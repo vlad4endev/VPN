@@ -1,0 +1,89 @@
+import { useState, useCallback, useEffect } from 'react'
+import logger from '../utils/logger.js'
+
+/**
+ * Custom hook для управления view (страницами приложения)
+ * Сохраняет текущий view в localStorage для восстановления при перезагрузке
+ * 
+ * @param {Object} options - Опции
+ * @param {Object} options.currentUser - Текущий пользователь
+ * @param {Function} options.onViewChange - Callback при изменении view
+ * @returns {Object} Объект с view и функцией setView
+ */
+export function useView({ currentUser, onViewChange } = {}) {
+  // Восстанавливаем view из localStorage при инициализации
+  const [view, setViewState] = useState(() => {
+    try {
+      const savedView = localStorage.getItem('vpn_current_view')
+      if (savedView && ['dashboard', 'admin', 'login', 'register'].includes(savedView)) {
+        logger.debug('useView', 'Восстановлен view из localStorage', { view: savedView })
+        return savedView
+      }
+    } catch (err) {
+      logger.error('useView', 'Ошибка при восстановлении view из localStorage', null, err)
+    }
+    return 'landing'
+  })
+
+  // Обертка для setView с сохранением в localStorage
+  const setView = useCallback((newView) => {
+    setViewState(newView)
+    if (newView && newView !== 'landing' && newView !== 'login' && newView !== 'register') {
+      try {
+        localStorage.setItem('vpn_current_view', newView)
+        logger.debug('useView', 'View сохранен в localStorage', { view: newView })
+      } catch (err) {
+        logger.error('useView', 'Ошибка при сохранении view в localStorage', { view: newView }, err)
+      }
+    } else {
+      localStorage.removeItem('vpn_current_view')
+    }
+    
+    // Вызываем callback, если он передан
+    if (onViewChange) {
+      onViewChange(newView)
+    }
+  }, [onViewChange])
+
+  // Автоматическое определение view на основе текущего пользователя
+  useEffect(() => {
+    if (!currentUser) {
+      // Если пользователь не авторизован, показываем landing
+      if (view !== 'landing' && view !== 'login' && view !== 'register') {
+        setView('landing')
+      }
+      return
+    }
+
+    // Если пользователь авторизован, определяем правильный view
+    let correctView = view
+
+    // Если текущий view - landing/login/register, переключаемся на dashboard или admin
+    if (view === 'landing' || view === 'login' || view === 'register') {
+      correctView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
+    }
+
+    // Если админ пытается зайти в dashboard, перенаправляем в admin
+    if (currentUser.role === 'admin' && view === 'dashboard') {
+      correctView = 'admin'
+    }
+
+    // Если обычный пользователь пытается зайти в admin, перенаправляем в dashboard
+    if (currentUser.role !== 'admin' && view === 'admin') {
+      correctView = 'dashboard'
+    }
+
+    // Обновляем view только если он изменился
+    if (correctView !== view) {
+      logger.debug('useView', 'Автоматическое определение view', { 
+        oldView: view, 
+        newView: correctView, 
+        role: currentUser.role 
+      })
+      setView(correctView)
+    }
+  }, [currentUser?.id, currentUser?.role, view, setView])
+
+  return { view, setView }
+}
+

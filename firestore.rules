@@ -1,0 +1,151 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Вспомогательная функция для проверки, является ли пользователь админом
+    // ОПТИМИЗИРОВАНО: Используем exists() для проверки существования документа перед get()
+    // Это уменьшает количество операций чтения
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Вспомогательная функция для проверки, является ли пользователь владельцем документа
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Вспомогательная функция для валидации email
+    function isValidEmail(email) {
+      return email is string && 
+        email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$') &&
+        email.size() <= 255;
+    }
+    
+    // Вспомогательная функция для валидации имени
+    function isValidName(name) {
+      return name is string && 
+        name.size() >= 2 && 
+        name.size() <= 100 &&
+        name.matches('^[a-zA-Zа-яА-ЯёЁ\\s\\-]+$');
+    }
+    
+    // Вспомогательная функция для валидации UUID
+    function isValidUUID(uuid) {
+      return uuid is string && 
+        uuid.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    }
+    
+    // Вспомогательная функция для валидации роли
+    function isValidRole(role) {
+      return role is string && role in ['user', 'admin'];
+    }
+    
+    // Пользователи - только свой документ или админы могут читать/писать все
+    match /artifacts/{appId}/public/data/users_v4/{userId} {
+      // Чтение: только свой документ или админы
+      allow read: if request.auth != null && (isOwner(userId) || isAdmin());
+      
+      // Создание: только аутентифицированные пользователи могут создавать свой документ
+      // ВАЛИДАЦИЯ: Проверяем обязательные поля и их формат
+      allow create: if request.auth != null && 
+        isOwner(userId) &&
+        // Валидация обязательных полей
+        request.resource.data.keys().hasAll(['email', 'name', 'role', 'plan', 'uuid', 'subId', 'createdAt', 'updatedAt']) &&
+        // Валидация формата данных
+        isValidEmail(request.resource.data.email) &&
+        isValidName(request.resource.data.name) &&
+        isValidRole(request.resource.data.role) &&
+        isValidUUID(request.resource.data.uuid) &&
+        request.resource.data.plan is string &&
+        request.resource.data.subId is string &&
+        request.resource.data.createdAt is string &&
+        request.resource.data.updatedAt is string &&
+        // Запрещаем создание с ролью admin (только через backend)
+        request.resource.data.role == 'user' &&
+        // Email должен совпадать с email из Firebase Auth (если доступен)
+        (request.auth.token.email == null || request.resource.data.email == request.auth.token.email);
+      
+      // Обновление: только свой документ или админы
+      // ВАЛИДАЦИЯ: Проверяем, что обновляемые данные валидны
+      allow update: if request.auth != null && 
+        (isOwner(userId) || isAdmin()) &&
+        // Валидация обновляемых полей (если они присутствуют)
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email']) || isValidEmail(request.resource.data.email)) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || isValidName(request.resource.data.name)) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || isValidRole(request.resource.data.role)) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uuid']) || isValidUUID(request.resource.data.uuid)) &&
+        // Запрещаем изменение роли на admin (только через backend)
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || 
+         request.resource.data.role == resource.data.role || 
+         (resource.data.role == 'user' && request.resource.data.role == 'admin' && isAdmin())) &&
+        // Обновляем updatedAt при любом изменении
+        request.resource.data.updatedAt is string;
+      
+      // Удаление: только админы
+      allow delete: if request.auth != null && isAdmin();
+    }
+    
+    // Настройки - чтение для всех аутентифицированных, запись только админам
+    match /artifacts/{appId}/public/settings {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && isAdmin();
+    }
+    
+    // Тарифы - чтение для всех аутентифицированных, запись только админам
+    match /artifacts/{appId}/public/data/tariffs/{tariffId} {
+      allow read: if request.auth != null;
+      
+      // ВАЛИДАЦИЯ: Проверяем обязательные поля тарифа
+      allow create: if request.auth != null && 
+        isAdmin() &&
+        request.resource.data.keys().hasAll(['name', 'price', 'duration']) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.price is number &&
+        request.resource.data.duration is number;
+      
+      allow update: if request.auth != null && 
+        isAdmin() &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || 
+         (request.resource.data.name is string && request.resource.data.name.size() > 0)) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['price']) || 
+         request.resource.data.price is number) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['duration']) || 
+         request.resource.data.duration is number);
+      
+      allow delete: if request.auth != null && isAdmin();
+    }
+    
+    // Платежи - только свой документ или админы
+    match /artifacts/{appId}/public/data/payments/{paymentId} {
+      // Чтение: только свой документ или админы
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      // Создание: только аутентифицированные пользователи могут создавать свои платежи
+      // ВАЛИДАЦИЯ: Проверяем обязательные поля
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.userId is string &&
+        request.resource.data.userId.size() > 0 &&
+        // Дополнительные проверки полей платежа (если используются)
+        (!request.resource.data.keys().hasAny(['amount']) || request.resource.data.amount is number) &&
+        (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status is string);
+      
+      // Обновление: только админы
+      allow update: if request.auth != null && isAdmin();
+      
+      // Удаление: только админы
+      allow delete: if request.auth != null && isAdmin();
+    }
+    
+    // Запрет доступа ко всем остальным документам
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

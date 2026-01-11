@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      # Несекретные переменные
+      - NODE_ENV=production
+      - PROXY_PORT=3001
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173}
+    
+    # ⚠️ ВАЖНО: Секреты через файлы, а не через environment напрямую
+    env_file:
+      - .env.production  # Монтируется как volume, НЕ копируется в образ
+    
+    # Или используйте Docker Secrets для продакшена
+    # secrets:
+    #   - xui_username
+    #   - xui_password
+    #   - xui_host
+    
+    volumes:
+      # Монтируем .env как volume (НЕ включается в образ)
+      - ./.env.production:/app/.env.production:ro
+    
+    restart: unless-stopped
+    networks:
+      - vpn-network
+
+# ========================================
+# 🔐 DOCKER SECRETS (для продакшена)
+# ========================================
+# Раскомментируйте для использования Docker Secrets
+# secrets:
+#   xui_username:
+#     file: ./secrets/xui_username.txt
+#   xui_password:
+#     file: ./secrets/xui_password.txt
+#   xui_host:
+#     file: ./secrets/xui_host.txt
+
+networks:
+  vpn-network:
+    driver: bridge

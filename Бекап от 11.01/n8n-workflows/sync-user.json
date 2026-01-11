@@ -1,0 +1,113 @@
+{
+  "name": "Sync User Data",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "sync-user",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-sync-user",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "sync-user"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.protocol || 'http' }}://{{ $json.body.serverIP }}:{{ $json.body.serverPort }}/{{ $json.body.randompath || 'panel' }}/panel/api/inbounds/getClientTraffics",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.body.sessionCookie }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "id": "get-client-data",
+      "name": "Get Client Data from 3x-ui",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем данные из webhook и 3x-ui\nconst webhookData = $input.item.json.body;\nconst xuiData = $('Get Client Data from 3x-ui').item.json;\n\n// Находим клиента по email или UUID\nlet clientData = null;\nif (xuiData && Array.isArray(xuiData)) {\n  clientData = xuiData.find(c => \n    c.email === webhookData.email || \n    c.id === webhookData.uuid\n  );\n} else if (xuiData && xuiData.id) {\n  clientData = xuiData;\n}\n\n// Формируем объект пользователя\nconst userData = {\n  id: webhookData.userId,\n  email: webhookData.email || clientData?.email || '',\n  uuid: webhookData.uuid || clientData?.id || '',\n  name: clientData?.email?.split('@')[0]?.replace(/_/g, ' ') || webhookData.email?.split('@')[0] || 'User',\n  vpnUuid: clientData?.id || webhookData.uuid || '',\n  plan: clientData?.plan || 'free',\n  expiresAt: clientData?.expiryTime > 0 ? new Date(clientData.expiryTime).toISOString() : null,\n  devices: clientData?.limitIp || 1,\n  status: clientData?.enable !== false ? 'active' : 'inactive',\n  // Дополнительные поля из 3x-ui\n  totalGB: clientData?.totalGB || 0,\n  up: clientData?.up || 0,\n  down: clientData?.down || 0,\n};\n\nreturn {\n  json: {\n    success: true,\n    user: userData\n  }\n};"
+      },
+      "id": "format-user-data",
+      "name": "Format User Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Client Data from 3x-ui",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Client Data from 3x-ui": {
+      "main": [
+        [
+          {
+            "node": "Format User Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format User Data": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
