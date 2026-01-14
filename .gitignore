@@ -61,6 +61,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 backend.log
+frontend.log
+
+# PID files
+*.pid
+.backend.pid
+.frontend.pid
 
 # ========================================
 # 💻 EDITOR & IDE

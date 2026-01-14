@@ -285,9 +285,10 @@ export default defineConfig(({ mode }) => {
       },
     ],
     server: {
-      host: '127.0.0.1',
+      host: '0.0.0.0',
       port: 5173,
       strictPort: false, // Если порт занят, попробует следующий
+      allowedHosts: 'all',
       proxy: {
         // Прокси для Backend Proxy (новый)
         '/api/vpn': {
@@ -375,6 +376,34 @@ export default defineConfig(({ mode }) => {
             });
             proxy.on('proxyRes', (proxyRes, req, _res) => {
               console.log('✅ Proxy Response:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
+        // Общий прокси для всех остальных /api запросов (должен быть последним)
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, req, res) => {
+              console.error('❌ API Proxy error:', err.message);
+              console.error('   Request:', req.method, req.url);
+              if (!res.headersSent) {
+                res.writeHead(502, {
+                  'Content-Type': 'application/json',
+                });
+                res.end(JSON.stringify({
+                  success: false,
+                  error: `Backend proxy недоступен: ${err.message}`,
+                  hint: 'Проверьте, что backend proxy запущен на http://localhost:3001'
+                }));
+              }
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log('🔄 API Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('✅ API Proxy Response:', proxyRes.statusCode, req.url);
             });
           },
         },

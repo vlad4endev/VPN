@@ -134,7 +134,7 @@ fi
 echo ""
 echo -e "${GREEN}🚀 Запуск n8n Webhook Proxy сервера...${NC}"
 cd server
-npm start > ../backend.log 2>&1 &
+nohup npm start > ../backend.log 2>&1 &
 BACKEND_PID=$!
 cd ..
 
@@ -151,27 +151,36 @@ else
     echo -e "${BLUE}💡 Убедитесь, что n8n запущен на http://localhost:5678${NC}"
 fi
 
-# Запуск Frontend
+# Запуск Frontend в фоне
 echo ""
 echo -e "${GREEN}🚀 Запуск Frontend приложения...${NC}"
+nohup npm run dev > frontend.log 2>&1 &
+FRONTEND_PID=$!
+
+# Сохранение PIDs в файл для удобной остановки
+echo "$BACKEND_PID" > .backend.pid
+echo "$FRONTEND_PID" > .frontend.pid
+
+# Ожидание запуска frontend
+echo -e "${BLUE}⏳ Ожидание запуска frontend (5 секунд)...${NC}"
+sleep 5
+
 echo ""
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ Все службы запущены!${NC}"
+echo -e "${GREEN}✅ Все службы запущены в фоне!${NC}"
 echo ""
-echo -e "${BLUE}📍 Frontend:${NC}    http://127.0.0.1:5173"
+echo -e "${BLUE}📍 Frontend:${NC}    http://0.0.0.0:5173 (или http://YOUR_SERVER_IP:5173)"
 echo -e "${BLUE}📍 n8n Webhook Proxy:${NC} http://localhost:3001"
 echo -e "${BLUE}📍 n8n:${NC}         http://localhost:5678"
 echo ""
-echo -e "${BLUE}📊 Проверка n8n Webhook Proxy:${NC}"
-echo -e "   curl http://localhost:3001/api/vpn/health"
+echo -e "${BLUE}📊 Просмотр логов:${NC}"
+echo -e "   ${GREEN}tail -f backend.log${NC}    # Логи backend"
+echo -e "   ${GREEN}tail -f frontend.log${NC}   # Логи frontend"
 echo ""
-echo -e "${BLUE}📋 Логи n8n Webhook Proxy:${NC}"
-echo -e "   tail -f backend.log"
-echo ""
-echo -e "${YELLOW}⚠️  Для остановки нажмите Ctrl+C${NC}"
+echo -e "${BLUE}🛑 Остановка служб:${NC}"
+echo -e "   ${GREEN}./stop-all.sh${NC}          # Остановить все службы"
+echo -e "   ${GREEN}kill \$(cat .backend.pid)${NC}   # Остановить только backend"
+echo -e "   ${GREEN}kill \$(cat .frontend.pid)${NC}  # Остановить только frontend"
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo ""
-
-# Запуск Frontend (блокирующий вызов)
-# Используем явный host и port для кроссплатформенности
-npm run dev
+echo -e "${GREEN}✅ Процессы запущены в фоне. Можно закрыть SSH сессию.${NC}"
