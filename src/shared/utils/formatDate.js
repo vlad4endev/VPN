@@ -97,6 +97,3 @@ export const formatTimeRemaining = (expiresAt) => {
 
   return parts.join(', ')
 }
-
-// Явный экспорт всех функций для надежности
-export { formatDate, getTimeRemaining, formatTimeRemaining }
