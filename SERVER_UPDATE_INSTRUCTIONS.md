@@ -1,9 +1,9 @@
 # Инструкция по обновлению на сервере
 
 ## Проблема
-Ошибка: `The requested module '/src/shared/utils/formatDate.js' does not provide an export named 'formatTimeRemaining'`
+Ошибка: `Identifier 'formatTimeRemaining' has already been declared`
 
-**Важно:** Функция `formatTimeRemaining` экспортируется в файле, но на сервере используется старая версия или кеш Vite.
+**Важно:** Функция `formatTimeRemaining` импортируется из `formatDate.js`, но на сервере в старой версии она также передается как проп в компонент Dashboard, что вызывает конфликт имен.
 
 ## Решение
 
@@ -81,8 +81,31 @@ npm install
 npm run dev
 ```
 
+## Важно: Проверка файла Dashboard.jsx
+
+**Перед обновлением убедитесь, что в файле `src/features/dashboard/components/Dashboard.jsx`:**
+
+1. ✅ Есть импорт: `import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'`
+2. ❌ **НЕТ** `formatTimeRemaining` в пропсах компонента (в деструктуризации `const Dashboard = ({ ... })`)
+3. ✅ Функция используется только через импорт: `{formatTimeRemaining(currentUser.expiresAt)}`
+
+**Если на сервере `formatTimeRemaining` есть в пропсах, удалите его оттуда!**
+
+Пример правильных пропсов (без `formatTimeRemaining`):
+```javascript
+const Dashboard = ({
+  currentUser,
+  // ... другие пропсы
+  formatDate,  // ✅ это нормально
+  formatTraffic,  // ✅ это нормально
+  // formatTimeRemaining,  // ❌ НЕ ДОЛЖНО БЫТЬ ЗДЕСЬ!
+  // ...
+}) => {
+```
+
 ## Проверка
 После обновления проверьте в браузере, что ошибка исчезла. Если ошибка все еще есть:
 1. Убедитесь, что файл `src/shared/utils/formatDate.js` содержит функцию `formatTimeRemaining`
-2. Проверьте, что dev-сервер полностью перезапущен
-3. Очистите кеш браузера (Ctrl+Shift+R или Cmd+Shift+R)
+2. Убедитесь, что в `Dashboard.jsx` НЕТ `formatTimeRemaining` в пропсах
+3. Проверьте, что dev-сервер полностью перезапущен
+4. Очистите кеш браузера (Ctrl+Shift+R или Cmd+Shift+R)
