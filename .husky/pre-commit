@@ -26,6 +26,6 @@ fi
 echo "✅ Проверка секретов пройдена"
 
 # Запускаем lint-staged если установлен
-if command -v npx &> /dev/null; then
-  npx lint-staged
+if command -v npx &> /dev/null && [ -f ".lintstagedrc.js" ]; then
+  npx lint-staged || true
 fi

@@ -127,7 +127,7 @@ jobs:
           docker save vpn-app:latest | gzip > vpn-app.tar.gz
       
       - name: Upload Docker image
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: docker-image
           path: vpn-app.tar.gz
@@ -140,7 +140,7 @@ jobs:
     
     steps:
       - name: Download Docker image
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: docker-image
       
