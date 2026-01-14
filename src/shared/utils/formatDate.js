@@ -56,7 +56,7 @@ export const getTimeRemaining = (expiresAt) => {
  * @param {number|string|Date} expiresAt - Timestamp окончания подписки
  * @returns {string} Отформатированная строка с оставшимся временем
  */
-export const formatTimeRemaining = (expiresAt) => {
+export function formatTimeRemaining(expiresAt) {
   const timeRemaining = getTimeRemaining(expiresAt)
 
   if (timeRemaining.isExpired) {
