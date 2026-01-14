@@ -3,7 +3,11 @@
 ## Проблема
 Ошибка: `The requested module '/src/shared/utils/formatDate.js' does not provide an export named 'formatTimeRemaining'`
 
+**Важно:** Функция `formatTimeRemaining` экспортируется в файле, но на сервере используется старая версия или кеш Vite.
+
 ## Решение
+
+**КРИТИЧЕСКИ ВАЖНО:** После обновления кода ОБЯЗАТЕЛЬНО очистите кеш Vite и перезапустите dev-сервер!
 
 ### 1. Обновите код на сервере:
 ```bash
