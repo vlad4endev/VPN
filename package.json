@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5173",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "analyze": "vite build --mode production && echo 'Откройте dist/stats.html для просмотра анализа бандла'",
