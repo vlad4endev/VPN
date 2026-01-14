@@ -1,14 +1,18 @@
-import { Globe, X, CheckCircle2, XCircle, AlertCircle, Copy, Download, Smartphone, Monitor, Tablet, ExternalLink } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Globe, X, CheckCircle2, XCircle, AlertCircle, Copy, Download, Smartphone, Monitor, Laptop, Apple, ExternalLink } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
+import { getFirestore, doc, getDoc } from 'firebase/firestore'
+import { APP_ID } from '../../../shared/constants/app.js'
+import logger from '../../../shared/utils/logger.js'
 
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
-  // Проверяем наличие user и subId (subId обязателен для формирования ссылки)
-  if (!user || !user.subId) return null
+  const [subscriptionLink, setSubscriptionLink] = useState(null)
+  const [loadingLink, setLoadingLink] = useState(true)
 
-  // Используем ссылку на подписку из профиля пользователя
-  // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
-  // ВАЖНО: Всегда формируем ссылку из user.subId, игнорируя сохраненные subscriptionLink/vpnLink
-  // так как они могут содержать неправильные значения (UUID вместо subId)
+  // Проверяем наличие user
+  if (!user) return null
+
+  // Получаем subId для формирования ссылки
   const getSubId = () => {
     // Используем subId (с заглавной) - это основное поле для ссылки подписки
     if (user?.subId && String(user.subId).trim() !== '') {
@@ -18,10 +22,82 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
   }
   
   const subId = getSubId()
-  // ВАЖНО: Всегда формируем ссылку из subId, не используем сохраненные subscriptionLink/vpnLink
-  // так как они могут содержать неправильные значения
-  const subscriptionLink = subId ? `https://subs.skypath.fun:3458/vk198/${subId}` : null
+
+  // Загружаем ссылку подписки: сначала из тарифа, затем из сохраненной, затем дефолтная
+  useEffect(() => {
+    const loadSubscriptionLink = async () => {
+      if (!user || !subId) {
+        setLoadingLink(false)
+        return
+      }
+
+      // ВАЖНО: Приоритет - сначала ссылка из тарифа (актуальная), затем сохраненная, затем дефолтная
+      // Загружаем тариф и используем ссылку из него (если есть tariffId)
+      if (user.tariffId) {
+        try {
+          const db = getFirestore()
+          const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+          const tariffSnapshot = await getDoc(tariffDoc)
+          if (tariffSnapshot.exists()) {
+            const tariff = tariffSnapshot.data()
+            if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
+              // Убираем завершающий слэш, если есть, и добавляем subId
+              const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
+              const linkFromTariff = `${baseLink}/${subId}`
+              setSubscriptionLink(linkFromTariff)
+              setLoadingLink(false)
+              logger.info('KeyModal', 'Использована ссылка из тарифа', {
+                tariffId: user.tariffId,
+                tariffName: tariff.name,
+                baseLink: tariff.subscriptionLink,
+                finalLink: linkFromTariff
+              })
+              return
+            }
+          }
+        } catch (err) {
+          logger.warn('KeyModal', 'Ошибка загрузки тарифа', {
+            tariffId: user.tariffId
+          }, err)
+        }
+      }
+      
+      // Если ссылки из тарифа нет, проверяем сохраненную ссылку (fallback)
+      if (user.subscriptionLink && String(user.subscriptionLink).trim() !== '') {
+        const savedLink = String(user.subscriptionLink).trim()
+        // Проверяем, что ссылка содержит правильный формат
+        if (savedLink.includes('subs.skypath.fun') || savedLink.startsWith('https://')) {
+          setSubscriptionLink(savedLink)
+          setLoadingLink(false)
+          logger.info('KeyModal', 'Использована сохраненная ссылка (fallback)', {
+            hasTariffId: !!user.tariffId
+          })
+          return
+        }
+      }
+      
+      // Если ссылка из тарифа и сохраненная не получены, используем дефолтную
+      const defaultLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      setSubscriptionLink(defaultLink)
+      setLoadingLink(false)
+      logger.info('KeyModal', 'Использована дефолтная ссылка', {
+        hasTariffId: !!user.tariffId
+      })
+    }
+    
+    loadSubscriptionLink()
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, subId])
   
+  if (loadingLink) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+        <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6">
+          <p className="text-slate-400">Загрузка ссылки на подписку...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!subscriptionLink) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
@@ -35,9 +111,9 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
   const userStatus = getUserStatus(user, clientStats)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-800 w-full max-w-[90vw] sm:max-w-md rounded-2xl sm:rounded-[2.5rem] overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-slate-900 border border-slate-800 w-full sm:max-w-[90vw] md:max-w-md rounded-none sm:rounded-2xl md:rounded-[2.5rem] shadow-2xl min-h-full sm:min-h-0 sm:my-4 sm:max-h-[90vh] sm:overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 sm:p-6 md:p-8 border-b border-slate-800 flex justify-between items-center gap-3">
@@ -53,7 +129,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             <X size={20} className="sm:w-6 sm:h-6 text-slate-400" />
           </button>
         </div>
-        <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-5 md:space-y-6">
+        <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-5 md:space-y-6 overflow-y-auto">
           <div className="space-y-2">
             <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">Статус:</p>
             <div className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${
@@ -120,7 +196,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 aria-label="Добавить подписку в приложение для iOS"
                 title="Добавить подписку в приложение для iOS"
               >
-                <Tablet className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 group-hover:scale-110 transition-transform flex-shrink-0" />
+                <Apple className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
                 <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
               </a>
@@ -132,7 +208,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 aria-label="Добавить подписку в приложение для macOS"
                 title="Добавить подписку в приложение для macOS"
               >
-                <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
+                <Laptop className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
                 <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
               </a>

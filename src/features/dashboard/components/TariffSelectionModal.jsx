@@ -246,9 +246,9 @@ const TariffSelectionModal = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-800 w-full max-w-[90vw] sm:max-w-md rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-slate-900 border border-slate-800 w-full sm:max-w-[90vw] md:max-w-md rounded-none sm:rounded-xl md:rounded-2xl shadow-2xl min-h-full sm:min-h-0 sm:my-4 sm:max-h-[90vh] sm:overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-3 sm:p-4 md:p-6 border-b border-slate-800 flex justify-between items-center gap-3">

@@ -7,7 +7,7 @@ import { Loader2, CreditCard, Wallet } from 'lucide-react'
  */
 const PaymentProcessingModal = ({ 
   onClose,
-  message = 'Вызываем главного бухгалтера...'
+  message = 'Формируем подписку...'
 }) => {
   // Предотвращаем закрытие модального окна кликом вне его
   useEffect(() => {

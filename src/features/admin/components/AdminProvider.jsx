@@ -32,6 +32,7 @@ export const AdminProviderWrapper = ({ children, ...adminProps }) => {
     const fallbackContextValue = {
       handleSaveUserCard: ensureFunction(null, 'handleSaveUserCard'),
       generateUUID: ensureFunction(null, 'generateUUID'),
+      generateSubId: ensureFunction(null, 'generateSubId'),
       handleUpdateUser: ensureFunction(null, 'handleUpdateUser'),
       handleDeleteUser: ensureFunction(null, 'handleDeleteUser'),
       loadUsers: ensureFunction(null, 'loadUsers'),
@@ -73,6 +74,10 @@ export const AdminProviderWrapper = ({ children, ...adminProps }) => {
     generateUUID: ensureFunction(
       adminHandlers.generateUUID,
       'generateUUID'
+    ),
+    generateSubId: ensureFunction(
+      adminHandlers.generateSubId,
+      'generateSubId'
     ),
     handleUpdateUser: ensureFunction(
       adminHandlers.handleUpdateUser,

@@ -52,7 +52,7 @@ const Dashboard = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deletingSubscription, setDeletingSubscription] = useState(false)
   const [showPaymentProcessing, setShowPaymentProcessing] = useState(false)
-  const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('Вызываем главного бухгалтера...')
+  const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('Формируем подписку...')
   const [paymentWindowRef, setPaymentWindowRef] = useState(null)
   const [paymentOrderId, setPaymentOrderId] = useState(null)
   const paymentPollingIntervalRef = useRef(null)
@@ -457,7 +457,7 @@ const Dashboard = ({
       setShowTariffModal(false)
       
       // Показываем модальное окно обработки платежа
-      setPaymentProcessingMessage('Вызываем главного бухгалтера...')
+      setPaymentProcessingMessage('Формируем подписку...')
       setShowPaymentProcessing(true)
       
       logger.debug('Dashboard', 'Вызов onHandleCreateSubscription', {
@@ -859,7 +859,7 @@ const Dashboard = ({
                               {onHandleRenewSubscription && (
                                 <button
                                   onClick={async () => {
-                                    setPaymentProcessingMessage('Вызываем главного бухгалтера...')
+                                    setPaymentProcessingMessage('Формируем подписку...')
                                     setShowPaymentProcessing(true)
                                     try {
                                       const result = await onHandleRenewSubscription()
@@ -914,7 +914,7 @@ const Dashboard = ({
                               {!isExpired && (
                                 <button
                                   onClick={async () => {
-                                    setPaymentProcessingMessage('Вызываем главного бухгалтера...')
+                                    setPaymentProcessingMessage('Формируем подписку...')
                                     setShowPaymentProcessing(true)
                                     try {
                                       const result = await onHandleRenewSubscription()
@@ -978,7 +978,7 @@ const Dashboard = ({
                       <div className="mt-3">
                         <button
                           onClick={async () => {
-                            setPaymentProcessingMessage('Вызываем главного бухгалтера...')
+                            setPaymentProcessingMessage('Формируем подписку...')
                             setShowPaymentProcessing(true)
                             try {
                               const result = await onHandleRenewSubscription()
@@ -1320,6 +1320,7 @@ const Dashboard = ({
         {showSuccessModal && subscriptionSuccess && (
           <SubscriptionSuccessModal
             vpnLink={subscriptionSuccess.vpnLink}
+            user={currentUser}
             onClose={() => {
               setShowSuccessModal(false)
               setSubscriptionSuccess(null)

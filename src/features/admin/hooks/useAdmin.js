@@ -109,6 +109,19 @@ export function useAdmin({
     }
   }, [usersHook.generateUUID])
 
+  const safeGenerateSubId = useMemo(() => {
+    if (usersHook.generateSubId && typeof usersHook.generateSubId === 'function') {
+      return usersHook.generateSubId
+    }
+    // Fallback функция
+    return () => {
+      console.error('❌ useAdmin: generateSubId не определен в usersHook!', {
+        usersHookKeys: Object.keys(usersHook),
+      })
+      return ''
+    }
+  }, [usersHook.generateSubId])
+
   return {
     // Состояние вкладки
     adminTab,
@@ -150,6 +163,7 @@ export function useAdmin({
     handleDeleteUser: usersHook.handleDeleteUser,
     handleSaveUserCard: safeHandleSaveUserCard,
     generateUUID: safeGenerateUUID,
+    generateSubId: safeGenerateSubId,
     
     // Тарифы
     editingTariff: tariffsHook.editingTariff,

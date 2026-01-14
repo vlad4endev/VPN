@@ -32,7 +32,7 @@ const UserCard = ({
   formatDate,
 }) => {
   // Получаем функции из контекста
-  const { handleSaveUserCard, generateUUID } = useAdminContext()
+  const { handleSaveUserCard, generateUUID, generateSubId } = useAdminContext()
   
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
@@ -212,6 +212,29 @@ const UserCard = ({
     }
   }, [generateUUID, handleFieldChange])
 
+  // Генерация subId из контекста
+  const handleGenerateSubId = useCallback(() => {
+    if (!generateSubId || typeof generateSubId !== 'function') {
+      console.error('UserCard: generateSubId не доступен из контекста')
+      setSaveError('Функция генерации subId не доступна')
+      return
+    }
+
+    try {
+      const newSubId = generateSubId()
+      if (newSubId) {
+        // Применяем subId к editingUser - он будет сохранен при сохранении карточки
+        handleFieldChange('subId', newSubId)
+        console.log('UserCard: subId сгенерирован и применен', { subId: newSubId })
+      } else {
+        setSaveError('Не удалось сгенерировать subId')
+      }
+    } catch (err) {
+      console.error('UserCard: Ошибка генерации subId:', err)
+      setSaveError('Ошибка генерации subId: ' + (err.message || 'Неизвестная ошибка'))
+    }
+  }, [generateSubId, handleFieldChange])
+
   // Сохранение с валидацией (использует функцию из контекста)
   const handleSave = useCallback(async () => {
     // Проверка наличия функции сохранения из контекста
@@ -276,11 +299,39 @@ const UserCard = ({
   }, [editingUser, handleSaveUserCard])
 
   // Формируем ссылку на подписку
-  // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
-  // Используем subId (строка)
-  const subscriptionLink = editingUser.subId && String(editingUser.subId).trim() !== ''
-    ? `https://subs.skypath.fun:3458/vk198/${String(editingUser.subId).trim()}`
-    : editingUser.subscriptionLink || editingUser.vpnLink || null
+  // Приоритет: 1) subscriptionLink из тарифа, 2) subscriptionLink из данных пользователя, 3) формируем на основе subId, 4) vpnLink
+  const subscriptionLink = (() => {
+    const subId = editingUser.subId && String(editingUser.subId).trim() !== '' 
+      ? String(editingUser.subId).trim() 
+      : null
+    
+    // Сначала проверяем ссылку из тарифа (если есть tariffId и subId)
+    if (editingUser.tariffId && subId && tariffs.length > 0) {
+      const tariff = tariffs.find(t => t.id === editingUser.tariffId)
+      if (tariff && tariff.subscriptionLink && String(tariff.subscriptionLink).trim() !== '') {
+        // Убираем завершающий слэш, если есть, и добавляем subId
+        const baseLink = String(tariff.subscriptionLink).trim().replace(/\/$/, '')
+        return `${baseLink}/${subId}`
+      }
+    }
+    
+    // Затем проверяем сохраненную ссылку подписки из данных пользователя
+    if (editingUser.subscriptionLink && String(editingUser.subscriptionLink).trim() !== '') {
+      return String(editingUser.subscriptionLink).trim()
+    }
+    
+    // Если есть subId, формируем ссылку по стандарту 3x-ui (дефолтная)
+    if (subId) {
+      return `https://subs.skypath.fun:3458/vk198/${subId}`
+    }
+    
+    // Fallback на vpnLink
+    if (editingUser.vpnLink && String(editingUser.vpnLink).trim() !== '') {
+      return String(editingUser.vpnLink).trim()
+    }
+    
+    return null
+  })()
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
@@ -496,7 +547,7 @@ const UserCard = ({
                     </>
                   ) : (
                     <div className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-500 text-sm">
-                      Сначала укажите UUID
+                      {editingUser.subId ? 'Сгенерируйте subId или укажите subscriptionLink' : 'Сгенерируйте subId для получения ссылки подписки'}
                     </div>
                   )}
                 </div>
@@ -562,17 +613,37 @@ const UserCard = ({
               <label htmlFor={fieldIds.subId} className="block text-slate-300 text-sm font-medium mb-2">
                 SubID пользователя
               </label>
-              <input
-                id={fieldIds.subId}
-                name="subId"
-                type="text"
-                value={editingUser.subId || ''}
-                onChange={handleSubIdChange}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Введите SubID (например: 7vyrlrvx1aiwylh1)"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  id={fieldIds.subId}
+                  name="subId"
+                  type="text"
+                  value={editingUser.subId || ''}
+                  onChange={handleSubIdChange}
+                  className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Введите SubID (например: 7vyrlrvx1aiwylh1)"
+                />
+                <button
+                  onClick={handleGenerateSubId}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2"
+                  title="Сгенерировать новый subId"
+                  type="button"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                {editingUser.subId && (
+                  <button
+                    onClick={() => onCopy?.(editingUser.subId || '')}
+                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
+                    title="Копировать subId"
+                    type="button"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               <p className="text-slate-500 text-xs mt-2">
-                SubID используется для формирования ссылки на подписку в формате 3x-ui
+                SubID используется для формирования ссылки на подписку в формате 3x-ui. При генерации новый subId будет применен и сохранен для этого пользователя.
               </p>
             </div>
           </div>

@@ -398,6 +398,21 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     }
   }, [setError])
 
+  // Генерация subId для 3x-ui
+  const generateSubId = useCallback(() => {
+    try {
+      const subId = ThreeXUI.generateSubId()
+      if (import.meta.env.DEV) {
+        logger.debug('Admin', 'subId сгенерирован', { subId })
+      }
+      return subId
+    } catch (err) {
+      logError('Admin', 'generateSubId', err)
+      setError('Ошибка генерации subId')
+      return ''
+    }
+  }, [setError])
+
   // Удаление пользователя с улучшенной обработкой ошибок
   const handleDeleteUser = useCallback(async (userId) => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -441,6 +456,7 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     handleDeleteUser,
     handleSaveUserCard,
     generateUUID,
+    generateSubId,
   }
 }
 

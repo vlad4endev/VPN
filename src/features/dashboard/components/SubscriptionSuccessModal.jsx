@@ -1,5 +1,8 @@
-import { useState } from 'react'
-import { X, Copy, Check, Download, Globe, Smartphone, Monitor, Tablet, ExternalLink, Clock } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, Copy, Check, Download, Globe, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock } from 'lucide-react'
+import { getFirestore, doc, getDoc } from 'firebase/firestore'
+import { APP_ID } from '../../../shared/constants/app.js'
+import logger from '../../../shared/utils/logger.js'
 
 const SubscriptionSuccessModal = ({ 
   vpnLink, 
@@ -15,13 +18,88 @@ const SubscriptionSuccessModal = ({
   orderId = null,
   amount = null,
   requiresPayment = false,
-  message = null
+  message = null,
+  user = null // Добавляем user для формирования правильной ссылки
 }) => {
   const [copied, setCopied] = useState(false)
+  const [subscriptionLink, setSubscriptionLink] = useState(vpnLink || null)
+
+  // Загружаем правильную ссылку на подписку с учетом тарифа
+  useEffect(() => {
+    const loadSubscriptionLink = async () => {
+      if (!user) {
+        // Если user не передан, используем vpnLink из пропсов
+        setSubscriptionLink(vpnLink || null)
+        return
+      }
+
+      const getSubId = () => {
+        if (user?.subId && String(user.subId).trim() !== '') {
+          return String(user.subId).trim()
+        }
+        return null
+      }
+
+      const subId = getSubId()
+      if (!subId) {
+        setSubscriptionLink(vpnLink || null)
+        return
+      }
+
+      // ВАЖНО: Приоритет - сначала ссылка из тарифа, затем сохраненная, затем vpnLink, затем дефолтная
+      if (user.tariffId) {
+        try {
+          const db = getFirestore()
+          const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+          const tariffSnapshot = await getDoc(tariffDoc)
+          if (tariffSnapshot.exists()) {
+            const tariff = tariffSnapshot.data()
+            if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
+              // Убираем завершающий слэш, если есть, и добавляем subId
+              const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
+              const linkFromTariff = `${baseLink}/${subId}`
+              setSubscriptionLink(linkFromTariff)
+              logger.info('SubscriptionSuccessModal', 'Использована ссылка из тарифа', {
+                tariffId: user.tariffId,
+                tariffName: tariff.name,
+                finalLink: linkFromTariff
+              })
+              return
+            }
+          }
+        } catch (err) {
+          logger.warn('SubscriptionSuccessModal', 'Ошибка загрузки тарифа', {
+            tariffId: user.tariffId
+          }, err)
+        }
+      }
+
+      // Если ссылки из тарифа нет, проверяем сохраненную ссылку
+      if (user.subscriptionLink && String(user.subscriptionLink).trim() !== '') {
+        const savedLink = String(user.subscriptionLink).trim()
+        if (savedLink.includes('subs.skypath.fun') || savedLink.startsWith('https://')) {
+          setSubscriptionLink(savedLink)
+          return
+        }
+      }
+
+      // Используем vpnLink из пропсов, если он есть
+      if (vpnLink && String(vpnLink).trim() !== '') {
+        setSubscriptionLink(String(vpnLink).trim())
+        return
+      }
+
+      // Дефолтная ссылка
+      const defaultLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      setSubscriptionLink(defaultLink)
+    }
+
+    loadSubscriptionLink()
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, vpnLink, user])
 
   const handleCopy = () => {
-    if (onCopy && vpnLink) {
-      onCopy(vpnLink)
+    if (onCopy && subscriptionLink) {
+      onCopy(subscriptionLink)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
@@ -36,18 +114,18 @@ const SubscriptionSuccessModal = ({
   // Ссылки для скачивания приложений через happ://add/url_подписки
   // Это позволяет пользователю сразу получить загруженную подписку в happ proxy
   const getDownloadLink = () => {
-    if (!vpnLink) return '#'
+    if (!subscriptionLink) return '#'
     // Используем URL подписки напрямую в happ:// схеме
     // Формат: happ://add/url_подписки
-    return `happ://add/${vpnLink}`
+    return `happ://add/${subscriptionLink}`
   }
   
   const downloadLink = getDownloadLink()
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-800 w-full max-w-[90vw] sm:max-w-2xl rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-slate-900 border border-slate-800 w-full sm:max-w-[90vw] md:max-w-2xl rounded-none sm:rounded-xl md:rounded-2xl shadow-2xl min-h-full sm:min-h-0 sm:my-4 sm:max-h-[90vh] sm:overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-3 sm:p-4 md:p-6 border-b border-slate-800 flex justify-between items-start sm:items-center gap-3">
@@ -83,7 +161,7 @@ const SubscriptionSuccessModal = ({
           </button>
         </div>
 
-        <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-5 md:space-y-6">
+        <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-5 md:space-y-6 overflow-y-auto">
           {/* Информация об оплате - если требуется оплата */}
           {requiresPayment && paymentUrl && (
             <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-3">
@@ -181,7 +259,7 @@ const SubscriptionSuccessModal = ({
           )}
 
           {/* Ссылка на подписку - Mobile First с вертикальным стеком на мобильных */}
-          {!requiresPayment && vpnLink && (
+          {!requiresPayment && subscriptionLink && (
             <div className="space-y-2">
             <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium">
               Ваша ссылка на подписку (скопируйте ссылку):
@@ -189,7 +267,7 @@ const SubscriptionSuccessModal = ({
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <div className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 sm:p-4 rounded-lg sm:rounded-xl overflow-x-auto">
                 <code className="text-blue-400 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs font-mono break-all select-all whitespace-pre-wrap word-break break-words">
-                  {vpnLink || 'Загрузка ссылки на подписку...'}
+                  {subscriptionLink || 'Загрузка ссылки на подписку...'}
                 </code>
               </div>
               <button
@@ -253,7 +331,7 @@ const SubscriptionSuccessModal = ({
                 aria-label="Добавить подписку в приложение для iOS"
                 title="Добавить подписку в приложение для iOS"
               >
-                <Tablet className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 group-hover:scale-110 transition-transform flex-shrink-0" />
+                <Apple className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
                 <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
               </a>
@@ -265,7 +343,7 @@ const SubscriptionSuccessModal = ({
                 aria-label="Добавить подписку в приложение для macOS"
                 title="Добавить подписку в приложение для macOS"
               >
-                <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
+                <Laptop className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
                 <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
               </a>
