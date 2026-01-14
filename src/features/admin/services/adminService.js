@@ -257,6 +257,13 @@ export const adminService = {
         return {
           ...data,
           servers: firestoreServers,
+          // Инициализируем appLinks если их нет
+          appLinks: data.appLinks || {
+            android: '',
+            ios: '',
+            macos: '',
+            windows: '',
+          },
         }
       } else {
         // Создаем настройки по умолчанию
@@ -267,6 +274,13 @@ export const adminService = {
           xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
           xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
           servers: [],
+          // Ссылки на приложения HAPP Proxy
+          appLinks: {
+            android: '',
+            ios: '',
+            macos: '',
+            windows: '',
+          },
           updatedAt: new Date().toISOString(),
         }
         await setDoc(settingsDoc, defaultSettings)
@@ -286,6 +300,13 @@ export const adminService = {
           xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
           xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
           servers: [],
+          // Ссылки на приложения HAPP Proxy
+          appLinks: {
+            android: '',
+            ios: '',
+            macos: '',
+            windows: '',
+          },
           updatedAt: new Date().toISOString(),
         }
       }

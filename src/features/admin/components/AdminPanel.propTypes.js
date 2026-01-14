@@ -57,6 +57,15 @@ export const AdminPanelPropTypes = {
   
   // Настройки
   settingsLoading: PropTypes.bool.isRequired,
+  settings: PropTypes.shape({
+    appLinks: PropTypes.shape({
+      android: PropTypes.string,
+      ios: PropTypes.string,
+      macos: PropTypes.string,
+      windows: PropTypes.string,
+    }),
+  }),
+  onHandleAppLinkChange: PropTypes.func.isRequired,
   
   // Тарифы
   tariffs: PropTypes.arrayOf(PropTypes.object).isRequired,

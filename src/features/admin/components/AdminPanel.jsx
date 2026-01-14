@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
-import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard } from 'lucide-react'
+import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
@@ -68,6 +68,8 @@ const AdminPanel = ({
   onHandleTariffDurationDaysChange,
   onHandleTariffActiveChange,
   onHandleTariffSubscriptionLinkChange,
+  settings,
+  onHandleAppLinkChange,
 }) => {
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
@@ -84,7 +86,7 @@ const AdminPanel = ({
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
       onHandleTariffNameChange, onHandleTariffPlanChange, onHandleTariffPriceChange,
       onHandleTariffDevicesChange, onHandleTariffTrafficGBChange, onHandleTariffDurationDaysChange,
-      onHandleTariffActiveChange
+      onHandleTariffActiveChange, settings, onHandleAppLinkChange
       // onHandleSaveUserCard и onGenerateUUID больше не передаются через пропсы - используются из контекста в UserCard
     }, 'prop', 'AdminPanel')
   }
@@ -575,6 +577,112 @@ const AdminPanel = ({
                 </div>
               )}
 
+            </div>
+
+            {/* Блок 2: Ссылки на приложения HAPP Proxy - Mobile First */}
+            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
+              <div className="mb-4 sm:mb-5 md:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-1.5 sm:mb-2 flex items-center gap-2">
+                    <Link2 className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                    <span className="truncate">Ссылки на приложения HAPP Proxy</span>
+                  </h2>
+                  <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">
+                    Настройка ссылок для скачивания приложений. Ссылки будут использоваться в кнопках конфигурации вместо happ://
+                  </p>
+                </div>
+              </div>
+
+              {settingsLoading ? (
+                <div className="flex items-center justify-center py-8 sm:py-10 md:py-12">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 border-2 border-slate-600 border-t-blue-600 rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <div className="space-y-4 sm:space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    {/* Android */}
+                    <div>
+                      <label htmlFor="app-link-android" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2 flex items-center gap-2">
+                        <Smartphone className="w-4 h-4 text-green-400 flex-shrink-0" />
+                        <span>Android</span>
+                      </label>
+                      <input
+                        id="app-link-android"
+                        type="url"
+                        value={settings?.appLinks?.android || ''}
+                        onChange={(e) => onHandleAppLinkChange('android', e.target.value)}
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        placeholder="https://play.google.com/store/apps/details?id=..."
+                      />
+                    </div>
+
+                    {/* iOS */}
+                    <div>
+                      <label htmlFor="app-link-ios" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2 flex items-center gap-2">
+                        <Apple className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                        <span>iOS</span>
+                      </label>
+                      <input
+                        id="app-link-ios"
+                        type="url"
+                        value={settings?.appLinks?.ios || ''}
+                        onChange={(e) => onHandleAppLinkChange('ios', e.target.value)}
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        placeholder="https://apps.apple.com/app/..."
+                      />
+                    </div>
+
+                    {/* macOS */}
+                    <div>
+                      <label htmlFor="app-link-macos" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2 flex items-center gap-2">
+                        <Laptop className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                        <span>macOS</span>
+                      </label>
+                      <input
+                        id="app-link-macos"
+                        type="url"
+                        value={settings?.appLinks?.macos || ''}
+                        onChange={(e) => onHandleAppLinkChange('macos', e.target.value)}
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        placeholder="https://apps.apple.com/app/..."
+                      />
+                    </div>
+
+                    {/* Windows */}
+                    <div>
+                      <label htmlFor="app-link-windows" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2 flex items-center gap-2">
+                        <Monitor className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                        <span>Windows</span>
+                      </label>
+                      <input
+                        id="app-link-windows"
+                        type="url"
+                        value={settings?.appLinks?.windows || ''}
+                        onChange={(e) => onHandleAppLinkChange('windows', e.target.value)}
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        placeholder="https://microsoft.com/store/apps/..."
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-2 sm:pt-3 border-t border-slate-800">
+                    <button
+                      onClick={onHandleSaveSettings}
+                      className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
+                      aria-label="Сохранить ссылки на приложения"
+                    >
+                      <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
+                      <span className="btn-text">Сохранить ссылки</span>
+                    </button>
+                  </div>
+
+                  <div className="bg-blue-900/20 border border-blue-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                    <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
+                      <strong className="text-blue-400">Примечание:</strong> Если ссылка не указана для платформы, будет использоваться формат <code className="text-blue-300 font-mono">happ://add/</code> с URL подписки.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

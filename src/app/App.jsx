@@ -930,6 +930,22 @@ export default function VPNServiceApp() {
             setCurrentUser(currentUserData)
             logger.info('Firebase', 'Пользователь авторизован, данные загружены', { uid: firebaseUser.uid, role: effectiveRole })
             
+            // Запрашиваем разрешение на уведомления для существующих пользователей (с задержкой)
+            setTimeout(async () => {
+              try {
+                const notificationService = (await import('../shared/services/notificationService.js')).default
+                const notificationInstance = notificationService.getInstance()
+                // Запрашиваем только если разрешения еще нет
+                if (!notificationInstance.hasPermission()) {
+                  await notificationInstance.requestPermission()
+                  logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для существующего пользователя')
+                }
+              } catch (notificationError) {
+                logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+                // Не блокируем загрузку из-за ошибки уведомлений
+              }
+            }, 2000) // Задержка 2 секунды, чтобы не показывать запрос сразу при загрузке
+            
             // Устанавливаем правильный view после загрузки пользователя
             const savedView = localStorage.getItem('vpn_current_view')
             if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'landing') {
@@ -947,6 +963,22 @@ export default function VPNServiceApp() {
                 if (savedUser.id === firebaseUser.uid) {
                   logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
                   setCurrentUser(savedUser)
+                  
+                  // Запрашиваем разрешение на уведомления для существующих пользователей (с задержкой)
+                  setTimeout(async () => {
+                    try {
+                      const notificationService = (await import('../shared/services/notificationService.js')).default
+                      const notificationInstance = notificationService.getInstance()
+                      // Запрашиваем только если разрешения еще нет
+                      if (!notificationInstance.hasPermission()) {
+                        await notificationInstance.requestPermission()
+                        logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для пользователя из кеша')
+                      }
+                    } catch (notificationError) {
+                      logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+                    }
+                  }, 2000)
+                  
                   // Устанавливаем view по роли
                   const savedView = localStorage.getItem('vpn_current_view')
                   if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'landing') {
@@ -1429,6 +1461,17 @@ export default function VPNServiceApp() {
       setView('dashboard')
       // Устанавливаем вкладку "Подписки" после регистрации
       setDashboardTab('subscription')
+      
+      // Запрашиваем разрешение на уведомления после успешной регистрации
+      try {
+        const notificationService = (await import('../shared/services/notificationService.js')).default
+        const notificationInstance = notificationService.getInstance()
+        await notificationInstance.requestPermission()
+        logger.info('Auth', 'Запрос разрешения на уведомления выполнен после регистрации')
+      } catch (notificationError) {
+        logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+        // Не блокируем регистрацию из-за ошибки уведомлений
+      }
     } catch (err) {
       logger.error('Auth', 'Ошибка регистрации', { email }, err)
       
@@ -2528,6 +2571,20 @@ export default function VPNServiceApp() {
   const handleSettingsXuiInboundIdChange = useCallback((e) => {
     const newValue = e.target.value
     setSettings(prev => prev ? { ...prev, xuiInboundId: newValue } : null)
+  }, [])
+
+  // Обработчики для изменения ссылок на приложения HAPP Proxy
+  const handleAppLinkChange = useCallback((platform, value) => {
+    setSettings(prev => {
+      if (!prev) return null
+      return {
+        ...prev,
+        appLinks: {
+          ...(prev.appLinks || { android: '', ios: '', macos: '', windows: '' }),
+          [platform]: value,
+        },
+      }
+    })
   }, [])
 
   // Сохранение настроек
@@ -3840,6 +3897,8 @@ export default function VPNServiceApp() {
           onHandleTariffDurationDaysChange={handleTariffDurationDaysChange}
           onHandleTariffActiveChange={handleTariffActiveChange}
           onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
+          settings={settings}
+          onHandleAppLinkChange={handleAppLinkChange}
         />
       </AdminProviderWrapper>
     )

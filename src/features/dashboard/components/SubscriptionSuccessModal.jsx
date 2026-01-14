@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { X, Copy, Check, Download, Globe, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock } from 'lucide-react'
 import { getFirestore, doc, getDoc } from 'firebase/firestore'
 import { APP_ID } from '../../../shared/constants/app.js'
 import logger from '../../../shared/utils/logger.js'
+import { detectPlatform, getPlatformInfo } from '../../../shared/utils/detectPlatform.js'
 
 const SubscriptionSuccessModal = ({ 
   vpnLink, 
@@ -111,16 +112,70 @@ const SubscriptionSuccessModal = ({
     }
   }
 
-  // Ссылки для скачивания приложений через happ://add/url_подписки
-  // Это позволяет пользователю сразу получить загруженную подписку в happ proxy
-  const getDownloadLink = () => {
+  // Загружаем настройки для получения ссылок на приложения
+  const [appLinks, setAppLinks] = useState(null)
+  
+  useEffect(() => {
+    const loadAppLinks = async () => {
+      try {
+        const db = getFirestore()
+        const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+        const settingsSnapshot = await getDoc(settingsDoc)
+        if (settingsSnapshot.exists()) {
+          const settingsData = settingsSnapshot.data()
+          setAppLinks(settingsData.appLinks || null)
+        }
+      } catch (err) {
+        logger.warn('SubscriptionSuccessModal', 'Ошибка загрузки настроек приложений', null, err)
+      }
+    }
+    loadAppLinks()
+  }, [])
+
+  // Определяем платформу пользователя
+  const userPlatform = useMemo(() => detectPlatform(), [])
+  const platformInfo = useMemo(() => getPlatformInfo(userPlatform), [userPlatform])
+
+  // Функция для получения ссылки на приложение для конкретной платформы
+  const getAppLink = (platform) => {
     if (!subscriptionLink) return '#'
-    // Используем URL подписки напрямую в happ:// схеме
-    // Формат: happ://add/url_подписки
+    
+    // Если есть ссылка на приложение для платформы, используем её
+    const appLink = appLinks?.[platform]
+    if (appLink && appLink.trim() !== '') {
+      // Если ссылка содержит {subscriptionLink}, заменяем на реальную ссылку подписки
+      return appLink.replace('{subscriptionLink}', subscriptionLink)
+    }
+    
+    // Fallback: используем happ:// схему
     return `happ://add/${subscriptionLink}`
   }
+
+  // Получаем ссылку для текущей платформы
+  const currentPlatformLink = useMemo(() => getAppLink(userPlatform), [userPlatform, subscriptionLink, appLinks])
   
-  const downloadLink = getDownloadLink()
+  // Получаем иконку для текущей платформы
+  const PlatformIcon = useMemo(() => {
+    const icons = {
+      Smartphone: Smartphone,
+      Apple: Apple,
+      Laptop: Laptop,
+      Monitor: Monitor,
+      Download: Download,
+    }
+    return icons[platformInfo.icon] || Download
+  }, [platformInfo.icon])
+
+  // Получаем цвет для иконки (используем статические классы)
+  const getIconColorClass = () => {
+    const colorMap = {
+      'green-400': 'text-green-400',
+      'gray-300': 'text-gray-300',
+      'blue-400': 'text-blue-400',
+      'slate-400': 'text-slate-400',
+    }
+    return colorMap[platformInfo.color] || 'text-slate-400'
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
@@ -292,63 +347,115 @@ const SubscriptionSuccessModal = ({
           </div>
           )}
 
-          {/* Кнопки скачивания приложений - Icon-only на мобильных */}
-          {!requiresPayment && (
+          {/* Кнопка скачивания приложения для текущей ОС */}
+          {!requiresPayment && userPlatform !== 'unknown' && (
             <div className="space-y-2 sm:space-y-3">
-            <h4 className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base flex items-center gap-2">
-              <Download size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Скачать приложение для VPN</span>
-            </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-              {/* Windows */}
+              <h4 className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base flex items-center gap-2">
+                <Download size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+                <span>Скачайте приложение на свое устройство</span>
+              </h4>
               <a
-                href={downloadLink}
-                className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Добавить подписку в приложение для Windows"
-                title="Добавить подписку в приложение для Windows"
+                href={currentPlatformLink}
+                className="w-full flex items-center justify-center gap-2 sm:gap-3 p-4 sm:p-5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
+                aria-label={`Добавить подписку в приложение для ${platformInfo.label}`}
+                title={`Добавить подписку в приложение для ${platformInfo.label}`}
               >
-                <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400 group-hover:scale-110 transition-transform flex-shrink-0" />
-                <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Windows</span>
-                <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                <PlatformIcon className={`w-6 h-6 sm:w-8 sm:h-8 ${getIconColorClass()} group-hover:scale-110 transition-transform flex-shrink-0`} />
+                <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
+                  Скачать для {platformInfo.label}
+                </span>
+                <ExternalLink size={18} className="sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
               </a>
-
-              {/* Android */}
-              <a
-                href={downloadLink}
-                className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Добавить подписку в приложение для Android"
-                title="Добавить подписку в приложение для Android"
-              >
-                <Smartphone className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 group-hover:scale-110 transition-transform flex-shrink-0" />
-                <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Android</span>
-                <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
-              </a>
-
-              {/* iOS */}
-              <a
-                href={downloadLink}
-                className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Добавить подписку в приложение для iOS"
-                title="Добавить подписку в приложение для iOS"
-              >
-                <Apple className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
-                <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
-                <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
-              </a>
-
-              {/* macOS */}
-              <a
-                href={downloadLink}
-                className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Добавить подписку в приложение для macOS"
-                title="Добавить подписку в приложение для macOS"
-              >
-                <Laptop className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
-                <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
-                <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
-              </a>
+              
+              {/* Кнопка для загрузки подписки в уже установленное приложение */}
+              {subscriptionLink && (
+                <a
+                  href={`happ://add/${subscriptionLink}`}
+                  className="w-full flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg sm:rounded-xl transition-all min-h-[44px] touch-manipulation"
+                  aria-label="Добавить подписку в установленное приложение HAPP Proxy"
+                  title="Добавить подписку в установленное приложение HAPP Proxy"
+                >
+                  <Globe size={18} className="sm:w-5 sm:h-5 text-white flex-shrink-0" />
+                  <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
+                    Добавить подписку в приложение
+                  </span>
+                </a>
+              )}
             </div>
-          </div>
+          )}
+          
+          {/* Если ОС не определена, показываем все кнопки */}
+          {!requiresPayment && userPlatform === 'unknown' && (
+            <div className="space-y-2 sm:space-y-3">
+              <h4 className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base flex items-center gap-2">
+                <Download size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+                <span>Скачайте приложение на свое устройство</span>
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                {/* Windows */}
+                <a
+                  href={getAppLink('windows')}
+                  className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
+                  aria-label="Добавить подписку в приложение для Windows"
+                  title="Добавить подписку в приложение для Windows"
+                >
+                  <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400 group-hover:scale-110 transition-transform flex-shrink-0" />
+                  <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Windows</span>
+                  <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                </a>
+
+                {/* Android */}
+                <a
+                  href={getAppLink('android')}
+                  className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
+                  aria-label="Добавить подписку в приложение для Android"
+                  title="Добавить подписку в приложение для Android"
+                >
+                  <Smartphone className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 group-hover:scale-110 transition-transform flex-shrink-0" />
+                  <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Android</span>
+                  <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                </a>
+
+                {/* iOS */}
+                <a
+                  href={getAppLink('ios')}
+                  className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
+                  aria-label="Добавить подписку в приложение для iOS"
+                  title="Добавить подписку в приложение для iOS"
+                >
+                  <Apple className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
+                  <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
+                  <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                </a>
+
+                {/* macOS */}
+                <a
+                  href={getAppLink('macos')}
+                  className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
+                  aria-label="Добавить подписку в приложение для macOS"
+                  title="Добавить подписку в приложение для macOS"
+                >
+                  <Laptop className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
+                  <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
+                  <ExternalLink size={12} className="sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                </a>
+              </div>
+              
+              {/* Кнопка для загрузки подписки в уже установленное приложение */}
+              {subscriptionLink && (
+                <a
+                  href={`happ://add/${subscriptionLink}`}
+                  className="w-full flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg sm:rounded-xl transition-all min-h-[44px] touch-manipulation mt-3"
+                  aria-label="Добавить подписку в установленное приложение HAPP Proxy"
+                  title="Добавить подписку в установленное приложение HAPP Proxy"
+                >
+                  <Globe size={18} className="sm:w-5 sm:h-5 text-white flex-shrink-0" />
+                  <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
+                    Добавить подписку в приложение
+                  </span>
+                </a>
+              )}
+            </div>
           )}
 
           {/* Инструкция - Mobile First */}

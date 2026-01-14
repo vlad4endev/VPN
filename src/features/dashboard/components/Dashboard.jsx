@@ -8,6 +8,8 @@ import SubscriptionSuccessModal from './SubscriptionSuccessModal.jsx'
 import PaymentProcessingModal from './PaymentProcessingModal.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import logger from '../../../shared/utils/logger.js'
+import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
+import notificationService from '../../../shared/services/notificationService.js'
 
 const Dashboard = ({
   currentUser,
@@ -72,6 +74,9 @@ const Dashboard = ({
   const userStatus = getUserStatus(currentUser)
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
 
+  // Используем хук для проверки подписок и отправки уведомлений
+  useSubscriptionNotifications(currentUser)
+
   // Отладочный useEffect для отслеживания изменений состояния модального окна
   useEffect(() => {
     logger.debug('Dashboard', 'Состояние модального окна изменилось', {
@@ -109,6 +114,43 @@ const Dashboard = ({
           orderId: paymentOrderId,
           status: payment.status
         })
+
+        // Если платеж не прошел (failed, cancelled, rejected)
+        if (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected') {
+          logger.warn('Dashboard', 'Платеж не прошел', {
+            orderId: paymentOrderId,
+            status: payment.status
+          })
+
+          // Останавливаем polling
+          if (paymentPollingIntervalRef.current) {
+            clearInterval(paymentPollingIntervalRef.current)
+            paymentPollingIntervalRef.current = null
+          }
+
+          // Отправляем уведомление о неуспешной оплате
+          try {
+            const notificationInstance = notificationService.getInstance()
+            if (notificationInstance.hasPermission()) {
+              const reason = payment.status === 'cancelled' 
+                ? 'Платеж отменен' 
+                : payment.status === 'rejected'
+                ? 'Платеж отклонен'
+                : 'Ошибка при обработке платежа'
+              await notificationInstance.notifyPaymentFailed(reason)
+              logger.info('Dashboard', 'Уведомление о неуспешной оплате отправлено', { status: payment.status })
+            }
+          } catch (notificationError) {
+            logger.warn('Dashboard', 'Ошибка отправки уведомления о неуспешной оплате', null, notificationError)
+          }
+
+          // Очищаем состояние
+          setPaymentOrderId(null)
+          setPaymentWindowRef(null)
+          setShowPaymentProcessing(false)
+          
+          return
+        }
 
         // Если платеж завершен, создаем подписку и обновляем клиента в 3x-ui
         if (payment.status === 'completed') {
@@ -164,6 +206,20 @@ const Dashboard = ({
               hasVpnLink: !!subscriptionResult?.vpnLink,
               tariffName: subscriptionResult?.tariffName
             })
+
+            // Отправляем уведомление об успешной оплате
+            try {
+              const notificationInstance = notificationService.getInstance()
+              if (notificationInstance.hasPermission()) {
+                await notificationInstance.notifyPaymentSuccess(
+                  payment.tariffName || tariff.name || 'Подписка',
+                  payment.amount || 0
+                )
+                logger.info('Dashboard', 'Уведомление об успешной оплате отправлено')
+              }
+            } catch (notificationError) {
+              logger.warn('Dashboard', 'Ошибка отправки уведомления об успешной оплате', null, notificationError)
+            }
 
             // Очищаем состояние
             setPaymentOrderId(null)
@@ -614,6 +670,18 @@ const Dashboard = ({
         errorType: error.constructor.name,
         errorStatus: error.response?.status
       }, error)
+      
+      // Отправляем уведомление об ошибке оплаты
+      try {
+        const notificationInstance = notificationService.getInstance()
+        if (notificationInstance.hasPermission()) {
+          const errorMessage = error.message || 'Неизвестная ошибка'
+          await notificationInstance.notifyPaymentFailed(errorMessage)
+          logger.info('Dashboard', 'Уведомление об ошибке оплаты отправлено')
+        }
+      } catch (notificationError) {
+        logger.warn('Dashboard', 'Ошибка отправки уведомления об ошибке оплаты', null, notificationError)
+      }
       
       // Закрываем модальное окно обработки платежа при ошибке
       setShowPaymentProcessing(false)

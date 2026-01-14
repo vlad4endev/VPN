@@ -60,6 +60,20 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       setLoginData({ email: '', password: '' })
       setView(result.userData.role === 'admin' ? 'admin' : 'dashboard')
       
+      // Запрашиваем разрешение на уведомления для существующих пользователей
+      try {
+        const notificationService = (await import('../../../shared/services/notificationService.js')).default
+        const notificationInstance = notificationService.getInstance()
+        // Запрашиваем только если разрешения еще нет
+        if (!notificationInstance.hasPermission()) {
+          await notificationInstance.requestPermission()
+          logger.info('Auth', 'Запрос разрешения на уведомления выполнен после входа')
+        }
+      } catch (notificationError) {
+        logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+        // Не блокируем вход из-за ошибки уведомлений
+      }
+      
       if (onSuccess) {
         onSuccess(result.userData)
       }
@@ -111,6 +125,17 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       setLoginData({ email: '', password: '', name: '' })
       setView('dashboard')
       
+      // Запрашиваем разрешение на уведомления после успешной регистрации
+      try {
+        const notificationService = (await import('../../../shared/services/notificationService.js')).default
+        const notificationInstance = notificationService.getInstance()
+        await notificationInstance.requestPermission()
+        logger.info('Auth', 'Запрос разрешения на уведомления выполнен после регистрации')
+      } catch (notificationError) {
+        logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+        // Не блокируем регистрацию из-за ошибки уведомлений
+      }
+      
       if (onSuccess) {
         onSuccess(result.userData)
       }
@@ -151,6 +176,20 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       setCurrentUser(result.userData)
       setSuccess('Вход выполнен успешно')
       setView(result.userData.role === 'admin' ? 'admin' : 'dashboard')
+      
+      // Запрашиваем разрешение на уведомления для существующих пользователей
+      try {
+        const notificationService = (await import('../../../shared/services/notificationService.js')).default
+        const notificationInstance = notificationService.getInstance()
+        // Запрашиваем только если разрешения еще нет
+        if (!notificationInstance.hasPermission()) {
+          await notificationInstance.requestPermission()
+          logger.info('Auth', 'Запрос разрешения на уведомления выполнен после входа через Google')
+        }
+      } catch (notificationError) {
+        logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+        // Не блокируем вход из-за ошибки уведомлений
+      }
       
       if (onSuccess) {
         onSuccess(result.userData)
