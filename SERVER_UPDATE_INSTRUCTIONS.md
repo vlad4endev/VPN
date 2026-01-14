@@ -1,13 +1,17 @@
 # Инструкция по обновлению на сервере
 
 ## Проблема
-Ошибка: `The symbol "formatTimeRemaining" has already been declared`
+Ошибка: `Identifier 'formatTimeRemaining' has already been declared`
 
-**Важно:** Функция `formatTimeRemaining` импортируется из `formatDate.js` (строка 15), но на сервере в старой версии она также передается как проп в компонент Dashboard (в деструктуризации пропсов), что вызывает конфликт имен.
+**Важно:** На сервере в файле `Dashboard.jsx` `formatTimeRemaining` объявлен **дважды в импортах**:
 
-**Причина:** На сервере в файле `Dashboard.jsx` `formatTimeRemaining` объявлен дважды:
-1. ✅ В импорте: `import { formatTimeRemaining, ... } from '...'`
-2. ❌ В пропсах: `const Dashboard = ({ ..., formatTimeRemaining, ... }) => {`
+Строка 13: `import { formatDate, formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'`
+Строка 14: `import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'` ❌ **ДУБЛИКАТ!**
+
+**Причина:** При обновлении кода появился дублирующий импорт. Нужно:
+1. ✅ Объединить импорты в один (оставить только строку 13)
+2. ❌ Удалить дублирующий импорт (строка 14)
+3. ❌ Убедиться, что `formatTimeRemaining` НЕ в пропсах компонента
 
 ## Решение
 
@@ -40,18 +44,41 @@ chmod +x fix-formatTimeRemaining.sh
 ```bash
 cd /opt/my-frontend
 
-# Удаляем formatTimeRemaining из пропсов (между const Dashboard = ({ и }) => {)
+# ШАГ 1: Удаляем дублирующие импорты из formatDate.js
+# Находим все строки с импортами из formatDate.js
+IMPORT_LINES=$(grep -n "from '../../../shared/utils/formatDate.js'" src/features/dashboard/components/Dashboard.jsx | cut -d: -f1)
+
+# Если найдено больше одного импорта, оставляем только первый и объединяем их
+FIRST_LINE=$(echo "$IMPORT_LINES" | head -1)
+OTHER_LINES=$(echo "$IMPORT_LINES" | tail -n +2)
+
+if [ -n "$OTHER_LINES" ]; then
+    # Читаем все импортируемые функции
+    ALL_IMPORTS=$(grep "from '../../../shared/utils/formatDate.js'" src/features/dashboard/components/Dashboard.jsx | \
+        sed 's/.*import { \(.*\) }.*/\1/' | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+    
+    # Заменяем первый импорт на объединенный
+    sed -i "${FIRST_LINE}s/.*import {.*}.*/import { $ALL_IMPORTS } from '..\/..\/..\/shared\/utils\/formatDate.js'/" src/features/dashboard/components/Dashboard.jsx
+    
+    # Удаляем остальные дублирующие импорты (в обратном порядке)
+    for LINE in $(echo "$OTHER_LINES" | sort -rn); do
+        sed -i "${LINE}d" src/features/dashboard/components/Dashboard.jsx
+    done
+    
+    echo "✅ Дублирующие импорты удалены"
+fi
+
+# ШАГ 2: Удаляем formatTimeRemaining из пропсов (если есть)
 sed -i '/const Dashboard = ({/,/}) => {/{/formatTimeRemaining,/d}' src/features/dashboard/components/Dashboard.jsx
-
-# Исправляем двойные запятые
 sed -i 's/,\s*,/,/g' src/features/dashboard/components/Dashboard.jsx
-
-# Исправляем запятую перед закрывающей скобкой
 sed -i 's/,\s*}) => {/) => {/g' src/features/dashboard/components/Dashboard.jsx
 
 # Проверяем результат
-grep -A 50 "const Dashboard = ({" src/features/dashboard/components/Dashboard.jsx | grep formatTimeRemaining
-# Если ничего не вывелось - все правильно!
+echo "Проверка импортов:"
+grep "from '../../../shared/utils/formatDate.js'" src/features/dashboard/components/Dashboard.jsx
+echo ""
+echo "Проверка пропсов:"
+grep -A 50 "const Dashboard = ({" src/features/dashboard/components/Dashboard.jsx | grep formatTimeRemaining || echo "✅ formatTimeRemaining не найден в пропсах"
 ```
 
 **ВАРИАНТ 3: Ручное исправление**
@@ -63,21 +90,32 @@ cd /opt/my-frontend
 nano src/features/dashboard/components/Dashboard.jsx
 ```
 
-Найдите строку с пропсами (примерно строка 15-50):
+**ШАГ 1: Удалите дублирующий импорт**
+
+Найдите строки с импортами (примерно строки 12-14):
+```javascript
+import notificationService from '../../../shared/services/notificationService.js'
+import { formatDate, formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'  // ✅ ОСТАВИТЬ
+import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'  // ❌ УДАЛИТЬ ЭТУ СТРОКУ!
+```
+
+**Удалите строку 14** (дублирующий импорт). Должен остаться только один импорт:
+```javascript
+import { formatDate, formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
+```
+
+**ШАГ 2: Проверьте пропсы (если нужно)**
+
+Убедитесь, что в пропсах компонента (после `const Dashboard = ({`) НЕТ `formatTimeRemaining`:
 ```javascript
 const Dashboard = ({
   currentUser,
   // ... другие пропсы
-  formatDate,
-  formatTraffic,
-  formatTimeRemaining,  // ❌ УДАЛИТЕ ЭТУ СТРОКУ!
+  formatDate,  // ✅ это нормально
+  formatTraffic,  // ✅ это нормально
+  // formatTimeRemaining,  // ❌ НЕ ДОЛЖНО БЫТЬ ЗДЕСЬ!
   // ...
 }) => {
-```
-
-Удалите строку `formatTimeRemaining,` из пропсов. Импорт должен остаться:
-```javascript
-import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 ```
 
 Скрипт автоматически:
