@@ -153,7 +153,9 @@ export default defineConfig(({ mode }) => {
         '@shared': path.resolve(__dirname, './src/shared'),
         '@lib': path.resolve(__dirname, './src/lib'),
         '@app': path.resolve(__dirname, './src/app'),
-      }
+      },
+      // Убеждаемся, что React разрешается правильно
+      dedupe: ['react', 'react-dom'],
     },
     plugins: [
       react(),
@@ -355,9 +357,20 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 1400,
       rollupOptions: {
         output: {
-          manualChunks: {
-            react: ['react', 'react-dom'],
-            firebase: ['firebase/app', 'firebase/firestore'],
+          manualChunks(id) {
+            // Не разделяем React на отдельный chunk - оставляем в основном bundle
+            // Это предотвращает проблемы с асинхронной загрузкой React
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom')) {
+                // React должен быть в основном bundle, не в отдельном chunk
+                return undefined
+              }
+              if (id.includes('firebase')) {
+                return 'firebase'
+              }
+              // Остальные node_modules в vendor chunk
+              return 'vendor'
+            }
           },
           chunkFileNames: 'assets/[name]-[hash].js',
           entryFileNames: 'assets/[name]-[hash].js',

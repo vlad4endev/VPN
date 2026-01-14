@@ -1,8 +1,14 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useUsers } from './useUsers.js'
 import { useServers } from './useServers.js'
 import { useTariffs } from './useTariffs.js'
 import { useSettings } from './useSettings.js'
+
+// Проверка доступности React
+if (!React || !React.useState) {
+  console.error('❌ React не доступен!', { React, useState: React?.useState })
+  throw new Error('React не инициализирован. Проверьте импорты и конфигурацию сборки.')
+}
 
 /**
  * Главный хук для управления Admin панелью
