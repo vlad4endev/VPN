@@ -28,6 +28,17 @@ export const getUserStatus = (user, clientStats = null) => {
       // Тестовый период истек - меняем статус на не оплачено
       return { status: 'unpaid', label: 'Не оплачено', color: 'text-red-400' }
     }
+    
+    // Если есть expiresAt и он больше testPeriodEndDate, подписка считается оплаченной
+    if (user.expiresAt && user.testPeriodEndDate && user.expiresAt > user.testPeriodEndDate) {
+      // Проверяем, не истекла ли подписка
+      if (user.expiresAt > now) {
+        return { status: 'active', label: 'Активен', color: 'text-green-400' }
+      } else {
+        return { status: 'expired', label: 'Истек', color: 'text-red-400' }
+      }
+    }
+    
     // Тестовый период еще активен
     const hoursLeft = Math.floor((user.testPeriodEndDate - now) / (60 * 60 * 1000))
     const minutesLeft = Math.floor(((user.testPeriodEndDate - now) % (60 * 60 * 1000)) / (60 * 1000))

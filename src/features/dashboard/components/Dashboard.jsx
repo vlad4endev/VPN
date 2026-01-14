@@ -10,6 +10,7 @@ import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import logger from '../../../shared/utils/logger.js'
 import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
+import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 
 const Dashboard = ({
   currentUser,
@@ -73,6 +74,31 @@ const Dashboard = ({
   )
   const userStatus = getUserStatus(currentUser)
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
+  
+  // Состояние для оставшегося времени подписки (обновляется каждую минуту)
+  const [timeRemaining, setTimeRemaining] = useState(() => 
+    currentUser?.expiresAt ? getTimeRemaining(currentUser.expiresAt) : null
+  )
+  
+  // Обновление оставшегося времени каждую минуту
+  useEffect(() => {
+    if (!currentUser?.expiresAt) {
+      setTimeRemaining(null)
+      return
+    }
+
+    const updateTimeRemaining = () => {
+      setTimeRemaining(getTimeRemaining(currentUser.expiresAt))
+    }
+
+    // Обновляем сразу
+    updateTimeRemaining()
+
+    // Обновляем каждую минуту
+    const interval = setInterval(updateTimeRemaining, 60000)
+
+    return () => clearInterval(interval)
+  }, [currentUser?.expiresAt])
 
   // Используем хук для проверки подписок и отправки уведомлений
   useSubscriptionNotifications(currentUser)
@@ -887,10 +913,27 @@ const Dashboard = ({
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <Calendar className="w-4 h-4 text-purple-400 flex-shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">До</p>
-                            <p className="text-white font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] truncate">
-                              {formatDate(currentUser.expiresAt)}
-                            </p>
+                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">Период действия</p>
+                            {timeRemaining && !timeRemaining.isExpired ? (
+                              <div>
+                                <p className={`font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] ${
+                                  timeRemaining.days <= 3 && timeRemaining.months === 0 
+                                    ? 'text-yellow-400' 
+                                    : timeRemaining.days <= 7 && timeRemaining.months === 0
+                                    ? 'text-orange-400'
+                                    : 'text-white'
+                                }`}>
+                                  {formatTimeRemaining(currentUser.expiresAt)}
+                                </p>
+                                <p className="text-slate-500 text-[clamp(0.65rem,0.6rem+0.25vw,0.7rem)] mt-0.5">
+                                  До {formatDate(currentUser.expiresAt)}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-red-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+                                Истекла
+                              </p>
+                            )}
                           </div>
                         </div>
                       )}

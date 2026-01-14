@@ -63,6 +63,24 @@ export const adminService = {
         updatedAt: new Date().toISOString(),
       }
       
+      // Автоматическое обновление paymentStatus при изменении expiresAt
+      // Если expiresAt больше testPeriodEndDate, меняем статус на 'paid'
+      if (updates.expiresAt !== undefined && updates.expiresAt !== null) {
+        const testPeriodEndDate = user.testPeriodEndDate || updates.testPeriodEndDate
+        if (testPeriodEndDate && updates.expiresAt > testPeriodEndDate) {
+          // Если дата окончания подписки больше даты окончания тестового периода,
+          // автоматически меняем статус на 'paid'
+          if (updates.paymentStatus === undefined || updates.paymentStatus === 'test_period') {
+            updateData.paymentStatus = 'paid'
+            logger.info('Admin', 'Автоматическое обновление paymentStatus на paid', {
+              userId,
+              expiresAt: updates.expiresAt,
+              testPeriodEndDate,
+            })
+          }
+        }
+      }
+      
       // Явно устанавливаем subId как строку (нормализуем значение)
       if (updates.subId !== undefined && updates.subId !== null) {
         updateData.subId = String(updates.subId).trim()

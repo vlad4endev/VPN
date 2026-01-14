@@ -50,6 +50,38 @@ const UserCard = ({
   const [errors, setErrors] = useState({})
   const [saveError, setSaveError] = useState(null)
 
+  // Функция для определения лимита трафика на основе тарифа и статуса оплаты
+  // Определяем до useEffect, чтобы она была доступна при инициализации
+  const getTrafficLimit = useCallback((tariff, paymentStatus) => {
+    // Если тестовый период - всегда 3 GB
+    if (paymentStatus === 'test_period') {
+      return 3
+    }
+    
+    // Если статус оплаты "paid" или не указан, берем из тарифа
+    if (!tariff) {
+      return 0
+    }
+    
+    const plan = tariff.plan?.toLowerCase()
+    const name = tariff.name?.toLowerCase()
+    const isSuper = plan === 'super' || name === 'super'
+    const isMulti = plan === 'multi' || name === 'multi'
+    
+    // SUPER тариф - 300 GB
+    if (isSuper) {
+      return 300
+    }
+    
+    // MULTI тариф - 0 (безлимит)
+    if (isMulti) {
+      return 0
+    }
+    
+    // Для других тарифов берем из тарифа или 0
+    return tariff.trafficGB || 0
+  }, [])
+
   // Обновляем editingUser при изменении user prop
   // ВАЖНО: Всегда используем актуальные данные из user prop для синхронизации
   useEffect(() => {
@@ -89,12 +121,26 @@ const UserCard = ({
           newEditingUser.uuid = normalizedUUID
         }
         
+        // Автоматически корректируем лимит трафика на основе тарифа и статуса оплаты
+        if (user.tariffId || user.paymentStatus) {
+          const tariffId = user.tariffId
+          const selectedTariff = tariffId ? tariffs.find(t => t.id === tariffId) : null
+          const paymentStatus = user.paymentStatus || ''
+          const correctTrafficGB = getTrafficLimit(selectedTariff, paymentStatus)
+          
+          // Обновляем только если текущий лимит не соответствует правильному
+          // Это позволяет сохранить ручные изменения, если они были сделаны
+          if (user.trafficGB !== correctTrafficGB && (user.paymentStatus === 'paid' || user.paymentStatus === 'test_period')) {
+            newEditingUser.trafficGB = correctTrafficGB
+          }
+        }
+        
         return newEditingUser
       })
       setErrors({})
       setSaveError(null)
     }
-  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid])
+  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, tariffs, getTrafficLimit])
 
   // Вычисляем статус на основе актуальных данных пользователя (user prop)
   // Это гарантирует, что статус всегда соответствует реальным данным из Firestore
@@ -157,21 +203,27 @@ const UserCard = ({
     const tariffId = e.target.value
     const selectedTariff = tariffs.find(t => t.id === tariffId)
     if (selectedTariff) {
-      setEditingUser(prev => ({
-        ...prev,
-        plan: selectedTariff.plan,
-        tariffId: tariffId,
-        devices: selectedTariff.devices || prev.devices || 1,
-        trafficGB: selectedTariff.trafficGB || prev.trafficGB || 0,
-      }))
+      setEditingUser(prev => {
+        const paymentStatus = prev.paymentStatus || ''
+        const trafficGB = getTrafficLimit(selectedTariff, paymentStatus)
+        
+        return {
+          ...prev,
+          plan: selectedTariff.plan,
+          tariffId: tariffId,
+          devices: selectedTariff.devices || prev.devices || 1,
+          trafficGB: trafficGB,
+        }
+      })
     } else {
       setEditingUser(prev => ({
         ...prev,
         plan: 'free',
         tariffId: null,
+        trafficGB: prev.paymentStatus === 'test_period' ? 3 : 0,
       }))
     }
-  }, [tariffs])
+  }, [tariffs, getTrafficLimit])
 
   const handleDevicesChange = useCallback((e) => {
     handleFieldChange('devices', Number(e.target.value) || 1)
@@ -189,6 +241,30 @@ const UserCard = ({
   // Обработчик для работы с subId (строка)
   const handleSubIdChange = useCallback((e) => {
     handleFieldChange('subId', e.target.value)
+  }, [handleFieldChange])
+
+  const handlePaymentStatusChange = useCallback((e) => {
+    const value = e.target.value
+    
+    setEditingUser(prev => {
+      // Определяем тариф для расчета лимита трафика
+      const tariffId = prev.tariffId
+      const selectedTariff = tariffId ? tariffs.find(t => t.id === tariffId) : null
+      
+      // Вычисляем новый лимит трафика на основе статуса оплаты и тарифа
+      const trafficGB = getTrafficLimit(selectedTariff, value)
+      
+      return {
+        ...prev,
+        paymentStatus: value,
+        trafficGB: trafficGB,
+      }
+    })
+  }, [tariffs, getTrafficLimit])
+
+  const handleRoleChange = useCallback((e) => {
+    const value = e.target.value
+    handleFieldChange('role', value)
   }, [handleFieldChange])
 
   // Генерация UUID из контекста
@@ -581,6 +657,21 @@ const UserCard = ({
                 />
                 <p className="text-slate-500 text-xs mt-1">
                   {editingUser.trafficGB === 0 ? 'Безлимит' : `${editingUser.trafficGB} GB`}
+                  {editingUser.paymentStatus === 'test_period' && (
+                    <span className="block text-yellow-400 mt-1">Тестовый период: 3 GB</span>
+                  )}
+                  {editingUser.paymentStatus === 'paid' && editingUser.tariffId && (() => {
+                    const tariff = tariffs.find(t => t.id === editingUser.tariffId)
+                    const plan = tariff?.plan?.toLowerCase() || ''
+                    const name = tariff?.name?.toLowerCase() || ''
+                    if (plan === 'super' || name === 'super') {
+                      return <span className="block text-green-400 mt-1">SUPER тариф: 300 GB</span>
+                    }
+                    if (plan === 'multi' || name === 'multi') {
+                      return <span className="block text-green-400 mt-1">MULTI тариф: безлимит</span>
+                    }
+                    return null
+                  })()}
                 </p>
               </div>
               <div>
@@ -667,26 +758,29 @@ const UserCard = ({
                 </div>
               </div>
               
-              {/* Статус оплаты - всегда показываем */}
+              {/* Статус оплаты - редактируемое поле */}
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Статус оплаты</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded">
-                  {editingUser.paymentStatus ? (
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      editingUser.paymentStatus === 'paid' ? 'bg-green-900/30 text-green-300' :
-                      editingUser.paymentStatus === 'test_period' ? 'bg-yellow-900/30 text-yellow-300' :
-                      editingUser.paymentStatus === 'unpaid' ? 'bg-red-900/30 text-red-300' :
-                      'bg-slate-700 text-slate-300'
-                    }`}>
-                      {editingUser.paymentStatus === 'paid' ? 'Оплачено' :
-                       editingUser.paymentStatus === 'test_period' ? 'Тестовый период' :
-                       editingUser.paymentStatus === 'unpaid' ? 'Не оплачено' :
-                       editingUser.paymentStatus}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500 text-sm">Не указан</span>
-                  )}
-                </div>
+                <label htmlFor={`user-card-payment-status-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Статус оплаты</label>
+                <select
+                  id={`user-card-payment-status-${user.id}`}
+                  name="paymentStatus"
+                  value={editingUser.paymentStatus || ''}
+                  onChange={handlePaymentStatusChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Не указан</option>
+                  <option value="paid">Оплачено</option>
+                  <option value="test_period">Тестовый период</option>
+                  <option value="unpaid">Не оплачено</option>
+                </select>
+                {editingUser.paymentStatus && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {editingUser.paymentStatus === 'paid' ? 'Подписка оплачена' :
+                     editingUser.paymentStatus === 'test_period' ? 'Активен тестовый период' :
+                     editingUser.paymentStatus === 'unpaid' ? 'Подписка не оплачена' :
+                     editingUser.paymentStatus}
+                  </p>
+                )}
               </div>
               
               {/* Тестовый период - всегда показываем */}
@@ -747,14 +841,22 @@ const UserCard = ({
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Роль</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    editingUser.role === 'admin' ? 'bg-purple-900/30 text-purple-300' : 'bg-slate-700 text-slate-300'
-                  }`}>
-                    {editingUser.role === 'admin' ? 'Админ' : 'Пользователь'}
-                  </span>
-                </div>
+                <label htmlFor={`user-card-role-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Роль</label>
+                <select
+                  id={`user-card-role-${user.id}`}
+                  name="role"
+                  value={editingUser.role || 'user'}
+                  onChange={handleRoleChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="user">Пользователь</option>
+                  <option value="admin">Админ</option>
+                </select>
+                {editingUser.role === 'admin' && (
+                  <p className="text-blue-400 text-xs mt-1">
+                    Пользователь получит доступ к админ-панели
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-slate-300 text-sm font-medium mb-2">План</label>
