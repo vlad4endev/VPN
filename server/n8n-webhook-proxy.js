@@ -41,21 +41,54 @@ async function initFirebaseAdmin() {
       return
     }
 
-    // Инициализируем с Application Default Credentials или переменными окружения
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
-      ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
-      : null
+    // Приоритет инициализации:
+    // 1. FIREBASE_SERVICE_ACCOUNT_KEY (JSON строка)
+    // 2. FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY (отдельные переменные)
+    // 3. Application Default Credentials (для production)
 
-    if (serviceAccount) {
+    let credential = null
+
+    // Вариант 1: Service Account JSON
+    const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+    if (serviceAccountKey) {
+      try {
+        const serviceAccount = JSON.parse(serviceAccountKey)
+        credential = firebaseAdmin.credential.cert(serviceAccount)
+        console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
+      } catch (err) {
+        console.log('⚠️ Ошибка парсинга FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
+      }
+    }
+
+    // Вариант 2: Отдельные переменные (FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY)
+    if (!credential) {
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY
+      
+      if (clientEmail && privateKey) {
+        // Нормализуем private key (заменяем \n на реальные переносы строк)
+        const normalizedPrivateKey = privateKey.replace(/\\n/g, '\n')
+        credential = firebaseAdmin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey: normalizedPrivateKey,
+        })
+        console.log('📝 Используется FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY')
+      }
+    }
+
+    // Инициализация
+    if (credential) {
       firebaseAdmin.initializeApp({
-        credential: firebaseAdmin.credential.cert(serviceAccount),
+        credential,
         projectId,
       })
     } else {
-      // Используем Application Default Credentials (для production)
+      // Вариант 3: Application Default Credentials (для production)
       firebaseAdmin.initializeApp({
         projectId,
       })
+      console.log('📝 Используются Application Default Credentials')
     }
 
     admin = firebaseAdmin
@@ -176,22 +209,30 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
     
     return response.data
   } catch (error) {
+    // Детальное логирование ошибки
+    const errorData = error.response?.data
+    const errorStatus = error.response?.status
+    const errorStatusText = error.response?.statusText
+    const hasErrorData = errorData && (typeof errorData === 'object' ? Object.keys(errorData).length > 0 : true)
+    
     console.error(`❌ n8n error:`, {
       message: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data,
-      url: webhookUrl
+      status: errorStatus,
+      statusText: errorStatusText,
+      hasData: !!errorData,
+      dataType: typeof errorData,
+      dataKeys: errorData && typeof errorData === 'object' ? Object.keys(errorData) : 'N/A',
+      dataPreview: errorData ? (typeof errorData === 'string' ? errorData.substring(0, 200) : JSON.stringify(errorData).substring(0, 200)) : 'empty',
+      url: webhookUrl,
+      code: error.code,
+      stack: error.stack?.substring(0, 500)
     })
     
     // Улучшенная обработка ошибок от n8n
     let errorMessage = error.message || 'Ошибка вызова n8n webhook'
-    
-    // Извлекаем детальную информацию об ошибке из ответа n8n
-    const errorData = error.response?.data
     const n8nDetails = errorData?.n8nDetails || {}
     
-    if (error.response?.status === 404 || error.response?.status === 500 || error.response?.status === 400) {
+    if (errorStatus === 404 || errorStatus === 500 || errorStatus === 400) {
       // Проверяем различные типы ошибок n8n
       if (errorData?.errorMessage) {
         const n8nError = errorData.errorMessage
@@ -228,12 +269,40 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
         errorMessage = errorData.error
       } else if (errorData?.message) {
         errorMessage = errorData.message
+      } else if (typeof errorData === 'string' && errorData.trim()) {
+        // Если ответ - строка (например, HTML страница с ошибкой)
+        errorMessage = `Ошибка от n8n (${errorStatus}): ${errorData.substring(0, 500)}`
+      } else if (!hasErrorData || (typeof errorData === 'object' && Object.keys(errorData).length === 0)) {
+        // Пустой ответ или пустой объект
+        errorMessage = `Ошибка от n8n (${errorStatus}): ${errorStatusText || 'Пустой ответ от сервера'}\n\n` +
+          `🔧 Возможные причины:\n` +
+          `1. Workflow в n8n не активирован\n` +
+          `2. Ошибка выполнения workflow (проверьте логи n8n)\n` +
+          `3. Узел "Respond to Webhook" не настроен или не подключен\n` +
+          `4. Webhook URL неправильный: ${webhookUrl}\n\n` +
+          `💡 Проверьте логи n8n для детальной информации об ошибке.`
       } else {
-        errorMessage = `Ошибка от n8n (${error.response.status}): ${error.response.statusText || 'Unknown error'}`
+        // Неизвестный формат ответа
+        errorMessage = `Ошибка от n8n (${errorStatus}): ${errorStatusText || 'Unknown error'}\n\n` +
+          `Получен ответ: ${JSON.stringify(errorData, null, 2).substring(0, 1000)}`
       }
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      errorMessage = `Не удалось подключиться к n8n (${error.code}): ${error.message}\n\n` +
+        `🔧 Проверьте:\n` +
+        `1. Доступность n8n по адресу: ${N8N_BASE_URL}\n` +
+        `2. Правильность N8N_BASE_URL в переменных окружения\n` +
+        `3. Сетевые настройки и firewall`
     }
     
-    throw new Error(errorMessage)
+    // Создаем объект ошибки с дополнительной информацией
+    const enhancedError = new Error(errorMessage)
+    enhancedError.status = errorStatus
+    enhancedError.statusText = errorStatusText
+    enhancedError.originalError = error.message
+    enhancedError.webhookUrl = webhookUrl
+    enhancedError.errorData = errorData
+    
+    throw enhancedError
   }
 }
 
@@ -242,22 +311,36 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
 /**
  * Health Check
  * GET /api/vpn/health
+ * 
+ * Простая проверка доступности сервера без обращения к n8n.
+ * Health check не должен зависеть от доступности n8n.
  */
 app.get('/api/vpn/health', async (req, res) => {
   try {
-    const healthData = await callN8NWebhook(N8N_WEBHOOKS.health, {}, 'GET')
+    // Простая проверка - сервер работает
     res.json({
       status: 'ok',
       service: 'n8n-webhook-proxy',
       timestamp: new Date().toISOString(),
-      n8n: { available: true, baseUrl: N8N_BASE_URL, ...healthData },
+      server: {
+        port: PORT,
+        host: HOST,
+        uptime: process.uptime(),
+      },
+      n8n: {
+        baseUrl: N8N_BASE_URL,
+        webhookId: DEFAULT_WEBHOOK_ID,
+        note: 'Для проверки доступности n8n используйте POST запрос к webhook endpoint'
+      },
     })
   } catch (error) {
-    res.status(503).json({
+    // Критическая ошибка самого сервера
+    console.error('❌ Health check critical error:', error)
+    res.status(500).json({
       status: 'error',
       service: 'n8n-webhook-proxy',
       timestamp: new Date().toISOString(),
-      n8n: { available: false, baseUrl: N8N_BASE_URL, error: error.message },
+      error: error.message || 'Неизвестная ошибка',
     })
   }
 })
@@ -301,27 +384,78 @@ app.post('/api/vpn/add-client', async (req, res) => {
     
     res.json(result)
   } catch (error) {
+    // Детальное логирование ошибки
+    const errorStatus = error.status || error.response?.status || 500
+    const errorData = error.errorData || error.response?.data
+    const hasErrorData = errorData && (typeof errorData === 'object' ? Object.keys(errorData).length > 0 : typeof errorData === 'string' && errorData.trim().length > 0)
+    
     console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса add-client:', {
       message: error.message,
-      stack: error.stack,
-      response: error.response?.data,
-      status: error.response?.status
+      status: errorStatus,
+      statusText: error.response?.statusText,
+      hasErrorData: hasErrorData,
+      errorDataType: typeof errorData,
+      errorDataPreview: errorData ? (typeof errorData === 'string' ? errorData.substring(0, 200) : JSON.stringify(errorData).substring(0, 200)) : 'empty',
+      webhookUrl: error.webhookUrl || getWebhookUrl('addClient', req),
+      stack: error.stack?.substring(0, 500)
     })
     
     // Определяем правильный HTTP статус код
     let statusCode = 500
-    if (error.response?.status) {
-      statusCode = error.response.status
-    } else if (error.message.includes('not registered') || error.message.includes('not found')) {
+    if (errorStatus) {
+      statusCode = errorStatus
+    } else if (error.message?.includes('not registered') || error.message?.includes('not found')) {
       statusCode = 404
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      statusCode = 503
+    }
+    
+    // Формируем детальное сообщение об ошибке
+    let errorMessage = error.message || 'Ошибка создания клиента через n8n'
+    let errorDetails = null
+    
+    // Если есть структурированные данные об ошибке, передаем их
+    if (errorData) {
+      if (typeof errorData === 'object') {
+        errorDetails = errorData
+        // Если есть errorMessage в данных, используем его
+        if (errorData.errorMessage) {
+          errorMessage = errorData.errorMessage
+        } else if (errorData.error) {
+          errorMessage = errorData.error
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+      } else if (typeof errorData === 'string' && errorData.trim()) {
+        errorDetails = { rawResponse: errorData.substring(0, 1000) }
+        // Если ответ - строка, но не пустая, добавляем её к сообщению
+        if (errorData.length < 200) {
+          errorMessage = `${errorMessage}\n\nОтвет n8n: ${errorData}`
+        }
+      }
+    }
+    
+    // Если ответ пустой, добавляем специальную подсказку
+    if (!hasErrorData && errorStatus === 500) {
+      errorMessage = `${errorMessage}\n\n` +
+        `⚠️ Получен пустой ответ от n8n. Это может означать:\n` +
+        `1. Workflow не активирован в n8n\n` +
+        `2. Ошибка выполнения workflow (проверьте логи n8n)\n` +
+        `3. Узел "Respond to Webhook" не настроен правильно\n` +
+        `4. Webhook URL: ${error.webhookUrl || getWebhookUrl('addClient', req)}`
     }
     
     res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка создания клиента через n8n',
-      details: error.response?.data || null,
-      hint: error.message?.includes('not registered') 
-        ? 'Проверьте, что workflow активен в n8n и webhook настроен правильно. URL: ' + N8N_WEBHOOKS.addClient
+      error: errorMessage,
+      errorMessage: errorMessage, // Дублируем для совместимости с фронтендом
+      errorDetails: errorDetails,
+      status: errorStatus,
+      webhookUrl: error.webhookUrl || getWebhookUrl('addClient', req),
+      hint: error.message?.includes('not registered') || error.message?.includes('not found')
+        ? 'Проверьте, что workflow активен в n8n и webhook настроен правильно.'
+        : error.message?.includes('Unused Respond to Webhook')
+        ? 'См. файл N8N_WORKFLOW_SETUP.md для инструкций по исправлению.'
         : null
     })
   }
@@ -341,7 +475,12 @@ app.post('/api/vpn/delete-client', async (req, res) => {
       userId: req.body?.userId,
       email: req.body?.email,
       clientId: req.body?.clientId,
-      inboundId: req.body?.inboundId
+      inboundId: req.body?.inboundId,
+      serverId: req.body?.serverId,
+      serverIP: req.body?.serverIP,
+      serverPort: req.body?.serverPort,
+      randompath: req.body?.randompath,
+      protocol: req.body?.protocol
     })
     
     if (!req.body || !req.body.clientId) {
@@ -506,7 +645,7 @@ app.post('/api/payment/generate-link', async (req, res) => {
       tariffId: req.body?.tariffId
     })
     
-    const { userId, amount, tariffId, paymentSettings } = req.body
+    const { userId, amount, tariffId, paymentSettings, userData: requestUserData } = req.body
     
     if (!userId || !amount || amount <= 0) {
       return res.status(400).json({
@@ -531,12 +670,94 @@ app.post('/api/payment/generate-link', async (req, res) => {
       })
     }
     
-    // Формируем данные для n8n workflow, включая настройки платежной системы
+    // Получаем данные пользователя (uuid, email, inboundId)
+    // Приоритет: из запроса > из Firestore
+    let userData = {
+      uuid: null,
+      email: null,
+      inboundId: null,
+      userId: userId
+    }
+    
+    // Если данные пользователя переданы в запросе, используем их
+    if (requestUserData && (requestUserData.uuid || requestUserData.email || requestUserData.inboundId)) {
+      userData.uuid = requestUserData.uuid || null
+      userData.email = requestUserData.email || null
+      userData.inboundId = requestUserData.inboundId || null
+      console.log('✅ n8n-webhook-proxy: Данные пользователя получены из запроса', {
+        userId,
+        hasEmail: !!userData.email,
+        hasUuid: !!userData.uuid,
+        hasInboundId: !!userData.inboundId,
+        email: userData.email,
+        uuid: userData.uuid,
+        inboundId: userData.inboundId
+      })
+    } else {
+      // Если данные не переданы, пытаемся получить из Firestore
+      if (db && userId) {
+        try {
+          const APP_ID = process.env.APP_ID || 'skyputh'
+          
+          console.log('🔍 n8n-webhook-proxy: Загрузка данных пользователя из Firestore', {
+            userId,
+            appId: APP_ID,
+            collectionPath: `artifacts/${APP_ID}/public/data/users_v4`
+          })
+          
+          // Получаем данные пользователя из Firestore
+          const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+          const userDoc = await usersCollection.doc(userId).get()
+          
+          if (userDoc.exists) {
+            const userDocData = userDoc.data()
+            userData.email = userDocData.email || null
+            userData.uuid = userDocData.uuid || null
+            
+            console.log('✅ n8n-webhook-proxy: Данные пользователя загружены из Firestore для генерации ссылки', {
+              userId,
+              hasEmail: !!userData.email,
+              hasUuid: !!userData.uuid,
+              email: userData.email,
+              uuid: userData.uuid,
+              allUserDataKeys: Object.keys(userDocData)
+            })
+          } else {
+            console.warn('⚠️ n8n-webhook-proxy: Пользователь не найден в Firestore для генерации ссылки', { 
+              userId,
+              appId: APP_ID,
+              collectionPath: `artifacts/${APP_ID}/public/data/users_v4`
+            })
+          }
+        } catch (userDataError) {
+          console.error('❌ n8n-webhook-proxy: Ошибка получения данных пользователя для генерации ссылки', {
+            userId,
+            error: userDataError.message,
+            stack: userDataError.stack
+          })
+          // Продолжаем работу даже если не удалось получить данные пользователя
+        }
+      } else {
+        console.warn('⚠️ n8n-webhook-proxy: Не удалось загрузить данные пользователя', {
+          hasDb: !!db,
+          hasUserId: !!userId
+        })
+      }
+    }
+    
+    // Формируем данные для n8n workflow, включая настройки платежной системы и данные пользователя
     const paymentData = {
       mode: 'generateLink',
       userId,
       amount: Number(amount),
       tariffId: tariffId || null,
+      // Данные пользователя
+      userData: {
+        uuid: userData.uuid,
+        email: userData.email,
+        userId: userData.userId,
+        inboundId: userData.inboundId || null // Inbound ID тарифа
+      },
       // Передаем настройки платежной системы (из запроса или из Firestore)
       paymentSettings: finalPaymentSettings || {},
       ...req.body
@@ -547,8 +768,11 @@ app.post('/api/payment/generate-link', async (req, res) => {
       userId: paymentData.userId,
       amount: paymentData.amount,
       tariffId: paymentData.tariffId,
+      hasUserData: !!paymentData.userData,
+      userData: paymentData.userData,
       hasPaymentSettings: !!paymentData.paymentSettings && Object.keys(paymentData.paymentSettings).length > 0,
-      paymentSettingsKeys: paymentData.paymentSettings ? Object.keys(paymentData.paymentSettings) : []
+      paymentSettingsKeys: paymentData.paymentSettings ? Object.keys(paymentData.paymentSettings) : [],
+      fullPaymentData: JSON.stringify(paymentData, null, 2).substring(0, 1000)
     })
     
     const result = await callN8NWebhook(webhookUrl, paymentData)
@@ -569,11 +793,24 @@ app.post('/api/payment/generate-link', async (req, res) => {
     
     if (Array.isArray(result)) {
       // Если ответ - массив, берем первый элемент
-      responseData = result[0] || result.find(item => item?.paymentUrl || item?.orderId) || {}
+      // n8n может возвращать [{ json: { paymentUrl: ... } }] или [{ paymentUrl: ... }]
+      const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId) || {}
+      
+      // Проверяем, есть ли поле json (стандартный формат n8n)
+      if (firstItem.json) {
+        responseData = firstItem.json
+      } else {
+        responseData = firstItem
+      }
+      
       console.log('📦 n8n-webhook-proxy: Ответ от n8n - массив, извлечен первый элемент:', {
         hasPaymentUrl: !!responseData.paymentUrl,
-        hasOrderId: !!responseData.orderId
+        hasOrderId: !!responseData.orderId,
+        hasJsonField: !!firstItem.json
       })
+    } else if (result?.json) {
+      // Если ответ имеет поле json (стандартный формат n8n)
+      responseData = result.json
     } else if (result?.data) {
       // Если ответ имеет поле data
       responseData = result.data
@@ -582,9 +819,29 @@ app.post('/api/payment/generate-link', async (req, res) => {
       responseData = result || {}
     }
     
-    // Проверяем, что в ответе есть необходимые поля
-    if (!responseData.paymentUrl && !responseData.orderId) {
-      console.error('❌ n8n-webhook-proxy: Неполные данные от n8n workflow:', {
+    // Извлекаем orderId из paymentUrl, если он не передан в ответе n8n
+    if (!responseData.orderId && responseData.paymentUrl) {
+      try {
+        const url = new URL(responseData.paymentUrl)
+        const label = url.searchParams.get('label')
+        if (label && label.startsWith('order_')) {
+          responseData.orderId = label
+          console.log('✅ n8n-webhook-proxy: orderId извлечен из paymentUrl', {
+            orderId: responseData.orderId,
+            label
+          })
+        }
+      } catch (urlError) {
+        console.warn('⚠️ n8n-webhook-proxy: Не удалось извлечь orderId из paymentUrl', {
+          paymentUrl: responseData.paymentUrl,
+          error: urlError.message
+        })
+      }
+    }
+
+    // Проверяем, что в ответе есть paymentUrl
+    if (!responseData.paymentUrl) {
+      console.error('❌ n8n-webhook-proxy: Отсутствует paymentUrl от n8n workflow:', {
         responseData,
         result,
         resultType: typeof result,
@@ -593,15 +850,23 @@ app.post('/api/payment/generate-link', async (req, res) => {
       })
       return res.status(500).json({
         success: false,
-        error: 'Неполные данные от n8n workflow: отсутствует paymentUrl или orderId',
+        error: 'Неполные данные от n8n workflow: отсутствует paymentUrl',
         receivedData: responseData
+      })
+    }
+
+    // Если orderId все еще отсутствует, генерируем его
+    if (!responseData.orderId) {
+      responseData.orderId = `order_${Date.now()}`
+      console.warn('⚠️ n8n-webhook-proxy: orderId сгенерирован из timestamp', {
+        orderId: responseData.orderId
       })
     }
     
     console.log('✅ n8n-webhook-proxy: Отправка ответа клиенту:', {
       paymentUrl: responseData.paymentUrl,
       orderId: responseData.orderId,
-      amount: responseData.amount,
+      amount: responseData.amount || amount,
       status: responseData.status,
       allKeys: Object.keys(responseData),
       fullResponse: JSON.stringify(responseData, null, 2)
@@ -612,9 +877,8 @@ app.post('/api/payment/generate-link', async (req, res) => {
       success: true,
       paymentUrl: responseData.paymentUrl,
       orderId: responseData.orderId,
-      amount: responseData.amount,
-      status: responseData.status,
-      userId: responseData.userId
+      amount: responseData.amount || amount, // Используем amount из запроса, если n8n не вернул
+      status: responseData.status || 'pending',
     })
   } catch (error) {
     console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса generate-link:', {
@@ -644,9 +908,15 @@ async function loadPaymentSettings() {
   }
 
   try {
-    const APP_ID = process.env.APP_ID || 'vpn-service'
+    const APP_ID = process.env.APP_ID || 'skyputh'
     // Путь к документу: artifacts/{APP_ID}/public/settings
-    const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+    const settingsPath = `artifacts/${APP_ID}/public/settings`
+    console.log('🔍 n8n-webhook-proxy: Загрузка настроек платежей из Firestore', {
+      appId: APP_ID,
+      settingsPath
+    })
+    
+    const settingsRef = db.doc(settingsPath)
     const settingsSnapshot = await settingsRef.get()
     
     if (settingsSnapshot.exists) {
@@ -655,17 +925,25 @@ async function loadPaymentSettings() {
         yoomoneyWallet: data.yoomoneyWallet || data.yooMoneyWallet || null,
         yoomoneySecretKey: data.yoomoneySecretKey || data.yooMoneySecretKey || null,
       }
-      console.log('✅ Настройки платежей загружены из Firestore', {
+      console.log('✅ n8n-webhook-proxy: Настройки платежей загружены из Firestore', {
         hasWallet: !!paymentSettings.yoomoneyWallet,
-        hasSecretKey: !!paymentSettings.yoomoneySecretKey
+        hasSecretKey: !!paymentSettings.yoomoneySecretKey,
+        wallet: paymentSettings.yoomoneyWallet ? `${paymentSettings.yoomoneyWallet.substring(0, 5)}...` : null,
+        allSettingsKeys: Object.keys(data)
       })
       return paymentSettings
     } else {
-      console.log('⚠️ Документ settings не найден в Firestore')
+      console.warn('⚠️ n8n-webhook-proxy: Документ settings не найден в Firestore', {
+        appId: APP_ID,
+        settingsPath
+      })
       return {}
     }
   } catch (err) {
-    console.error('❌ Ошибка загрузки настроек платежей из Firestore:', err.message)
+    console.error('❌ n8n-webhook-proxy: Ошибка загрузки настроек платежей из Firestore:', {
+      error: err.message,
+      stack: err.stack
+    })
     return {}
   }
 }
@@ -694,16 +972,107 @@ app.post('/api/payment/webhook', async (req, res) => {
       hasSecretKey: !!paymentSettings.yoomoneySecretKey
     })
     
+    // Получаем данные пользователя из платежа
+    let userData = {
+      uuid: null,
+      email: null,
+      userId: null
+    }
+    
+    // Формируем дату и время оплаты в формате DD-MM-YYYY и время ЧЧ:ММ
+    const paymentDateTime = new Date()
+    const paymentDate = paymentDateTime.toLocaleDateString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }) // Формат: DD-MM-YYYY
+    const paymentTime = paymentDateTime.toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }) // Формат: ЧЧ:ММ
+    
+    // Пытаемся получить данные пользователя из платежа в Firestore
+    if (db && req.body?.label) {
+      try {
+        const APP_ID = process.env.APP_ID || 'skyputh'
+        const orderId = req.body.label
+        
+        // Ищем платеж по orderId
+        const paymentsCollection = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+        const paymentQuery = paymentsCollection.where('orderId', '==', orderId).limit(1)
+        const paymentSnapshot = await paymentQuery.get()
+        
+        if (!paymentSnapshot.empty) {
+          const paymentDoc = paymentSnapshot.docs[0]
+          const paymentData = paymentDoc.data()
+          const userId = paymentData.userId
+          
+          if (userId) {
+            userData.userId = userId
+            
+            // Получаем данные пользователя из Firestore
+            const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+            const userDoc = await usersCollection.doc(userId).get()
+            
+            if (userDoc.exists) {
+              const userDocData = userDoc.data()
+              userData.email = userDocData.email || null
+              userData.uuid = userDocData.uuid || null
+              
+              console.log('✅ n8n-webhook-proxy: Данные пользователя загружены из Firestore', {
+                userId,
+                hasEmail: !!userData.email,
+                hasUuid: !!userData.uuid
+              })
+            } else {
+              console.warn('⚠️ n8n-webhook-proxy: Пользователь не найден в Firestore', { userId })
+            }
+          } else {
+            console.warn('⚠️ n8n-webhook-proxy: userId не найден в платеже', { orderId })
+          }
+        } else {
+          console.warn('⚠️ n8n-webhook-proxy: Платеж не найден в Firestore', { orderId })
+        }
+      } catch (userDataError) {
+        console.error('❌ n8n-webhook-proxy: Ошибка получения данных пользователя', {
+          error: userDataError.message
+        })
+        // Продолжаем работу даже если не удалось получить данные пользователя
+      }
+    }
+    
     // Получаем webhook URL для обработки платежей
     const webhookUrl = getWebhookUrl('addClient', req) // Используем существующий механизм
     console.log('📤 n8n-webhook-proxy: Отправка webhook в n8n для обработки:', webhookUrl)
     
-    // Формируем данные для n8n workflow, включая настройки платежей
+    // Формируем данные для n8n workflow, включая настройки платежей и данные пользователя
     const webhookData = {
       mode: 'processNotification',
       paymentSettings: paymentSettings,
+      // Данные пользователя
+      userData: {
+        uuid: userData.uuid,
+        email: userData.email,
+        userId: userData.userId
+      },
+      // Дата и время оплаты
+      paymentDate: paymentDate, // Формат: DD-MM-YYYY
+      paymentTime: paymentTime, // Формат: HH:MM:SS
+      paymentDateTime: paymentDateTime.toISOString(), // ISO формат для совместимости
+      // Оригинальные данные от YooMoney
       ...req.body
     }
+    
+    console.log('📤 n8n-webhook-proxy: Данные для n8n workflow:', {
+      mode: webhookData.mode,
+      hasUserData: !!webhookData.userData,
+      userData: webhookData.userData,
+      paymentDate: webhookData.paymentDate,
+      paymentTime: webhookData.paymentTime,
+      label: webhookData.label,
+      operationId: webhookData.operation_id
+    })
     
     const result = await callN8NWebhook(webhookUrl, webhookData)
     
@@ -829,6 +1198,160 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Ошибка при проверке статуса платежа'
+    })
+  }
+})
+
+/**
+ * Проверка платежа (вызов webhook для проверки)
+ * POST /api/payment/verify
+ * 
+ * Принимает orderId и отправляет запрос в n8n workflow для проверки платежа
+ */
+app.post('/api/payment/verify', async (req, res) => {
+  try {
+    console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/payment/verify', {
+      hasBody: !!req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      orderId: req.body?.orderId,
+      userId: req.body?.userId
+    })
+    
+    const { orderId, userId, tariffId, amount } = req.body
+    
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        error: 'orderId обязателен'
+      })
+    }
+
+    // Если Firebase Admin SDK еще не инициализирован, пытаемся инициализировать
+    if (!db) {
+      await initFirebaseAdmin()
+    }
+
+    if (!db) {
+      console.log('⚠️ Firestore недоступен для проверки платежа')
+      return res.status(503).json({
+        success: false,
+        error: 'Firestore недоступен'
+      })
+    }
+
+    try {
+      const APP_ID = process.env.APP_ID || 'skyputh'
+      const paymentsCollection = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+      const paymentQuery = paymentsCollection.where('orderId', '==', orderId).limit(1)
+      const paymentSnapshot = await paymentQuery.get()
+
+      if (paymentSnapshot.empty) {
+        console.log('⚠️ Платеж не найден для проверки', { orderId })
+        return res.status(404).json({
+          success: false,
+          error: 'Платеж не найден',
+          orderId
+        })
+      }
+
+      const paymentDoc = paymentSnapshot.docs[0]
+      const paymentData = paymentDoc.data()
+      
+      // Получаем данные пользователя из Firestore
+      let userData = {
+        uuid: null,
+        email: paymentData.email || null,
+        userId: paymentData.userId || userId
+      }
+      
+      if (userData.userId) {
+        try {
+          const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+          const userDoc = await usersCollection.doc(userData.userId).get()
+          
+          if (userDoc.exists) {
+            const userDocData = userDoc.data()
+            userData.email = userDocData.email || userData.email
+            userData.uuid = userDocData.uuid || null
+          }
+        } catch (userDataError) {
+          console.error('❌ Ошибка получения данных пользователя', {
+            userId: userData.userId,
+            error: userDataError.message
+          })
+        }
+      }
+      
+      // Загружаем настройки платежей
+      const paymentSettings = await loadPaymentSettings()
+      
+      // Получаем webhook URL
+      const webhookUrl = getWebhookUrl('addClient', req)
+      
+      // Формируем данные для n8n workflow
+      const verifyData = {
+        mode: 'verifyPayment',
+        orderId: orderId,
+        userId: userData.userId,
+        // Данные пользователя
+        userData: {
+          uuid: userData.uuid,
+          email: userData.email,
+          userId: userData.userId
+        },
+        // Данные платежа
+        paymentData: {
+          orderId: orderId,
+          userId: paymentData.userId,
+          tariffId: paymentData.tariffId || tariffId,
+          tariffName: paymentData.tariffName,
+          amount: paymentData.amount || amount,
+          status: paymentData.status,
+          devices: paymentData.devices,
+          periodMonths: paymentData.periodMonths,
+          discount: paymentData.discount,
+          createdAt: paymentData.createdAt
+        },
+        // Настройки платежей
+        paymentSettings: paymentSettings
+      }
+      
+      console.log('📤 n8n-webhook-proxy: Отправка запроса на проверку платежа в n8n:', {
+        webhookUrl,
+        orderId,
+        userId: userData.userId,
+        hasPaymentData: !!verifyData.paymentData
+      })
+      
+      const result = await callN8NWebhook(webhookUrl, verifyData)
+      
+      console.log('✅ n8n-webhook-proxy: Получен ответ от n8n для проверки платежа:', {
+        hasResult: !!result,
+        status: result?.status,
+        success: result?.success
+      })
+      
+      res.json({
+        success: true,
+        orderId,
+        result: result
+      })
+    } catch (firestoreError) {
+      console.error('❌ Ошибка при запросе к Firestore для проверки платежа:', firestoreError)
+      res.status(500).json({
+        success: false,
+        error: 'Ошибка при проверке платежа',
+        details: firestoreError.message
+      })
+    }
+  } catch (error) {
+    console.error('❌ Ошибка при проверке платежа:', {
+      message: error.message,
+      stack: error.stack
+    })
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Ошибка при проверке платежа'
     })
   }
 })

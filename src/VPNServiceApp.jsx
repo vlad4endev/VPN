@@ -1775,6 +1775,7 @@ export default function VPNServiceApp() {
         onHandleTariffTrafficGBChange={adminHandlers.handleTariffTrafficGBChange}
         onHandleTariffDurationDaysChange={adminHandlers.handleTariffDurationDaysChange}
         onHandleTariffActiveChange={adminHandlers.handleTariffActiveChange}
+        onHandleTariffSubscriptionLinkChange={adminHandlers.handleTariffSubscriptionLinkChange}
         onHandleSaveUserCard={finalHandleSaveUserCard}
         onGenerateUUID={finalGenerateUUID}
         />

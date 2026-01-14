@@ -1,0 +1,25 @@
+[Unit]
+Description=SkyPuth VPN Backend Proxy Server
+After=network.target
+
+[Service]
+Type=simple
+# ЗАМЕНИТЕ /path/to/VPN на реальный путь к проекту
+WorkingDirectory=/path/to/VPN/server
+ExecStart=/usr/bin/node proxy-server.js
+Restart=always
+RestartSec=10
+Environment="NODE_ENV=production"
+# ЗАМЕНИТЕ /path/to/VPN на реальный путь к проекту
+EnvironmentFile=/path/to/VPN/.env
+
+# Безопасность: запуск от непривилегированного пользователя
+User=%i
+Group=%i
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

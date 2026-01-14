@@ -8,13 +8,15 @@ import {
   CreditCard,
   RefreshCw,
   Eye,
-  EyeOff
+  EyeOff,
+  Trash2
 } from 'lucide-react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import logger from '../../../shared/utils/logger.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
+import { adminService } from '../services/adminService.js'
 
 /**
  * Панель управления настройками YooMoney
@@ -29,6 +31,7 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [clearingPayments, setClearingPayments] = useState(false)
   const justSavedRef = useRef(false)
 
   // Загрузка настроек YooMoney при монтировании
@@ -216,6 +219,31 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
     }
   }, [])
 
+  // Очистка всех платежей со статусом 'pending'
+  const handleClearAllPendingPayments = useCallback(async () => {
+    if (!window.confirm('Вы уверены, что хотите удалить все незавершенные платежи (со статусом pending) для всех пользователей? Это действие нельзя отменить.')) {
+      return
+    }
+
+    setClearingPayments(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      logger.info('Admin', 'Начало очистки всех платежей со статусом pending')
+      const result = await adminService.clearAllPendingPayments()
+      
+      logger.info('Admin', 'Очистка всех платежей со статусом pending завершена', result)
+      setSuccess(`Удалено ${result.deleted} платежей со статусом pending`)
+      setTimeout(() => setSuccess(null), 5000)
+    } catch (err) {
+      logger.error('Admin', 'Ошибка очистки всех платежей со статусом pending', null, err)
+      setError('Ошибка при удалении платежей: ' + (err.message || 'Неизвестная ошибка'))
+    } finally {
+      setClearingPayments(false)
+    }
+  }, [])
+
   if (loading) {
     return (
       <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-6">
@@ -344,7 +372,26 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
           </div>
         </div>
 
-        <div className="flex justify-end pt-4 border-t border-slate-800">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-4 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={handleClearAllPendingPayments}
+            disabled={clearingPayments}
+            className="px-4 sm:px-6 py-2 sm:py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2 min-h-[44px] touch-manipulation"
+            title="Удалить все незавершенные платежи со статусом pending для всех пользователей"
+          >
+            {clearingPayments ? (
+              <>
+                <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                Очистка...
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                Очистить все pending платежи
+              </>
+            )}
+          </button>
           <button
             type="submit"
             disabled={saving}

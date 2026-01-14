@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build",
     "preview": "vite preview",
-    "analyze": "vite build --mode production && echo 'Откройте dist/stats.html для просмотра анализа бандла'"
+    "analyze": "vite build --mode production && echo 'Откройте dist/stats.html для просмотра анализа бандла'",
+    "start": "node server/proxy-server.js",
+    "start:backend": "cd server && npm start",
+    "start:all": "node scripts/start-all.js",
+    "setup:env": "node setup-env.js",
+    "setup:env:fix": "node setup-env.js --fix",
+    "build:start": "npm run build && npm start"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.16",

@@ -42,6 +42,7 @@ const Dashboard = ({
   showLogger,
   onSetShowLogger,
   onGetKey,
+  servers = [],
 }) => {
   // Состояние для модальных окон выбора тарифа и успеха
   const [selectedTariff, setSelectedTariff] = useState(null)
@@ -71,6 +72,16 @@ const Dashboard = ({
   const userStatus = getUserStatus(currentUser)
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
 
+  // Отладочный useEffect для отслеживания изменений состояния модального окна
+  useEffect(() => {
+    logger.debug('Dashboard', 'Состояние модального окна изменилось', {
+      showSuccessModal,
+      hasSubscriptionSuccess: !!subscriptionSuccess,
+      subscriptionSuccessKeys: subscriptionSuccess ? Object.keys(subscriptionSuccess) : [],
+      subscriptionSuccessPaymentUrl: subscriptionSuccess?.paymentUrl
+    })
+  }, [showSuccessModal, subscriptionSuccess])
+
   // Polling статуса платежа после открытия окна оплаты
   useEffect(() => {
     if (!paymentOrderId) {
@@ -99,12 +110,15 @@ const Dashboard = ({
           status: payment.status
         })
 
-        // Если платеж завершен, обновляем данные и останавливаем polling
+        // Если платеж завершен, создаем подписку и обновляем клиента в 3x-ui
         if (payment.status === 'completed') {
-          logger.info('Dashboard', 'Платеж завершен успешно', {
+          logger.info('Dashboard', 'Платеж завершен успешно, создаем подписку', {
             orderId: paymentOrderId,
             amount: payment.amount,
-            tariffName: payment.tariffName
+            tariffId: payment.tariffId,
+            tariffName: payment.tariffName,
+            devices: payment.devices,
+            periodMonths: payment.periodMonths
           })
 
           // Останавливаем polling
@@ -113,21 +127,66 @@ const Dashboard = ({
             paymentPollingIntervalRef.current = null
           }
 
-          // Очищаем состояние
-          setPaymentOrderId(null)
-          setPaymentWindowRef(null)
+          try {
+            // Находим тариф по tariffId из платежа
+            const tariff = tariffs.find(t => t.id === payment.tariffId)
+            if (!tariff) {
+              logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
+                tariffId: payment.tariffId,
+                orderId: paymentOrderId
+              })
+              // Все равно перезагружаем страницу, webhook мог обработать платеж
+              window.location.reload()
+              return
+            }
 
-          // Закрываем модальное окно успеха (если открыто)
-          setShowSuccessModal(false)
-          setSubscriptionSuccess(null)
+            // Создаем подписку с данными из платежа
+            logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
+              userId: currentUser.id,
+              tariffId: tariff.id,
+              devices: payment.devices || 1,
+              periodMonths: payment.periodMonths || 1
+            })
 
-          // Показываем уведомление об успешной оплате перед перезагрузкой
-          // Используем небольшой таймаут для лучшего UX
-          setTimeout(() => {
-            // Обновляем страницу, чтобы загрузить обновленные данные пользователя
-            // После webhook платеж будет обработан и подписка активирована
-            window.location.reload()
-          }, 500) // Небольшая задержка для показа успешного статуса
+            // Вызываем создание подписки через onHandleCreateSubscription
+            // Передаем данные из платежа
+            const subscriptionResult = await onHandleCreateSubscription(
+              tariff,
+              payment.devices || 1,
+              null, // natrockPort - не используется для SUPER тарифа
+              payment.periodMonths || 1,
+              false, // testPeriod - уже оплачено
+              'pay_now', // paymentMode
+              payment.discount || 0
+            )
+
+            logger.info('Dashboard', 'Подписка создана после успешной оплаты', {
+              hasVpnLink: !!subscriptionResult?.vpnLink,
+              tariffName: subscriptionResult?.tariffName
+            })
+
+            // Очищаем состояние
+            setPaymentOrderId(null)
+            setPaymentWindowRef(null)
+
+            // Закрываем модальное окно успеха (если открыто)
+            setShowSuccessModal(false)
+            setSubscriptionSuccess(null)
+
+            // Показываем уведомление об успешной оплате перед перезагрузкой
+            setTimeout(() => {
+              // Обновляем страницу, чтобы загрузить обновленные данные пользователя
+              window.location.reload()
+            }, 500)
+          } catch (error) {
+            logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
+              orderId: paymentOrderId
+            }, error)
+            // Все равно перезагружаем страницу, webhook мог обработать платеж
+            setTimeout(() => {
+              window.location.reload()
+            }, 1000)
+          }
         }
       } catch (error) {
         logger.error('Dashboard', 'Ошибка проверки статуса платежа', {
@@ -149,32 +208,100 @@ const Dashboard = ({
         paymentPollingIntervalRef.current = null
       }
     }
-  }, [paymentOrderId])
+  }, [paymentOrderId, tariffs, onHandleCreateSubscription, currentUser])
 
   // Отслеживание закрытия окна оплаты
   useEffect(() => {
-    if (!paymentWindowRef) return
+    if (!paymentWindowRef || !paymentOrderId) return
 
-    logger.debug('Dashboard', 'Отслеживание закрытия окна оплаты')
+    logger.debug('Dashboard', 'Отслеживание закрытия окна оплаты', {
+      orderId: paymentOrderId
+    })
 
     const checkWindowClosed = setInterval(() => {
       try {
         // Проверяем, закрыто ли окно
         if (paymentWindowRef.closed) {
-          logger.debug('Dashboard', 'Окно оплаты закрыто')
+          logger.info('Dashboard', 'Окно оплаты закрыто, ожидаем 5 секунд перед проверкой платежа', {
+            orderId: paymentOrderId
+          })
 
           // Очищаем интервал проверки окна
           clearInterval(checkWindowClosed)
 
+          // Сразу запускаем проверку статуса платежа через webhook
+          setTimeout(async () => {
+            try {
+              logger.info('Dashboard', 'Окно оплаты закрыто, запускаем проверку статуса платежа через webhook', {
+                orderId: paymentOrderId
+              })
+
+              const { dashboardService } = await import('../services/dashboardService.js')
+              
+              // Отправляем запрос на проверку платежа через webhook
+              await dashboardService.verifyPayment(paymentOrderId)
+
+              logger.info('Dashboard', 'Запрос на проверку платежа через webhook отправлен', {
+                orderId: paymentOrderId
+              })
+
+              // Сразу проверяем статус платежа (webhook может уже обработать платеж)
+              const payment = await dashboardService.checkPaymentStatus(paymentOrderId)
+              
+              if (payment && payment.status === 'completed') {
+                logger.info('Dashboard', 'Платеж уже обработан webhook, создаем подписку', {
+                  orderId: paymentOrderId
+                })
+                
+                // Находим тариф
+                const tariff = tariffs.find(t => t.id === payment.tariffId)
+                if (tariff && onHandleCreateSubscription) {
+                  // Создаем подписку с данными из платежа
+                  await onHandleCreateSubscription(
+                    tariff,
+                    payment.devices || 1,
+                    null,
+                    payment.periodMonths || 1,
+                    false,
+                    'pay_now',
+                    payment.discount || 0
+                  )
+                  
+                  logger.info('Dashboard', 'Подписка создана после проверки webhook', {
+                    orderId: paymentOrderId
+                  })
+                  
+                  // Перезагружаем страницу для обновления данных
+                  setTimeout(() => {
+                    window.location.reload()
+                  }, 1000)
+                }
+              } else {
+                logger.info('Dashboard', 'Платеж еще не обработан, продолжаем polling', {
+                  orderId: paymentOrderId,
+                  status: payment?.status
+                })
+              }
+            } catch (error) {
+              logger.error('Dashboard', 'Ошибка при проверке платежа после закрытия окна', {
+                orderId: paymentOrderId
+              }, error)
+              // Не показываем ошибку пользователю, polling продолжит проверку
+            }
+          }, 2000) // Ждем 2 секунды для обработки webhook
+
           // Если polling еще не запущен (не должно быть), запускаем его
           // Но обычно polling уже запущен, так что это просто безопасность
-          if (paymentOrderId && !paymentPollingIntervalRef.current) {
+          if (!paymentPollingIntervalRef.current) {
             logger.debug('Dashboard', 'Окно закрыто, запускаем polling (fallback)')
           }
         }
       } catch (error) {
         // Ошибка может возникнуть при попытке доступа к закрытому окну из другого домена
         // Это нормально, просто очищаем интервал
+        logger.debug('Dashboard', 'Ошибка проверки статуса окна (возможно, окно закрыто)', {
+          error: error.message
+        })
         clearInterval(checkWindowClosed)
       }
     }, 1000) // Проверяем каждую секунду
@@ -182,7 +309,7 @@ const Dashboard = ({
     return () => {
       clearInterval(checkWindowClosed)
     }
-  }, [paymentWindowRef, paymentOrderId])
+  }, [paymentWindowRef, paymentOrderId, tariffs, onHandleCreateSubscription, currentUser])
 
   // Синхронизация данных с n8n при загрузке компонента
   useEffect(() => {
@@ -346,6 +473,13 @@ const Dashboard = ({
         discount: subscriptionData.discount || 0
       })
 
+      logger.info('Dashboard', 'Вызов onHandleCreateSubscription', {
+        tariffId: subscriptionData.tariff.id,
+        tariffName: subscriptionData.tariff.name
+      })
+      
+      console.log('🔍 Dashboard: ПЕРЕД await onHandleCreateSubscription')
+      
       const result = await onHandleCreateSubscription(
         subscriptionData.tariff,
         subscriptionData.devices,
@@ -356,16 +490,56 @@ const Dashboard = ({
         subscriptionData.discount || 0
       )
       
-      logger.debug('Dashboard', 'onHandleCreateSubscription вернул результат', { hasResult: !!result })
+      logger.info('Dashboard', 'onHandleCreateSubscription вернул результат (ПОСЛЕ await)', {
+        hasResult: !!result,
+        hasPaymentUrl: !!result?.paymentUrl,
+        requiresPayment: result?.requiresPayment,
+        resultKeys: result ? Object.keys(result) : [],
+        fullResult: result
+      })
+      
+      console.log('🔍 Dashboard: result после await onHandleCreateSubscription:', result)
       
       // Закрываем модальное окно обработки платежа
       setShowPaymentProcessing(false)
       
       // Если результат содержит ссылку на оплату, открываем её в miniapp
-      if (result && result.paymentUrl && result.requiresPayment) {
-        logger.info('Dashboard', 'Открываем ссылку на оплату', {
+      // Проверяем наличие paymentUrl, даже если requiresPayment не указан явно
+      if (result && result.paymentUrl) {
+        logger.info('Dashboard', 'Открываем ссылку на оплату в мини-окне', {
+          paymentUrl: result.paymentUrl,
           orderId: result.orderId,
-          amount: result.amount
+          amount: result.amount,
+          requiresPayment: result.requiresPayment
+        })
+        
+        // Показываем модальное окно с информацией об оплате
+        const subscriptionSuccessData = {
+          vpnLink: null,
+          paymentUrl: result.paymentUrl,
+          orderId: result.orderId,
+          amount: result.amount,
+          requiresPayment: true,
+          message: result.message || 'Требуется оплата для активации подписки',
+          tariffName: result.tariffName || subscriptionData.tariff.name,
+          devices: result.devices || subscriptionData.devices || 1,
+          periodMonths: result.periodMonths || subscriptionData.periodMonths || 1
+        }
+        
+        logger.info('Dashboard', 'Устанавливаем subscriptionSuccess и показываем модальное окно', {
+          hasPaymentUrl: !!subscriptionSuccessData.paymentUrl,
+          orderId: subscriptionSuccessData.orderId,
+          amount: subscriptionSuccessData.amount,
+          tariffName: subscriptionSuccessData.tariffName,
+          willSetShowSuccessModal: true
+        })
+        
+        setSubscriptionSuccess(subscriptionSuccessData)
+        setShowSuccessModal(true)
+        
+        logger.info('Dashboard', 'Модальное окно должно быть показано', {
+          showSuccessModal: true,
+          subscriptionSuccess: subscriptionSuccessData
         })
         
         // Открываем ссылку на оплату в новом окне как miniapp
@@ -395,24 +569,20 @@ const Dashboard = ({
           
           // Сохраняем ссылку на окно и orderId для отслеживания
           setPaymentWindowRef(paymentWindow)
-          setPaymentOrderId(result.orderId)
+          if (result.orderId) {
+            setPaymentOrderId(result.orderId)
+          }
           
-          logger.info('Dashboard', 'Окно оплаты открыто, начинаем отслеживание', { orderId: result.orderId })
+          logger.info('Dashboard', 'Окно оплаты открыто, начинаем отслеживание', { 
+            orderId: result.orderId,
+            paymentUrl: result.paymentUrl
+          })
+        } else {
+          logger.warn('Dashboard', 'Не удалось открыть окно оплаты (возможно, заблокировано браузером)', {
+            paymentUrl: result.paymentUrl
+          })
+          // Если окно заблокировано, модальное окно уже показано, пользователь может нажать кнопку в модальном окне
         }
-        
-        // Показываем уведомление пользователю
-        setSubscriptionSuccess({
-          vpnLink: null,
-          paymentUrl: result.paymentUrl,
-          orderId: result.orderId,
-          amount: result.amount,
-          requiresPayment: true,
-          message: 'Окно оплаты открыто. Завершите оплату для активации подписки. После оплаты страница обновится автоматически.',
-          tariffName: subscriptionData.tariff.name,
-          devices: subscriptionData.devices || 1,
-          periodMonths: subscriptionData.periodMonths || 1
-        })
-        setShowSuccessModal(true)
         return
       }
       
@@ -554,226 +724,163 @@ const Dashboard = ({
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
             {hasSubscription ? (
               <div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-5 md:mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
                   <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">Текущая подписка</h2>
                   {currentUser?.uuid && onHandleDeleteSubscription && (
                     <button
                       onClick={() => setShowDeleteConfirm(true)}
                       disabled={deletingSubscription || creatingSubscription}
-                      className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-red-600/90 hover:bg-red-700 active:bg-red-800 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
+                      className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-red-600/90 hover:bg-red-700 active:bg-red-800 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
                       aria-label="Отменить подписку"
                     >
-                      <Trash2 className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                      <Trash2 className="w-4 h-4 flex-shrink-0" />
                       <span className="btn-text">{deletingSubscription ? 'Отмена...' : 'Отменить подписку'}</span>
                     </button>
                   )}
                 </div>
-                <div className="space-y-4 sm:space-y-5">
-                  {/* Основная карточка подписки - улучшенный дизайн */}
-                  <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-xl sm:rounded-2xl p-5 sm:p-6 md:p-8 border border-slate-700 shadow-lg">
-                    {/* Заголовок с тарифом и статусом */}
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-[clamp(1.5rem,1.3rem+1vw,2rem)] font-bold text-white">{currentUser.tariffName || 'Не указан'}</h3>
-                          {currentUser.tariffName?.toLowerCase() === 'super' && (
-                            <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-blue-600 text-white text-xs sm:text-sm font-bold rounded-full">PREMIUM</span>
-                          )}
-                        </div>
-                        <div className={`inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg ${userStatus.color} font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]`}>
-                          {userStatus.status === 'active' && <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />}
-                          {userStatus.status === 'expired' && <XCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />}
-                          {userStatus.status === 'unpaid' && <XCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />}
-                          {userStatus.status === 'test_period' && <Clock className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />}
-                          {userStatus.status === 'no-key' && <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />}
+                <div className="space-y-3">
+                  {/* Основная карточка подписки - компактный дизайн */}
+                  <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-lg sm:rounded-xl p-4 sm:p-5 border border-slate-700">
+                    {/* Заголовок с тарифом и статусом - компактная версия */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
+                      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                        <h3 className="text-[clamp(1.25rem,1.15rem+0.5vw,1.5rem)] font-bold text-white">{currentUser.tariffName || 'Не указан'}</h3>
+                        {currentUser.tariffName?.toLowerCase() === 'super' && (
+                          <span className="px-2 py-0.5 bg-blue-600 text-white text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] font-bold rounded-full">PREMIUM</span>
+                        )}
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg ${userStatus.color} font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]`}>
+                          {userStatus.status === 'active' && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                          {userStatus.status === 'expired' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
+                          {userStatus.status === 'unpaid' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
+                          {userStatus.status === 'test_period' && <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
+                          {userStatus.status === 'no-key' && <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />}
                           <span>{userStatus.label}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Информационные блоки в сетке */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 mb-6">
-                      {/* Количество устройств */}
-                      <div className="bg-slate-900/50 rounded-xl p-4 sm:p-5 border border-slate-700">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Smartphone className="w-5 h-5 text-blue-400 flex-shrink-0" />
-                          <p className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] font-medium">Устройств</p>
+                    {/* Компактная сетка метрик */}
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
+                      {/* Устройств */}
+                      <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
+                        <div className="flex items-center justify-center gap-1.5 mb-1">
+                          <Smartphone className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                          <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">Устройств</p>
                         </div>
-                        <p className="text-white font-bold text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)]">
+                        <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
                           {currentUser.devices || currentTariff?.devices || 1}
                         </p>
                       </div>
 
-                      {/* Период */}
-                      {currentUser.periodMonths && (
-                        <div className="bg-slate-900/50 rounded-xl p-4 sm:p-5 border border-slate-700">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Calendar className="w-5 h-5 text-green-400 flex-shrink-0" />
-                            <p className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] font-medium">Период</p>
+                      {/* Период или Трафик */}
+                      {currentUser.periodMonths ? (
+                        <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <Calendar className="w-4 h-4 text-green-400 flex-shrink-0" />
+                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">Период</p>
                           </div>
-                          <p className="text-white font-bold text-[clamp(1.125rem,1rem+0.625vw,1.5rem)]">
-                            {currentUser.periodMonths} {currentUser.periodMonths === 1 ? 'месяц' : currentUser.periodMonths < 5 ? 'месяца' : 'месяцев'}
+                          <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
+                            {currentUser.periodMonths} {currentUser.periodMonths === 1 ? 'мес' : 'мес'}
                           </p>
                         </div>
+                      ) : (
+                        (currentTariff || currentUser?.paymentStatus) && (
+                          <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
+                            <div className="flex items-center justify-center gap-1.5 mb-1">
+                              <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+                              <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">Трафик</p>
+                            </div>
+                            <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
+                              {currentUser?.paymentStatus === 'test_period' ? '3 GB' :
+                               currentTariff?.trafficGB > 0 ? `${currentTariff.trafficGB} GB` : '∞'}
+                            </p>
+                          </div>
+                        )
                       )}
 
-                      {/* Трафик */}
-                      {(currentTariff || currentUser?.paymentStatus) && (
-                        <div className="bg-slate-900/50 rounded-xl p-4 sm:p-5 border border-slate-700">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Zap className="w-5 h-5 text-yellow-400 flex-shrink-0" />
-                            <p className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] font-medium">Трафик</p>
+                      {/* Трафик или пустой */}
+                      {(currentTariff || currentUser?.paymentStatus) && currentUser.periodMonths && (
+                        <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">Трафик</p>
                           </div>
-                          <p className="text-white font-bold text-[clamp(1.125rem,1rem+0.625vw,1.5rem)]">
-                            {(() => {
-                              // Для тестового периода всегда показываем 3 GB
-                              if (currentUser?.paymentStatus === 'test_period') {
-                                return '3 GB'
-                              }
-                              
-                              // Для оплаченного периода берем значение из тарифа
-                              // Проверяем, что тариф найден и имеет trafficGB
-                              if (currentTariff) {
-                                // Если trafficGB указан и больше 0, показываем его
-                                if (currentTariff.trafficGB && currentTariff.trafficGB > 0) {
-                                  return `${currentTariff.trafficGB} GB`
-                                }
-                                // Если trafficGB равен 0 или не указан, показываем "Безлимит"
-                                return 'Безлимит'
-                              }
-                              
-                              // Если тариф не найден, но есть tariffId, показываем "Безлимит" (fallback)
-                              // Это может произойти, если тариф еще не загружен или был удален
-                              if (currentUser?.tariffId) {
-                                logger.warn('Dashboard', 'Тариф не найден для tariffId', {
-                                  tariffId: currentUser.tariffId,
-                                  availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-                                })
-                                return 'Безлимит'
-                              }
-                              
-                              // Если нет ни тарифа, ни tariffId, показываем "Безлимит"
-                              return 'Безлимит'
-                            })()}
+                          <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
+                            {currentUser?.paymentStatus === 'test_period' ? '3 GB' :
+                             currentTariff?.trafficGB > 0 ? `${currentTariff.trafficGB} GB` : '∞'}
                           </p>
                         </div>
                       )}
                     </div>
 
-                    {/* Дополнительная информация */}
-                    <div className="space-y-3 sm:space-y-4">
-                      {/* Дата окончания */}
+                    {/* Компактная строка с датой и статусом оплаты */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-2.5 sm:p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-3">
                       {currentUser.expiresAt && (
-                        <div className="flex items-start sm:items-center gap-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
-                          <Calendar className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5 sm:mt-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mb-1">Действует до</p>
-                            <p className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Calendar className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">До</p>
+                            <p className="text-white font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] truncate">
                               {formatDate(currentUser.expiresAt)}
                             </p>
-                            {new Date(currentUser.expiresAt) > new Date() && (
-                              <p className="text-slate-500 text-xs mt-1">
-                                Осталось: {Math.ceil((new Date(currentUser.expiresAt) - new Date()) / (1000 * 60 * 60 * 24))} дней
-                              </p>
-                            )}
                           </div>
                         </div>
                       )}
-
-                      {/* Статус оплаты */}
-                      <div className="flex items-start sm:items-center gap-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
-                        <CreditCard className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5 sm:mt-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mb-1">Статус оплаты</p>
-                          <p className={`font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <CreditCard className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">Оплата</p>
+                          <p className={`font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] ${
                             currentUser.paymentStatus === 'paid' ? 'text-green-400' :
                             currentUser.paymentStatus === 'test_period' ? 'text-yellow-400' :
                             currentUser.paymentStatus === 'unpaid' ? 'text-red-400' :
                             'text-slate-300'
                           }`}>
                             {currentUser.paymentStatus === 'paid' ? 'Оплачено' : 
-                             currentUser.paymentStatus === 'test_period' ? 'Тестовый период' :
+                             currentUser.paymentStatus === 'test_period' ? 'Тест' :
                              currentUser.paymentStatus === 'unpaid' ? 'Не оплачено' : 
-                             'Не указан'}
+                             '—'}
                           </p>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Предупреждения и уведомления */}
+                    {/* Компактные предупреждения */}
+                    <div className="space-y-2 sm:space-y-2.5">
                       {currentUser?.paymentStatus === 'test_period' && currentUser?.testPeriodEndDate && (
-                        <div className="p-4 bg-yellow-900/20 border border-yellow-800/50 rounded-xl">
-                          <div className="flex items-start gap-3">
-                            <Clock className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-yellow-400 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mb-1">Тестовый период активен</p>
-                              <p className="text-yellow-300/90 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                                Окончание: {formatDate(currentUser.testPeriodEndDate)}
-                              </p>
-                              <p className="text-yellow-300/70 text-xs mt-2 mb-3">
-                                После окончания тестового периода подписка будет приостановлена до оплаты
-                              </p>
+                        <div className="p-2.5 sm:p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-yellow-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">Тест до {formatDate(currentUser.testPeriodEndDate)}</p>
+                                <p className="text-yellow-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">После окончания подписка приостановится</p>
+                              </div>
                               {onHandleRenewSubscription && (
                                 <button
                                   onClick={async () => {
-                                    // Показываем модальное окно обработки платежа
                                     setPaymentProcessingMessage('Вызываем главного бухгалтера...')
                                     setShowPaymentProcessing(true)
-                                    
                                     try {
                                       const result = await onHandleRenewSubscription()
-                                      
-                                      // Закрываем модальное окно обработки платежа
                                       setShowPaymentProcessing(false)
-                                      
-                                      // Если результат содержит ссылку на оплату, открываем её в miniapp
                                       if (result && result.paymentUrl && result.requiresPayment) {
-                                        const windowFeatures = [
-                                          'width=400',
-                                          'height=700',
-                                          'left=' + (window.screen.width / 2 - 200),
-                                          'top=' + (window.screen.height / 2 - 350),
-                                          'resizable=yes',
-                                          'scrollbars=yes',
-                                          'status=no',
-                                          'toolbar=no',
-                                          'menubar=no',
-                                          'location=no'
-                                        ].join(',')
-                                        
-                                        const paymentWindow = window.open(
-                                          result.paymentUrl, 
-                                          'payment_miniapp',
-                                          windowFeatures
-                                        )
-                                        
-                                        if (paymentWindow) {
-                                          paymentWindow.focus()
-                                        }
-                                        
-                                        setSubscriptionSuccess({
-                                          vpnLink: null,
-                                          paymentUrl: result.paymentUrl,
-                                          orderId: result.orderId,
-                                          amount: result.amount,
-                                          requiresPayment: true,
-                                          message: 'Окно оплаты открыто. Завершите оплату для активации подписки.',
-                                          tariffName: currentUser.tariffName || 'Не указан',
-                                          devices: currentUser.devices || 1,
-                                          periodMonths: currentUser.periodMonths || 1
-                                        })
+                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                                        if (paymentWindow) paymentWindow.focus()
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffName: currentUser.tariffName || 'Не указан', devices: currentUser.devices || 1, periodMonths: currentUser.periodMonths || 1 })
                                         setShowSuccessModal(true)
                                       }
                                     } catch (error) {
                                       setShowPaymentProcessing(false)
-                                      // Ошибка будет обработана в onHandleRenewSubscription
                                     }
                                   }}
                                   disabled={creatingSubscription || showPaymentProcessing}
-                                  className="min-h-[40px] px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 touch-manipulation"
+                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
                                   aria-label="Оплатить подписку"
                                 >
-                                  <CreditCard className="w-4 h-4 flex-shrink-0" />
-                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить подписку'}</span>
+                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
                                 </button>
                               )}
                             </div>
@@ -781,368 +888,128 @@ const Dashboard = ({
                         </div>
                       )}
                       {currentUser?.paymentStatus === 'unpaid' && (() => {
-                        // Вычисляем количество дней неоплаты
                         const unpaidStartDate = currentUser.unpaidStartDate || currentUser.testPeriodEndDate
-                        const daysUnpaid = unpaidStartDate 
-                          ? Math.floor((Date.now() - new Date(unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000))
-                          : 0
-                        const daysLeft = 5 - daysUnpaid
-                        const isExpiringSoon = daysLeft <= 2 && daysLeft > 0
-                        const isExpired = daysLeft <= 0
+                      const daysUnpaid = unpaidStartDate 
+                        ? Math.floor((Date.now() - new Date(unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000))
+                        : 0
+                      const daysLeft = 5 - daysUnpaid
+                      const isExpiringSoon = daysLeft <= 2 && daysLeft > 0
+                      const isExpired = daysLeft <= 0
 
-                        return (
-                          <div className={`p-4 border rounded-xl ${isExpired || isExpiringSoon ? 'bg-red-900/30 border-red-800/70' : 'bg-red-900/20 border-red-800/50'}`}>
-                            <div className="flex items-start gap-3">
-                              <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isExpired || isExpiringSoon ? 'text-red-400 animate-pulse' : 'text-red-400'}`} />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-red-400 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mb-1">
-                                  {isExpired ? 'Подписка будет удалена' : 'Требуется оплата'}
-                                </p>
-                                <p className="text-red-300/90 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mb-2">
-                                  {isExpired 
-                                    ? 'Прошло более 5 дней с момента неоплаты. Подписка будет удалена автоматически.'
-                                    : `Необходимо произвести оплату. Осталось ${daysLeft} ${daysLeft === 1 ? 'день' : daysLeft < 5 ? 'дня' : 'дней'} до удаления подписки.`
-                                  }
+                      return (
+                        <div className={`p-2.5 sm:p-3 border rounded-lg ${isExpired || isExpiringSoon ? 'bg-red-900/30 border-red-800/70' : 'bg-red-900/20 border-red-800/50'}`}>
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${isExpired || isExpiringSoon ? 'text-red-400 animate-pulse' : 'text-red-400'}`} />
+                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-red-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+                                  {isExpired ? 'Подписка будет удалена' : `Требуется оплата (${daysLeft} ${daysLeft === 1 ? 'день' : daysLeft < 5 ? 'дня' : 'дней'})`}
                                 </p>
                                 {!isExpired && (
-                                  <button
-                                    onClick={async () => {
-                                      // Показываем модальное окно обработки платежа
-                                      setPaymentProcessingMessage('Вызываем главного бухгалтера...')
-                                      setShowPaymentProcessing(true)
-                                      
-                                      try {
-                                        const result = await onHandleRenewSubscription()
-                                        
-                                        // Закрываем модальное окно обработки платежа
-                                        setShowPaymentProcessing(false)
-                                        
-                                        // Если результат содержит ссылку на оплату, открываем её в miniapp
-                                        if (result && result.paymentUrl && result.requiresPayment) {
-                                          const windowFeatures = [
-                                            'width=400',
-                                            'height=700',
-                                            'left=' + (window.screen.width / 2 - 200),
-                                            'top=' + (window.screen.height / 2 - 350),
-                                            'resizable=yes',
-                                            'scrollbars=yes',
-                                            'status=no',
-                                            'toolbar=no',
-                                            'menubar=no',
-                                            'location=no'
-                                          ].join(',')
-                                          
-                                          const paymentWindow = window.open(
-                                            result.paymentUrl, 
-                                            'payment_miniapp',
-                                            windowFeatures
-                                          )
-                                          
-                                          if (paymentWindow) {
-                                            paymentWindow.focus()
-                                            
-                                            // Сохраняем ссылку на окно и orderId для отслеживания
-                                            setPaymentWindowRef(paymentWindow)
-                                            setPaymentOrderId(result.orderId)
-                                            
-                                            logger.info('Dashboard', 'Окно оплаты открыто (тестовый период), начинаем отслеживание', {
-                                              orderId: result.orderId,
-                                              paymentUrl: result.paymentUrl
-                                            })
-                                          }
-                                          
-                                          setSubscriptionSuccess({
-                                            vpnLink: null,
-                                            paymentUrl: result.paymentUrl,
-                                            orderId: result.orderId,
-                                            amount: result.amount,
-                                            requiresPayment: true,
-                                            message: 'Окно оплаты открыто. Завершите оплату для активации подписки. После оплаты страница обновится автоматически.',
-                                            tariffName: currentUser.tariffName || 'Не указан',
-                                            devices: currentUser.devices || 1,
-                                            periodMonths: currentUser.periodMonths || 1
-                                          })
-                                          setShowSuccessModal(true)
-                                        }
-                                      } catch (error) {
-                                        setShowPaymentProcessing(false)
-                                        // Ошибка будет обработана в onHandleRenewSubscription
-                                      }
-                                    }}
-                                    disabled={creatingSubscription || showPaymentProcessing}
-                                    className="mt-2 min-h-[40px] px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 touch-manipulation"
-                                    aria-label="Оплатить подписку"
-                                  >
-                                    <CreditCard className="w-4 h-4 flex-shrink-0" />
-                                    <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить подписку'}</span>
-                                  </button>
+                                  <p className="text-red-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
+                                    Необходимо произвести оплату для продолжения
+                                  </p>
                                 )}
                               </div>
+                              {!isExpired && (
+                                <button
+                                  onClick={async () => {
+                                    setPaymentProcessingMessage('Вызываем главного бухгалтера...')
+                                    setShowPaymentProcessing(true)
+                                    try {
+                                      const result = await onHandleRenewSubscription()
+                                      setShowPaymentProcessing(false)
+                                      if (result && result.paymentUrl && result.requiresPayment) {
+                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                                        if (paymentWindow) {
+                                          paymentWindow.focus()
+                                          setPaymentWindowRef(paymentWindow)
+                                          setPaymentOrderId(result.orderId)
+                                          logger.info('Dashboard', 'Окно оплаты открыто (unpaid), начинаем отслеживание', { orderId: result.orderId, paymentUrl: result.paymentUrl })
+                                        }
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffName: currentUser.tariffName || 'Не указан', devices: currentUser.devices || 1, periodMonths: currentUser.periodMonths || 1 })
+                                        setShowSuccessModal(true)
+                                      }
+                                    } catch (error) {
+                                      setShowPaymentProcessing(false)
+                                    }
+                                  }}
+                                  disabled={creatingSubscription || showPaymentProcessing}
+                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
+                                  aria-label="Оплатить подписку"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
+                                </button>
+                              )}
                             </div>
                           </div>
-                        )
-                      })()}
+                        </div>
+                      )
+                    })()}
                     </div>
 
-                    {/* Блок управления подключением */}
-                    <div className="mt-6 p-5 bg-slate-900/50 rounded-xl border border-slate-700">
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-                        <div>
-                          <p className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mb-1">UUID / Ключ подключения</p>
-                          {currentUser.uuid && (
-                            <p className="text-slate-500 text-xs">Ваш уникальный идентификатор для VPN подключения</p>
-                          )}
-                        </div>
-                        {currentUser.uuid ? (
-                          <button
-                            onClick={() => onSetShowKeyModal(true)}
-                            className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
-                            aria-label="Показать конфигурацию"
-                          >
-                            <Globe className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                            <span className="btn-text">Показать конфигурацию</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={onGetKey}
-                            className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
-                            aria-label="Получить ключ"
-                          >
-                            <Shield className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                            <span className="btn-text">Получить ключ</span>
-                          </button>
-                        )}
-                      </div>
-                      {currentUser.uuid && (
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <code className="flex-1 bg-slate-950 p-3 sm:p-4 rounded-lg text-slate-300 text-xs sm:text-sm font-mono break-all min-w-0 border border-slate-800">
-                            {currentUser.uuid}
-                          </code>
-                          <button
-                            onClick={() => onCopy(currentUser.uuid)}
-                            className="btn-icon-only-mobile min-h-[44px] min-w-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center touch-manipulation sm:w-auto w-full"
-                            title="Копировать UUID"
-                            aria-label="Копировать UUID"
-                          >
-                            <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
-                            <span className="btn-text sm:hidden ml-2">Копировать</span>
-                          </button>
-                        </div>
+                    {/* Компактный блок управления подключением */}
+                    <div className="mt-3 p-2.5 sm:p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 flex items-center justify-center">
+                      {currentUser.uuid ? (
+                        <button
+                          onClick={() => onSetShowKeyModal(true)}
+                          className="btn-icon-only-mobile min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
+                          aria-label="Конфигурация"
+                        >
+                          <Globe className="w-4 h-4 flex-shrink-0" />
+                          <span className="btn-text">Конфигурация</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={onGetKey}
+                          className="btn-icon-only-mobile min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
+                          aria-label="Получить ключ"
+                        >
+                          <Shield className="w-4 h-4 flex-shrink-0" />
+                          <span className="btn-text">Получить ключ</span>
+                        </button>
                       )}
                     </div>
 
-                    {/* Кнопки действий */}
-                    <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                      {userStatus.status === 'expired' && (
+                    {/* Компактная кнопка продления для expired статуса */}
+                    {userStatus.status === 'expired' && (
+                      <div className="mt-3">
                         <button
                           onClick={async () => {
-                            // Показываем модальное окно обработки платежа
                             setPaymentProcessingMessage('Вызываем главного бухгалтера...')
                             setShowPaymentProcessing(true)
-                            
                             try {
                               const result = await onHandleRenewSubscription()
-                              
-                              // Закрываем модальное окно обработки платежа
                               setShowPaymentProcessing(false)
-                              
-                              // Если результат содержит ссылку на оплату, открываем её в miniapp
                               if (result && result.paymentUrl && result.requiresPayment) {
-                                const windowFeatures = [
-                                  'width=400',
-                                  'height=700',
-                                  'left=' + (window.screen.width / 2 - 200),
-                                  'top=' + (window.screen.height / 2 - 350),
-                                  'resizable=yes',
-                                  'scrollbars=yes',
-                                  'status=no',
-                                  'toolbar=no',
-                                  'menubar=no',
-                                  'location=no'
-                                ].join(',')
-                                
-                                const paymentWindow = window.open(
-                                  result.paymentUrl, 
-                                  'payment_miniapp',
-                                  windowFeatures
-                                )
-                                
-                                if (paymentWindow) {
-                                  paymentWindow.focus()
-                                }
-                                
-                                setSubscriptionSuccess({
-                                  vpnLink: null,
-                                  paymentUrl: result.paymentUrl,
-                                  orderId: result.orderId,
-                                  amount: result.amount,
-                                  requiresPayment: true,
-                                  message: 'Окно оплаты открыто. Завершите оплату для активации подписки.',
-                                  tariffName: currentUser.tariffName || 'Не указан',
-                                  devices: currentUser.devices || 1,
-                                  periodMonths: currentUser.periodMonths || 1
-                                })
+                                const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                                const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                                if (paymentWindow) paymentWindow.focus()
+                                setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffName: currentUser.tariffName || 'Не указан', devices: currentUser.devices || 1, periodMonths: currentUser.periodMonths || 1 })
                                 setShowSuccessModal(true)
                               }
                             } catch (error) {
                               setShowPaymentProcessing(false)
-                              // Ошибка будет обработана в onHandleRenewSubscription
                             }
                           }}
                           disabled={creatingSubscription || showPaymentProcessing}
-                          className="flex-1 min-h-[44px] px-5 sm:px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
+                          className="w-full min-h-[40px] px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
                           aria-label="Продлить подписку"
                         >
-                          <Calendar className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                          <Calendar className="w-4 h-4 flex-shrink-0" />
                           <span>{creatingSubscription || showPaymentProcessing ? 'Продление...' : 'Продлить подписку'}</span>
                         </button>
-                      )}
-                      {currentUser?.paymentStatus === 'unpaid' && (() => {
-                        const unpaidStartDate = currentUser.unpaidStartDate || currentUser.testPeriodEndDate
-                        const daysUnpaid = unpaidStartDate 
-                          ? Math.floor((Date.now() - new Date(unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000))
-                          : 0
-                        const daysLeft = 5 - daysUnpaid
-                        
-                        if (daysLeft > 0) {
-                          return (
-                            <button
-                              onClick={async () => {
-                                // Показываем модальное окно обработки платежа
-                                setPaymentProcessingMessage('Вызываем главного бухгалтера...')
-                                setShowPaymentProcessing(true)
-                                
-                                try {
-                                  const result = await onHandleRenewSubscription()
-                                  
-                                  // Закрываем модальное окно обработки платежа
-                                  setShowPaymentProcessing(false)
-                                  
-                                  // Если результат содержит ссылку на оплату, открываем её в miniapp
-                                  if (result && result.paymentUrl && result.requiresPayment) {
-                                    const windowFeatures = [
-                                      'width=400',
-                                      'height=700',
-                                      'left=' + (window.screen.width / 2 - 200),
-                                      'top=' + (window.screen.height / 2 - 350),
-                                      'resizable=yes',
-                                      'scrollbars=yes',
-                                      'status=no',
-                                      'toolbar=no',
-                                      'menubar=no',
-                                      'location=no'
-                                    ].join(',')
-                                    
-                                    const paymentWindow = window.open(
-                                      result.paymentUrl, 
-                                      'payment_miniapp',
-                                      windowFeatures
-                                    )
-                                    
-                                    if (paymentWindow) {
-                                      paymentWindow.focus()
-                                    }
-                                    
-                                    setSubscriptionSuccess({
-                                      vpnLink: null,
-                                      paymentUrl: result.paymentUrl,
-                                      orderId: result.orderId,
-                                      amount: result.amount,
-                                      requiresPayment: true,
-                                      message: 'Окно оплаты открыто. Завершите оплату для активации подписки.',
-                                      tariffName: currentUser.tariffName || 'Не указан',
-                                      devices: currentUser.devices || 1,
-                                      periodMonths: currentUser.periodMonths || 1
-                                    })
-                                    setShowSuccessModal(true)
-                                  }
-                                } catch (error) {
-                                  setShowPaymentProcessing(false)
-                                  // Ошибка будет обработана в onHandleRenewSubscription
-                                }
-                              }}
-                              disabled={creatingSubscription || showPaymentProcessing}
-                              className="flex-1 min-h-[44px] px-5 sm:px-6 py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
-                              aria-label="Оплатить подписку"
-                            >
-                              <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                              <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить подписку'}</span>
-                            </button>
-                          )
-                        }
-                        return null
-                      })()}
-                    </div>
+                      </div>
+                    )}
                   </div>
-                  {userStatus.status === 'expired' && (
-                    <button
-                      onClick={async () => {
-                        // Показываем модальное окно обработки платежа
-                        setPaymentProcessingMessage('Вызываем главного бухгалтера...')
-                        setShowPaymentProcessing(true)
-                        
-                        try {
-                          const result = await onHandleRenewSubscription()
-                          
-                          // Закрываем модальное окно обработки платежа
-                          setShowPaymentProcessing(false)
-                          
-                          // Если результат содержит ссылку на оплату, открываем её в miniapp
-                          if (result && result.paymentUrl && result.requiresPayment) {
-                            const windowFeatures = [
-                              'width=400',
-                              'height=700',
-                              'left=' + (window.screen.width / 2 - 200),
-                              'top=' + (window.screen.height / 2 - 350),
-                              'resizable=yes',
-                              'scrollbars=yes',
-                              'status=no',
-                              'toolbar=no',
-                              'menubar=no',
-                              'location=no'
-                            ].join(',')
-                            
-                            const paymentWindow = window.open(
-                              result.paymentUrl, 
-                              'payment_miniapp',
-                              windowFeatures
-                            )
-                            
-                            if (paymentWindow) {
-                              paymentWindow.focus()
-                            }
-                            
-                            setSubscriptionSuccess({
-                              vpnLink: null,
-                              paymentUrl: result.paymentUrl,
-                              orderId: result.orderId,
-                              amount: result.amount,
-                              requiresPayment: true,
-                              message: 'Окно оплаты открыто. Завершите оплату для активации подписки.',
-                              tariffName: currentUser.tariffName || 'Не указан',
-                              devices: currentUser.devices || 1,
-                              periodMonths: currentUser.periodMonths || 1
-                            })
-                            setShowSuccessModal(true)
-                          }
-                        } catch (error) {
-                          setShowPaymentProcessing(false)
-                          // Ошибка будет обработана в onHandleRenewSubscription
-                        }
-                      }}
-                      disabled={creatingSubscription || showPaymentProcessing}
-                      className="w-full min-h-[44px] px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                      aria-label="Продлить подписку"
-                    >
-                      {creatingSubscription || showPaymentProcessing ? 'Продление...' : 'Продлить подписку'}
-                    </button>
-                  )}
                 </div>
               </div>
             ) : (
               <div>
-                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-3 sm:mb-4 md:mb-5">Выберите тариф</h2>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 md:gap-6">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-3 sm:mb-4">Выберите тариф</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {tariffs.filter(t => t.active && (t.name === 'Super' || t.name === 'MULTI')).map((tariff) => {
                     // Определяем характеристики для каждого тарифа
                     const isSuper = tariff.name === 'Super'
@@ -1159,21 +1026,21 @@ const Dashboard = ({
                         ]
                     
                     return (
-                      <div key={tariff.id} className="bg-slate-800 rounded-lg sm:rounded-xl p-5 sm:p-6 border border-slate-700 flex flex-col">
-                        <div className="flex items-center justify-between mb-4 sm:mb-5">
-                          <h3 className="text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] font-bold text-white">{tariff.name}</h3>
+                      <div key={tariff.id} className="bg-slate-800 rounded-lg sm:rounded-xl p-4 sm:p-5 border border-slate-700 flex flex-col">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-[clamp(1.25rem,1.15rem+0.5vw,1.75rem)] font-bold text-white">{tariff.name}</h3>
                           {isSuper && (
-                            <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-blue-600 text-white text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] font-bold rounded-full">ХИТ</span>
+                            <span className="px-2 py-1 bg-blue-600 text-white text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs font-bold rounded-full">ХИТ</span>
                           )}
                         </div>
-                        <div className="mb-4 sm:mb-5">
-                          <span className="text-[clamp(2rem,1.8rem+1vw,3rem)] font-bold text-blue-400">{tariff.price}</span>
-                          <span className="text-slate-400 ml-2 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">₽/мес</span>
+                        <div className="mb-3 sm:mb-4">
+                          <span className="text-[clamp(1.5rem,1.4rem+0.5vw,2rem)] font-bold text-blue-400">{tariff.price}</span>
+                          <span className="text-slate-400 ml-1.5 sm:ml-2 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">₽/мес</span>
                         </div>
-                        <ul className="space-y-2 sm:space-y-2.5 mb-6 sm:mb-7 flex-1">
+                        <ul className="space-y-1.5 sm:space-y-2 mb-4 sm:mb-5 flex-1">
                           {features.map((feature, index) => (
                             <li key={index} className="flex items-center gap-2 text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
-                              <Check className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 flex-shrink-0" />
+                              <Check className="w-4 h-4 text-blue-400 flex-shrink-0" />
                               <span>{feature}</span>
                             </li>
                           ))}
@@ -1181,7 +1048,7 @@ const Dashboard = ({
                         <button
                           onClick={() => handleTariffSelect(tariff)}
                           disabled={creatingSubscription}
-                          className="w-full min-h-[44px] px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation mt-auto"
+                          className="w-full min-h-[44px] px-4 sm:px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation mt-auto"
                           aria-label={`Выбрать тариф ${tariff.name}`}
                         >
                           Выбрать {tariff.name === 'Super' ? 'Super' : tariff.name}
@@ -1214,7 +1081,38 @@ const Dashboard = ({
               </div>
 
               <div>
-                <label htmlFor="profile-name" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Имя</label>
+                <label htmlFor="profile-subid" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">SubId (ID подписки)</label>
+                {currentUser.subId ? (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      key="profile-subid-input-disabled"
+                      id="profile-subid"
+                      name="profile-subid"
+                      type="text"
+                      value={currentUser.subId}
+                      disabled
+                      readOnly
+                      className="flex-1 min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-text font-mono text-sm sm:text-base"
+                    />
+                    <button
+                      onClick={() => onCopy(currentUser.subId)}
+                      className="min-h-[44px] min-w-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center touch-manipulation"
+                      title="Копировать SubId"
+                      aria-label="Копировать SubId"
+                    >
+                      <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-500 text-base flex items-center">
+                    <span>Не сгенерирован</span>
+                  </div>
+                )}
+                <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">Используется для формирования ссылки на подписку</p>
+              </div>
+
+              <div>
+                <label htmlFor={editingProfile ? "profile-name" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Имя</label>
                 {editingProfile ? (
                   <input
                     key="profile-name-input"
@@ -1235,7 +1133,7 @@ const Dashboard = ({
               </div>
 
               <div>
-                <label htmlFor="profile-phone" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Номер телефона</label>
+                <label htmlFor={editingProfile ? "profile-phone" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Номер телефона</label>
                 {editingProfile ? (
                   <input
                     key="profile-phone-input"
@@ -1403,6 +1301,7 @@ const Dashboard = ({
             isLoading={creatingSubscription}
             natrockPorts={settings?.natrockPorts || []}
             settings={settings}
+            servers={servers}
           />
         )}
 

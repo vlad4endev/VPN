@@ -118,6 +118,11 @@ export function useTariffs(tariffs, setTariffs, setError, setSuccess) {
     setEditingTariff(prev => prev ? { ...prev, active: newValue } : null)
   }, [])
 
+  const handleTariffSubscriptionLinkChange = useCallback((e) => {
+    const newValue = e.target.value
+    setEditingTariff(prev => prev ? { ...prev, subscriptionLink: newValue } : null)
+  }, [])
+
   return {
     editingTariff,
     setEditingTariff,
@@ -131,6 +136,7 @@ export function useTariffs(tariffs, setTariffs, setError, setSuccess) {
     handleTariffTrafficGBChange,
     handleTariffDurationDaysChange,
     handleTariffActiveChange,
+    handleTariffSubscriptionLinkChange,
   }
 }
 

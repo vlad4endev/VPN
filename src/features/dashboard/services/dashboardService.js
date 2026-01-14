@@ -2,6 +2,7 @@ import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, g
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import XUIService from '../../vpn/services/XUIService.js'
+import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import paymentService from '../../payment/services/paymentService.js'
 import logger from '../../../shared/utils/logger.js'
 
@@ -117,36 +118,79 @@ export const dashboardService = {
       // Удаляем клиента из 3x-ui, если есть UUID
       if (user.uuid) {
         try {
-          const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
-          if (inboundId) {
-            const xuiService = XUIService.getInstance()
+          const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
+          
+          // Получаем данные сервера для определения правильного inboundId
+          let serverInboundId = defaultInboundId
+          let activeServer = null
+          
+          try {
+            const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+            const settingsSnapshot = await getDoc(settingsDoc)
+            const settingsData = settingsSnapshot.exists() ? settingsSnapshot.data() : {}
+            const serversList = settingsData.servers || []
             
-            // Формируем категоризированные данные для n8n с маркировкой операции удаления
-            const deleteData = {
-              operation: 'delete_client',
-              category: 'delete_client',
-              timestamp: new Date().toISOString(),
+            // Ищем сервер, привязанный к тарифу пользователя (если есть tariffId)
+            if (user.tariffId) {
+              const serversForTariff = serversList.filter(server => {
+                if (server.tariffIds && server.tariffIds.length > 0) {
+                  return server.tariffIds.includes(user.tariffId)
+                }
+                return true
+              })
               
-              // Базовые данные
-              userId: user.id,
-              userUuid: user.uuid,
-              userName: user.name || user.email?.split('@')[0] || 'User',
-              userEmail: user.email,
+              activeServer = serversForTariff.find(s => s.active && s.id)
               
-              // Данные для 3x-ui
-              inboundId: parseInt(inboundId),
-              email: user.email,
+              if (activeServer && activeServer.xuiInboundId) {
+                serverInboundId = activeServer.xuiInboundId
+                logger.info('Dashboard', 'Найден сервер для тарифа при удалении аккаунта', {
+                  tariffId: user.tariffId,
+                  serverId: activeServer.id,
+                  inboundId: serverInboundId
+                })
+              }
             }
             
-            // Загружаем webhook URL из Firestore и передаем в запрос
-            const webhookUrl = await loadWebhookUrl()
-            if (webhookUrl) {
-              deleteData.webhookUrl = webhookUrl
+            // Если не нашли сервер для тарифа, используем первый активный сервер
+            if (!activeServer) {
+              activeServer = serversList.find(s => s.active && s.id)
+              if (activeServer && activeServer.xuiInboundId) {
+                serverInboundId = activeServer.xuiInboundId
+              }
             }
-            
-            await xuiService.deleteClient(deleteData)
-            logger.info('Dashboard', 'Клиент удален из 3x-ui', { email: user.email })
+          } catch (serverError) {
+            logger.warn('Dashboard', 'Ошибка получения сервера при удалении аккаунта, используем дефолтный inboundId', {
+              error: serverError.message
+            })
           }
+          
+          const xuiService = XUIService.getInstance()
+
+          // Формируем категоризированные данные для n8n с маркировкой операции удаления
+          const deleteData = {
+            operation: 'delete_client',
+            category: 'delete_client',
+            timestamp: new Date().toISOString(),
+
+            // Базовые данные
+            userId: user.id,
+            userUuid: user.uuid,
+            userName: user.name || user.email?.split('@')[0] || 'User',
+            userEmail: user.email,
+
+            // Данные для 3x-ui
+            inboundId: parseInt(serverInboundId),
+            email: user.email,
+          }
+          
+          // Загружаем webhook URL из Firestore и передаем в запрос
+          const webhookUrl = await loadWebhookUrl()
+          if (webhookUrl) {
+            deleteData.webhookUrl = webhookUrl
+          }
+          
+          await xuiService.deleteClient(deleteData)
+          logger.info('Dashboard', 'Клиент удален из 3x-ui', { email: user.email })
         } catch (err) {
           logger.warn('Dashboard', 'Ошибка удаления клиента из 3x-ui', { email: user.email }, err)
           // Продолжаем удаление даже если не удалось удалить из 3x-ui
@@ -332,6 +376,7 @@ export const dashboardService = {
     }
 
     // Получаем активный сервер с сохраненной сессией и inboundId из настроек сервера
+    // ВАЖНО: Ищем сервер, привязанный к тарифу пользователя (SUPER или MULTI)
     let serverId = null
     let sessionCookie = null
     let serverIP = null
@@ -348,11 +393,31 @@ export const dashboardService = {
       const serversList = settingsData.servers || []
       
       logger.info('Dashboard', 'Поиск сервера с сессией для getKey', { 
-        totalServers: serversList.length
+        totalServers: serversList.length,
+        userTariffId: user.tariffId
       })
       
-      // Ищем сервер с активной сессией
-      for (const server of serversList) {
+      // Ищем сервер, привязанный к тарифу пользователя (если есть tariffId)
+      let serversToCheck = serversList
+      if (user.tariffId) {
+        serversToCheck = serversList.filter(server => {
+          // Если у сервера есть привязка к тарифам, проверяем, есть ли наш тариф
+          if (server.tariffIds && server.tariffIds.length > 0) {
+            return server.tariffIds.includes(user.tariffId)
+          }
+          // Если привязки нет - сервер подходит для всех тарифов
+          return true
+        })
+        
+        logger.info('Dashboard', 'Фильтрация серверов по тарифу для getKey', {
+          tariffId: user.tariffId,
+          filteredServers: serversToCheck.length,
+          totalServers: serversList.length
+        })
+      }
+      
+      // Ищем сервер с активной сессией среди серверов для этого тарифа
+      for (const server of serversToCheck) {
         if (server.active && server.sessionCookie && server.sessionCookieReceivedAt) {
           // Проверяем, не истекла ли сессия (обычно сессия 3x-ui живет 1 час)
           const sessionAge = Date.now() - new Date(server.sessionCookieReceivedAt).getTime()
@@ -367,10 +432,12 @@ export const dashboardService = {
             protocol = server.protocol || (server.serverPort === 443 || server.serverPort === 40919 ? 'https' : 'http')
             serverInboundId = server.xuiInboundId || inboundId // Используем inboundId из настроек сервера
             
-            logger.info('Dashboard', 'Найден активный сервер с сессией', { 
+            logger.info('Dashboard', 'Найден активный сервер с сессией для getKey', { 
               serverId,
               serverName: server.name,
               serverInboundId,
+              tariffId: user.tariffId,
+              tariffIds: server.tariffIds,
               sessionAge: Math.round(sessionAge / 1000 / 60) + ' минут'
             })
             break
@@ -384,8 +451,39 @@ export const dashboardService = {
         }
       }
       
-      if (!serverId || !sessionCookie || !serverIP || !serverPort) {
-        throw new Error('Не найден активный сервер с сохраненной сессией. Выполните тест сессии в настройках сервера.')
+      // Если не нашли сервер с сессией для тарифа, ищем любой активный сервер с credentials
+      if (!serverId) {
+        logger.warn('Dashboard', 'Сервер с сессией для тарифа не найден, ищем любой активный сервер', {
+          tariffId: user.tariffId
+        })
+        
+        for (const server of serversToCheck) {
+          const isActive = server.active !== false
+          const hasCredentials = server.xuiUsername && server.xuiPassword
+          const hasServerInfo = server.serverIP && server.serverPort
+          
+          if (isActive && hasCredentials && hasServerInfo) {
+            serverId = server.id
+            serverIP = server.serverIP
+            serverPort = server.serverPort
+            randompath = server.randompath
+            protocol = server.protocol || (server.serverPort === 443 || server.serverPort === 40919 ? 'https' : 'http')
+            serverInboundId = server.xuiInboundId || inboundId
+            
+            logger.info('Dashboard', 'Найден активный сервер с credentials для getKey (сессия будет получена автоматически)', {
+              serverId,
+              serverName: server.name,
+              serverInboundId,
+              tariffId: user.tariffId,
+              tariffIds: server.tariffIds
+            })
+            break
+          }
+        }
+      }
+      
+      if (!serverId || !serverIP || !serverPort) {
+        throw new Error('Не найден активный сервер с сохраненной сессией или учетными данными для данного тарифа. Выполните тест сессии в настройках сервера.')
       }
     } catch (err) {
       logger.error('Dashboard', 'Ошибка получения сервера с сессией', null, err)
@@ -467,7 +565,7 @@ export const dashboardService = {
       })
 
       // Генерируем ссылку на подписку вместо UUID
-      // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
+      // Формат: https://subs.skypath.fun:3458/vk198/{SUBID} или из тарифа
       const finalSubId = user.subId || ''
       if (!finalSubId) {
         logger.error('Dashboard', 'У пользователя отсутствует subId, невозможно сгенерировать ссылку подписки', {
@@ -477,7 +575,40 @@ export const dashboardService = {
         throw new Error('Отсутствует subId пользователя. Обратитесь к администратору.')
       }
       
-      const subscriptionLink = `https://subs.skypath.fun:3458/vk198/${finalSubId}`
+      // Загружаем тариф пользователя, если он есть, чтобы использовать ссылку из тарифа
+      let subscriptionLink
+      if (user.tariffId) {
+        try {
+          const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+          const tariffSnapshot = await getDoc(tariffDoc)
+          if (tariffSnapshot.exists()) {
+            const tariff = tariffSnapshot.data()
+            if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
+              // Убираем завершающий слэш, если есть, и добавляем subId
+              const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
+              subscriptionLink = `${baseLink}/${finalSubId}`
+              logger.info('Dashboard', 'Использована ссылка из тарифа для getKey', {
+                tariffId: user.tariffId,
+                baseLink: tariff.subscriptionLink,
+                finalLink: subscriptionLink
+              })
+            }
+          }
+        } catch (tariffError) {
+          logger.warn('Dashboard', 'Ошибка загрузки тарифа для getKey, используем дефолтную ссылку', {
+            tariffId: user.tariffId
+          }, tariffError)
+        }
+      }
+      
+      // Если ссылка из тарифа не получена, используем дефолтную
+      if (!subscriptionLink) {
+        subscriptionLink = `https://subs.skypath.fun:3458/vk198/${finalSubId}`
+        logger.info('Dashboard', 'Использована дефолтная ссылка подписки для getKey', {
+          subscriptionLink
+        })
+      }
+      
       logger.info('Dashboard', 'Ссылка на подписку сгенерирована для getKey', {
         userId: user.id,
         email: user.email,
@@ -517,6 +648,70 @@ export const dashboardService = {
         discount
       })
 
+      // Проверяем существующие платежи со статусом 'pending' для этого пользователя
+      try {
+        const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+        const pendingQuery = query(
+          paymentsCollection,
+          where('userId', '==', user.id),
+          where('status', '==', 'pending')
+        )
+        const pendingSnapshot = await getDocs(pendingQuery)
+        
+        if (!pendingSnapshot.empty) {
+          const pendingPayments = []
+          pendingSnapshot.forEach((docSnapshot) => {
+            pendingPayments.push({
+              id: docSnapshot.id,
+              ...docSnapshot.data(),
+            })
+          })
+          
+          // Сортируем по дате создания (новые сначала)
+          pendingPayments.sort((a, b) => {
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+            return dateB - dateA
+          })
+          
+          const latestPending = pendingPayments[0]
+          
+          logger.info('Dashboard', 'Найдены существующие платежи со статусом pending', {
+            userId: user.id,
+            count: pendingPayments.length,
+            latestOrderId: latestPending.orderId,
+            latestCreatedAt: latestPending.createdAt
+          })
+          
+          // Возвращаем существующий платеж, если он был создан недавно (менее 24 часов назад)
+          const paymentAge = latestPending.createdAt 
+            ? (Date.now() - new Date(latestPending.createdAt).getTime()) / (1000 * 60 * 60)
+            : Infinity
+          
+          if (paymentAge < 24) {
+            logger.info('Dashboard', 'Найден существующий платеж со статусом pending, пропускаем проверку', {
+              orderId: latestPending.orderId,
+              paymentAgeHours: paymentAge.toFixed(2),
+              amount: latestPending.amount
+            })
+            
+            // Разрешаем создание нового платежа, даже если есть pending
+            // Пользователь может создать новый платеж для того же тарифа или другого
+            // Старые pending платежи будут обработаны webhook или очищены админом
+            logger.info('Dashboard', 'Продолжаем создание нового платежа несмотря на существующий pending', {
+              existingOrderId: latestPending.orderId
+            })
+          }
+        }
+      } catch (err) {
+        // Если это ошибка о существующем платеже, пробрасываем её
+        if (err.message && err.message.includes('незавершенный платеж')) {
+          throw err
+        }
+        // Иначе логируем и продолжаем
+        logger.warn('Dashboard', 'Ошибка проверки существующих платежей', { userId: user.id }, err)
+      }
+
       // Загружаем настройки платежной системы из Firestore
       let paymentSettings = {}
       try {
@@ -546,13 +741,55 @@ export const dashboardService = {
         finalAmount = amount * (1 - discount)
       }
 
+      // Получаем inboundId для тарифа (из сервера, привязанного к тарифу)
+      let tariffInboundId = null
+      try {
+        const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+        const settingsSnapshot = await getDoc(settingsDoc)
+        if (settingsSnapshot.exists()) {
+          const settingsData = settingsSnapshot.data()
+          const serversList = settingsData.servers || []
+          
+          // Ищем сервер, привязанный к данному тарифу
+          const serverForTariff = serversList.find(server => {
+            if (server.tariffIds && server.tariffIds.length > 0) {
+              return server.tariffIds.includes(tariff.id)
+            }
+            return false
+          })
+          
+          if (serverForTariff && serverForTariff.xuiInboundId) {
+            tariffInboundId = serverForTariff.xuiInboundId
+            logger.info('Dashboard', 'Найден inboundId для тарифа из сервера', {
+              tariffId: tariff.id,
+              serverId: serverForTariff.id,
+              inboundId: tariffInboundId
+            })
+          } else {
+            logger.warn('Dashboard', 'Не найден сервер для тарифа, inboundId не будет передан', {
+              tariffId: tariff.id
+            })
+          }
+        }
+      } catch (inboundIdError) {
+        logger.warn('Dashboard', 'Ошибка получения inboundId для тарифа', {
+          tariffId: tariff.id
+        }, inboundIdError)
+      }
+
       // Генерируем ссылку на оплату через n8n, передавая настройки платежной системы
+      // Передаем также данные пользователя (uuid, email) и inboundId тарифа для отправки в n8n
       const paymentServiceInstance = paymentService.getInstance()
       const paymentResult = await paymentServiceInstance.generatePaymentLink(
         user.id,
         finalAmount,
         tariff.id,
-        paymentSettings
+        paymentSettings,
+        {
+          uuid: user.uuid || null,
+          email: user.email || null,
+          inboundId: tariffInboundId || null
+        }
       )
 
       // Сохраняем заказ в Firestore со статусом 'pending'
@@ -580,11 +817,13 @@ export const dashboardService = {
         })
       }
 
-    return {
-      paymentUrl: paymentResult.paymentUrl,
-      orderId: paymentResult.orderId,
-      amount: paymentResult.amount || finalAmount,
-    }
+      return {
+        success: true,
+        paymentUrl: paymentResult.paymentUrl,
+        orderId: paymentResult.orderId,
+        amount: paymentResult.amount || finalAmount,
+        requiresPayment: true, // Указываем, что требуется оплата
+      }
   } catch (error) {
     logger.error('Dashboard', 'Ошибка инициации оплаты', {
       userId: user?.id,
@@ -594,6 +833,55 @@ export const dashboardService = {
     throw error
   }
 },
+
+  /**
+   * Удаление всех платежей со статусом 'pending' для пользователя
+   * @param {string} userId - ID пользователя
+   * @returns {Promise<Object>} Результат удаления (количество удаленных платежей)
+   */
+  async clearPendingPayments(userId) {
+    if (!db || !userId) {
+      throw new Error('База данных недоступна или userId не указан')
+    }
+
+    try {
+      logger.info('Dashboard', 'Очистка платежей со статусом pending', { userId })
+      
+      const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+      const pendingQuery = query(
+        paymentsCollection,
+        where('userId', '==', userId),
+        where('status', '==', 'pending')
+      )
+      const pendingSnapshot = await getDocs(pendingQuery)
+      
+      if (pendingSnapshot.empty) {
+        logger.info('Dashboard', 'Платежи со статусом pending не найдены', { userId })
+        return { deleted: 0, message: 'Не найдено платежей со статусом pending' }
+      }
+      
+      const deletePromises = []
+      pendingSnapshot.forEach((docSnapshot) => {
+        deletePromises.push(deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/payments`, docSnapshot.id)))
+      })
+      
+      await Promise.all(deletePromises)
+      
+      const deletedCount = deletePromises.length
+      logger.info('Dashboard', 'Платежи со статусом pending удалены', { 
+        userId, 
+        deletedCount 
+      })
+      
+      return { 
+        deleted: deletedCount, 
+        message: `Удалено ${deletedCount} платежей со статусом pending` 
+      }
+    } catch (err) {
+      logger.error('Dashboard', 'Ошибка удаления платежей со статусом pending', { userId }, err)
+      throw err
+    }
+  },
 
   /**
    * Проверка статуса платежа по orderId
@@ -627,6 +915,61 @@ export const dashboardService = {
       return paymentData
     } catch (error) {
       logger.error('Dashboard', 'Ошибка проверки статуса платежа', { orderId }, error)
+      throw error
+    }
+  },
+
+  /**
+   * Проверка платежа через webhook
+   * @param {string} orderId - ID заказа
+   * @returns {Promise<Object>} Результат проверки платежа
+   */
+  async verifyPayment(orderId) {
+    if (!orderId) {
+      throw new Error('orderId обязателен для проверки платежа')
+    }
+
+    try {
+      logger.info('Dashboard', 'Отправка запроса на проверку платежа', { orderId })
+
+      // Получаем данные платежа из Firestore
+      const payment = await this.checkPaymentStatus(orderId)
+      
+      if (!payment) {
+        throw new Error('Платеж не найден')
+      }
+
+      // Отправляем запрос на проверку платежа через API
+      const response = await fetch('/api/payment/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          orderId: orderId,
+          userId: payment.userId,
+          tariffId: payment.tariffId,
+          amount: payment.amount,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      logger.info('Dashboard', 'Платеж проверен через webhook', {
+        orderId,
+        success: result.success
+      })
+
+      return result
+    } catch (error) {
+      logger.error('Dashboard', 'Ошибка проверки платежа через webhook', {
+        orderId
+      }, error)
       throw error
     }
   },
@@ -896,6 +1239,103 @@ export const dashboardService = {
     // Это первая подписка, если у пользователя нет активного тарифа или тариф отличается
     const isNewSubscription = !user.tariffId || !user.plan || user.tariffId !== tariff.id
     
+    // ВАЖНО: Если требуется оплата (pay_now и !testPeriod), НЕ создаем подписку здесь
+    // Подписка будет создана только после получения webhook от YooMoney о успешной оплате
+    // Проверяем ДО подготовки данных для создания подписки
+    logger.debug('Dashboard', 'Проверка условий оплаты', {
+      paymentMode,
+      testPeriod,
+      shouldCheckPayment: paymentMode === 'pay_now' && !testPeriod
+    })
+    
+    if (paymentMode === 'pay_now' && !testPeriod) {
+      logger.debug('Dashboard', 'Условие оплаты выполнено, рассчитываем сумму', {
+        tariffName: tariff.name,
+        tariffPlan: tariff.plan,
+        price: tariff.price
+      })
+      
+      const isSuper = tariff.name?.toLowerCase() === 'super' || tariff.plan?.toLowerCase() === 'super'
+      let paymentAmount = 0
+      
+      if (isSuper) {
+        // Используем цену из тарифа (цена за устройство за месяц)
+        const devicePrice = tariff.price || 150
+        const basePrice = finalDevices * devicePrice * finalPeriodMonths
+        const discountAmount = discount > 0 ? basePrice * discount : 0
+        paymentAmount = basePrice - discountAmount
+      } else {
+        paymentAmount = tariff.price || 0
+      }
+      
+      logger.debug('Dashboard', 'Сумма платежа рассчитана', {
+        paymentAmount,
+        isSuper,
+        finalDevices,
+        finalPeriodMonths,
+        discount
+      })
+      
+      if (paymentAmount > 0) {
+        // Инициируем оплату БЕЗ создания подписки
+        logger.info('Dashboard', 'Инициация оплаты БЕЗ создания подписки (подписка будет создана после webhook)', {
+          userId: user.id,
+          tariffId: tariff.id,
+          amount: paymentAmount
+        })
+        
+        const paymentResult = await this.initiatePayment(
+          user,
+          tariff,
+          paymentAmount,
+          finalDevices,
+          finalPeriodMonths,
+          discount
+        )
+        
+        logger.debug('Dashboard', 'Платеж инициирован, получен результат', {
+          hasPaymentUrl: !!paymentResult.paymentUrl,
+          orderId: paymentResult.orderId,
+          amount: paymentResult.amount
+        })
+        
+        // НЕ обновляем статус оплаты здесь - статус изменится только после подтверждения платежа через webhook
+        // Это позволяет пользователю попробовать оплатить снова, если оплата не прошла
+        
+        // Возвращаем ссылку на оплату, НЕ создавая подписку
+        logger.info('Dashboard', 'Возвращаем результат с paymentUrl, НЕ создавая подписку', {
+          paymentUrl: paymentResult.paymentUrl,
+          orderId: paymentResult.orderId,
+          amount: paymentResult.amount
+        })
+        
+        const returnValue = {
+          success: true,
+          paymentUrl: paymentResult.paymentUrl,
+          orderId: paymentResult.orderId,
+          amount: paymentResult.amount,
+          requiresPayment: true,
+          // НЕ возвращаем paymentStatus здесь - статус остается прежним до подтверждения
+          tariffId: tariff.id,
+          tariffName: tariff.name,
+          devices: finalDevices,
+          periodMonths: finalPeriodMonths,
+          discount: discount || 0,
+          message: 'Требуется оплата для активации подписки'
+        }
+        
+        logger.debug('Dashboard', 'Возвращаемое значение', returnValue)
+        return returnValue
+      } else {
+        logger.debug('Dashboard', 'Сумма платежа <= 0, пропускаем блок оплаты', { paymentAmount })
+      }
+    } else {
+      logger.debug('Dashboard', 'Условие оплаты НЕ выполнено, продолжаем создание подписки', {
+        paymentMode,
+        testPeriod
+      })
+    }
+
     // Формируем категоризированные данные для n8n с маркировкой операции
     const operationData = {
       // Маркировка операции для разделения потоков в n8n
@@ -912,9 +1352,12 @@ export const dashboardService = {
       // Данные для 3x-ui
       email: user.name || user.email, // Имя пользователя из профиля
       inboundId: parseInt(finalInboundId), // Используем inboundId из настроек сервера
-      // Для тестовой подписки: 3 GB трафика и 24 часа
-      // Для оплаченной подписки: трафик из тарифа
-      totalGB: testPeriod ? 3 : (tariff.trafficGB > 0 ? tariff.trafficGB : 0),
+      // ВАЖНО: 3x-ui принимает трафик в БАЙТАХ, а не в ГБ
+      // Для тестовой подписки: 3 GB = 3 * 1024 * 1024 * 1024 байт
+      // Для оплаченной подписки: трафик из тарифа в байтах
+      totalGB: testPeriod 
+        ? 3 * 1024 * 1024 * 1024 // 3 GB в байтах для тестового периода
+        : (tariff.trafficGB > 0 ? tariff.trafficGB * 1024 * 1024 * 1024 : 0), // Конвертируем ГБ в байты
       expiryTime: expiryTimeForBackend, // В миллисекундах, backend конвертирует в секунды для 3x-ui
       limitIp: finalDevices, // Используем определенное количество устройств
       clientId: clientId, // UUID из профиля или сгенерированный
@@ -980,49 +1423,6 @@ export const dashboardService = {
       hasPassword: !!addClientData.xuiPassword,
       passwordLength: addClientData.xuiPassword ? addClientData.xuiPassword.length : 0,
     })
-
-    // ВАЖНО: Если требуется оплата (pay_now и !testPeriod), НЕ создаем подписку здесь
-    // Подписка будет создана только после получения webhook от YooMoney о успешной оплате
-    if (paymentMode === 'pay_now' && !testPeriod) {
-      const isSuper = tariff.name?.toLowerCase() === 'super' || tariff.plan?.toLowerCase() === 'super'
-      let paymentAmount = 0
-      
-      if (isSuper) {
-        const basePrice = finalDevices * 150 * finalPeriodMonths
-        const discountAmount = discount > 0 ? basePrice * discount : 0
-        paymentAmount = basePrice - discountAmount
-      } else {
-        paymentAmount = tariff.price || 0
-      }
-      
-      if (paymentAmount > 0) {
-        // Инициируем оплату БЕЗ создания подписки
-        logger.info('Dashboard', 'Инициация оплаты БЕЗ создания подписки (подписка будет создана после webhook)', {
-          userId: user.id,
-          tariffId: tariff.id,
-          amount: paymentAmount
-        })
-        
-        const paymentResult = await this.initiatePayment(
-          user,
-          tariff,
-          paymentAmount,
-          finalDevices,
-          finalPeriodMonths,
-          discount
-        )
-        
-        // Возвращаем ссылку на оплату, НЕ создавая подписку
-        return {
-          success: true,
-          paymentUrl: paymentResult.paymentUrl,
-          orderId: paymentResult.orderId,
-          amount: paymentResult.amount,
-          requiresPayment: true,
-          message: 'Требуется оплата для активации подписки'
-        }
-      }
-    }
 
     // Создаем клиента в 3x-ui через Backend Proxy
     // Backend выполнит транзакцию: Firestore (status: creating) → 3x-ui → Firestore (finalize)
@@ -1154,17 +1554,61 @@ export const dashboardService = {
 
     // Генерируем ссылку на подписку (sub link) вместо VLESS
     // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
-    const subId = user.subId || ''
+    // Если у пользователя нет subId, генерируем его
+    let subId = user.subId || ''
     if (!subId) {
-      logger.error('Dashboard', 'У пользователя отсутствует subId, невозможно сгенерировать ссылку подписки', {
+      logger.warn('Dashboard', 'У пользователя отсутствует subId, генерируем новый', {
         userId: user.id,
         email: user.email
       })
-      throw new Error('Отсутствует subId пользователя. Обратитесь к администратору.')
+      
+      // Генерируем subId используя ThreeXUI.generateSubId
+      try {
+        const generatedSubId = ThreeXUI.generateSubId()
+        
+        // Сохраняем subId в Firestore
+        const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+        await updateDoc(userDoc, {
+          subId: generatedSubId,
+          updatedAt: new Date().toISOString(),
+        })
+        
+        subId = generatedSubId
+        user.subId = generatedSubId // Обновляем объект user для согласованности
+        logger.info('Dashboard', 'subId сгенерирован и сохранен для пользователя', {
+          userId: user.id,
+          email: user.email,
+          subId: generatedSubId
+        })
+      } catch (subIdError) {
+        logger.error('Dashboard', 'Ошибка генерации subId для пользователя', {
+          userId: user.id,
+          email: user.email
+        }, subIdError)
+        throw new Error('Не удалось сгенерировать subId. Обратитесь к администратору.')
+      }
     }
     
     // Формируем ссылку на подписку
-    const subscriptionLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+    // Используем ссылку из тарифа, если она есть, иначе используем дефолтную
+    let subscriptionLink
+    if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
+      // Убираем завершающий слэш, если есть, и добавляем subId
+      const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
+      subscriptionLink = `${baseLink}/${subId}`
+      logger.info('Dashboard', 'Использована ссылка из тарифа', {
+        tariffId: tariff.id,
+        baseLink: tariff.subscriptionLink,
+        finalLink: subscriptionLink
+      })
+    } else {
+      // Дефолтная ссылка, если в тарифе не указана
+      subscriptionLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      logger.info('Dashboard', 'Использована дефолтная ссылка подписки', {
+        tariffId: tariff.id,
+        subscriptionLink
+      })
+    }
     const vpnLink = subscriptionLink // Используем vpnLink для обратной совместимости
 
     // Обновляем данные пользователя в Firestore с количеством устройств
@@ -1205,52 +1649,7 @@ export const dashboardService = {
       expiryTime: expiryTime > 0 ? new Date(expiryTime).toISOString() : null
     })
 
-    // Если требуется оплата сейчас и сумма > 0, инициируем оплату через YooMoney
-    // ВАЖНО: При оплате НЕ создаем подписку - подписка создается только после получения webhook от YooMoney
-    if (paymentMode === 'pay_now' && !testPeriod) {
-      // Для SUPER тарифа используем пересчитанную цену с учетом периода и скидки
-      let paymentAmount = 0
-      const isSuper = tariff.name?.toLowerCase() === 'super' || tariff.plan?.toLowerCase() === 'super'
-      
-      if (isSuper) {
-        const basePrice = finalDevices * 150 * finalPeriodMonths
-        const discountAmount = discount > 0 ? basePrice * discount : 0
-        paymentAmount = basePrice - discountAmount
-      } else {
-        paymentAmount = tariff.price || 0
-      }
-      
-      if (paymentAmount > 0) {
-        // Инициируем оплату через YooMoney БЕЗ создания подписки
-        // Подписка будет создана только после получения webhook от YooMoney о успешной оплате
-        logger.info('Dashboard', 'Инициация оплаты БЕЗ создания подписки', {
-          userId: user.id,
-          tariffId: tariff.id,
-          amount: paymentAmount,
-          devices: finalDevices,
-          periodMonths: finalPeriodMonths
-        })
-        
-        const paymentResult = await this.initiatePayment(
-          user,
-          tariff,
-          paymentAmount,
-          finalDevices,
-          finalPeriodMonths,
-          discount
-        )
-        
-        // Возвращаем ссылку на оплату БЕЗ создания подписки
-        return {
-          success: true,
-          paymentUrl: paymentResult.paymentUrl,
-          orderId: paymentResult.orderId,
-          amount: paymentResult.amount,
-          requiresPayment: true,
-          message: 'Требуется оплата для активации подписки'
-        }
-      }
-    }
+    // Платеж уже обработан в блоке выше (строка 959), здесь код не должен выполняться
     
     // Создаем запись о платеже для тестового периода
     if (testPeriod) {
@@ -1810,7 +2209,7 @@ export const dashboardService = {
 
     try {
       const xuiService = XUIService.getInstance()
-      const inboundId = import.meta.env.VITE_XUI_INBOUND_ID || 1
+      const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
 
       // Получаем данные сервера
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
@@ -1818,17 +2217,66 @@ export const dashboardService = {
       const settingsData = settingsSnapshot.exists() ? settingsSnapshot.data() : {}
       const serversList = settingsData.servers || []
 
-      // Находим активный сервер
-      const activeServer = serversList.find(s => s.active && s.id)
+      // Находим сервер, привязанный к тарифу пользователя (если есть tariffId)
+      let activeServer = null
+      
+      if (user.tariffId) {
+        // Ищем сервер, привязанный к данному тарифу
+        const serversForTariff = serversList.filter(server => {
+          // Если у сервера есть привязка к тарифам, проверяем, есть ли наш тариф
+          if (server.tariffIds && server.tariffIds.length > 0) {
+            return server.tariffIds.includes(user.tariffId)
+          }
+          // Если привязки нет - сервер подходит для всех тарифов
+          return true
+        })
+        
+        // Ищем активный сервер среди серверов для этого тарифа
+        activeServer = serversForTariff.find(s => s.active && s.id)
+        
+        if (activeServer) {
+          logger.info('Dashboard', 'Найден сервер для тарифа пользователя', {
+            tariffId: user.tariffId,
+            serverId: activeServer.id,
+            serverName: activeServer.name,
+            tariffIds: activeServer.tariffIds,
+            inboundId: activeServer.xuiInboundId
+          })
+        } else {
+          logger.warn('Dashboard', 'Не найден активный сервер для тарифа, используем первый активный', {
+            tariffId: user.tariffId,
+            availableServersForTariff: serversForTariff.length
+          })
+        }
+      }
+      
+      // Если не нашли сервер для тарифа, используем первый активный сервер (fallback)
+      if (!activeServer) {
+        activeServer = serversList.find(s => s.active && s.id)
+      }
+      
       if (!activeServer) {
         throw new Error('Не найден активный сервер для удаления клиента')
       }
 
+      // Используем inboundId из найденного сервера, а не из переменной окружения
+      const inboundId = activeServer.xuiInboundId || defaultInboundId
+      
       logger.info('Dashboard', 'Удаление клиента из 3x-ui', {
         email: user.email,
         uuid: user.uuid,
+        tariffId: user.tariffId || null,
+        tariffName: user.tariffName || null,
+        serverId: activeServer.id,
+        serverName: activeServer.name,
         inboundId,
-        serverId: activeServer.id
+        serverId: activeServer.id,
+        serverName: activeServer.name,
+        serverIP: activeServer.serverIP,
+        serverPort: activeServer.serverPort,
+        randompath: activeServer.randompath || '',
+        protocol: activeServer.protocol || 'https',
+        serverTariffIds: activeServer.tariffIds || []
       })
 
       // Удаляем клиента из 3x-ui через Backend Proxy
@@ -1844,6 +2292,7 @@ export const dashboardService = {
         sessionCookie: activeServer.sessionCookie || null,
         serverIP: activeServer.serverIP,
         serverPort: activeServer.serverPort,
+        randompath: activeServer.randompath || '',
         protocol: activeServer.protocol || 'https',
         xuiUsername: activeServer.xuiUsername,
         xuiPassword: activeServer.xuiPassword,

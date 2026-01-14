@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  skyputh-vpn:
+    image: skyputh-vpn:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skyputh-vpn
+    restart: unless-stopped
+    
+    ports:
+      - "${PROXY_PORT:-3001}:3001"
+    
+    environment:
+      # Режим работы
+      - NODE_ENV=production
+      - PROXY_PORT=3001
+      - PROXY_HOST=0.0.0.0
+      
+      # Backend proxy настройки (3x-ui)
+      - XUI_HOST=${XUI_HOST}
+      - XUI_USERNAME=${XUI_USERNAME}
+      - XUI_PASSWORD=${XUI_PASSWORD}
+      - XUI_INBOUND_ID=${XUI_INBOUND_ID:-1}
+      
+      # CORS настройки
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - FRONTEND_URL=${FRONTEND_URL}
+      
+      # Firebase (для frontend - с префиксом VITE_)
+      - VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
+      - VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
+      - VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
+      - VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}
+      - VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}
+      - VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
+      - VITE_RECAPTCHA_SITE_KEY=${VITE_RECAPTCHA_SITE_KEY:-}
+      
+      # Логирование
+      - VITE_LOG_LEVEL=${VITE_LOG_LEVEL:-warn}
+    
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    # Security: непривилегированный пользователь
+    user: "1001:1001"
+    
+    # Labels для Portainer
+    labels:
+      - "com.docker.compose.project=skyputh-vpn"
+      - "traefik.enable=false"
+    
+    # Networks
+    networks:
+      - vpn-network
+    
+    # Logging (опционально)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  vpn-network:
+    driver: bridge
+    name: skyputh-vpn-network

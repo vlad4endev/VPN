@@ -82,25 +82,51 @@ else
     echo -e "${GREEN}✅ Зависимости Backend Proxy установлены${NC}"
 fi
 
-# Проверка занятости портов
+# Проверка занятости портов (совместимо с Ubuntu и macOS)
 check_port() {
     PORT=$1
-    if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-        return 0  # Порт занят
-    else
-        return 1  # Порт свободен
+    # Используем netstat (Ubuntu) или ss (современные системы) или lsof (macOS)
+    if command -v ss &> /dev/null; then
+        if ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+            return 0  # Порт занят
+        fi
+    elif command -v netstat &> /dev/null; then
+        if netstat -tuln 2>/dev/null | grep -q ":$PORT "; then
+            return 0  # Порт занят
+        fi
+    elif command -v lsof &> /dev/null; then
+        if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+            return 0  # Порт занят
+        fi
     fi
+    return 1  # Порт свободен
+}
+
+# Функция для освобождения порта
+free_port() {
+    PORT=$1
+    if command -v lsof &> /dev/null; then
+        PID=$(lsof -ti:$PORT 2>/dev/null)
+        if [ ! -z "$PID" ]; then
+            kill -9 $PID 2>/dev/null
+            return 0
+        fi
+    elif command -v fuser &> /dev/null; then
+        fuser -k $PORT/tcp 2>/dev/null
+        return 0
+    fi
+    return 1
 }
 
 if check_port 3001; then
     echo -e "${YELLOW}⚠️  Порт 3001 уже занят. Останавливаю процесс...${NC}"
-    kill -9 $(lsof -ti:3001) 2>/dev/null
+    free_port 3001
     sleep 2
 fi
 
 if check_port 5173; then
     echo -e "${YELLOW}⚠️  Порт 5173 уже занят. Останавливаю процесс...${NC}"
-    kill -9 $(lsof -ti:5173) 2>/dev/null
+    free_port 5173
     sleep 2
 fi
 
@@ -132,7 +158,7 @@ echo ""
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ Все службы запущены!${NC}"
 echo ""
-echo -e "${BLUE}📍 Frontend:${NC}    http://localhost:5173"
+echo -e "${BLUE}📍 Frontend:${NC}    http://127.0.0.1:5173"
 echo -e "${BLUE}📍 n8n Webhook Proxy:${NC} http://localhost:3001"
 echo -e "${BLUE}📍 n8n:${NC}         http://localhost:5678"
 echo ""
@@ -147,4 +173,5 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 
 # Запуск Frontend (блокирующий вызов)
+# Используем явный host и port для кроссплатформенности
 npm run dev

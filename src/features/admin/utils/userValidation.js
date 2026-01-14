@@ -103,19 +103,28 @@ export function normalizeUser(user) {
     throw new Error('Данные пользователя не предоставлены')
   }
 
-  // Нормализация subid: всегда массив, фильтруем пустые значения
-  let normalizedSubid = []
-  if (user.subid) {
-    if (Array.isArray(user.subid)) {
-      normalizedSubid = user.subid
-        .map(s => String(s).trim())
-        .filter(s => s !== '')
-    } else if (typeof user.subid === 'string' && user.subid.trim() !== '') {
-      normalizedSubid = [user.subid.trim()]
+  // Нормализация subId: строка (приоритет у subId, если нет - используем subid для обратной совместимости)
+  let normalizedSubId = ''
+  if (user.subId) {
+    normalizedSubId = String(user.subId).trim()
+  } else if (user.subid) {
+    // Обратная совместимость: если subid - массив, берем первый элемент
+    if (Array.isArray(user.subid) && user.subid.length > 0) {
+      normalizedSubId = String(user.subid[0]).trim()
+    } else if (typeof user.subid === 'string') {
+      normalizedSubId = String(user.subid).trim()
     }
   }
 
+  // Создаем копию объекта user без старого поля subid (если оно есть)
+  // Это предотвращает дублирование данных при миграции со старого формата
+  const { subid, ...userWithoutOldSubid } = user
+
+  // Нормализуем основные поля и сохраняем все остальные поля из user
   return {
+    // Сохраняем все поля из user (кроме старого subid), чтобы не потерять данные
+    ...userWithoutOldSubid,
+    // Нормализуем основные поля
     id: String(user.id || ''),
     email: String(user.email || '').trim().toLowerCase(),
     uuid: user.uuid ? String(user.uuid).trim() : '',
@@ -131,7 +140,7 @@ export function normalizeUser(user) {
     tariffId: user.tariffId ? String(user.tariffId) : null,
     plan: user.plan ? String(user.plan) : 'free',
     role: user.role ? String(user.role) : 'user',
-    subid: normalizedSubid,
+    subId: normalizedSubId,
   }
 }
 

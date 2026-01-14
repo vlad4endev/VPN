@@ -164,6 +164,7 @@ export function useAdmin({
     handleTariffTrafficGBChange: tariffsHook.handleTariffTrafficGBChange,
     handleTariffDurationDaysChange: tariffsHook.handleTariffDurationDaysChange,
     handleTariffActiveChange: tariffsHook.handleTariffActiveChange,
+    handleTariffSubscriptionLinkChange: tariffsHook.handleTariffSubscriptionLinkChange,
   }
 }
 

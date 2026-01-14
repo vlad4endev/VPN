@@ -139,10 +139,10 @@ service cloud.firestore {
 ## 📝 Текущая конфигурация
 
 Проект: **skypathvpn**
-- API Key: `AIzaSyBiqe1iDUOYxFoUgNhtXoPBKdjXuEhlTVY`
-- Auth Domain: `skypathvpn.firebaseapp.com`
-- Project ID: `skypathvpn`
-- Storage Bucket: `skypathvpn.firebasestorage.app`
+- API Key: `AIzaSy...` (получите в Firebase Console)
+- Auth Domain: `your-project-id.firebaseapp.com`
+- Project ID: `your-project-id`
+- Storage Bucket: `your-project-id.firebasestorage.app`
 
 ## 🔑 Методы авторизации
 

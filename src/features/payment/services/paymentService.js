@@ -10,28 +10,48 @@ class PaymentService {
    * @param {number} amount - Сумма платежа
    * @param {string} tariffId - ID тарифа (опционально)
    * @param {Object} paymentSettings - Настройки платежной системы (yoomoneyWallet, yoomoneySecretKey)
+   * @param {Object} userData - Данные пользователя (uuid, email, inboundId) - опционально
    * @returns {Promise<Object>} Объект с paymentUrl и orderId
    */
-  async generatePaymentLink(userId, amount, tariffId = null, paymentSettings = {}) {
+  async generatePaymentLink(userId, amount, tariffId = null, paymentSettings = {}, userData = null) {
     try {
       logger.info('Payment', 'Генерация ссылки на оплату', { 
         userId, 
         amount, 
         tariffId,
-        hasPaymentSettings: !!paymentSettings && Object.keys(paymentSettings).length > 0
+        hasPaymentSettings: !!paymentSettings && Object.keys(paymentSettings).length > 0,
+        hasUserData: !!userData,
+        userData: userData
       })
+
+      const requestBody = {
+        userId,
+        amount: Number(amount),
+        tariffId,
+        paymentSettings: paymentSettings || {},
+      }
+
+      // Добавляем данные пользователя, если они переданы
+      if (userData && (userData.uuid || userData.email || userData.inboundId)) {
+        requestBody.userData = {
+          uuid: userData.uuid || null,
+          email: userData.email || null,
+          userId: userId,
+          inboundId: userData.inboundId || null
+        }
+        logger.info('Payment', 'Данные пользователя добавлены в запрос', {
+          hasUuid: !!userData.uuid,
+          hasEmail: !!userData.email,
+          hasInboundId: !!userData.inboundId
+        })
+      }
 
       const response = await fetch('/api/payment/generate-link', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          userId,
-          amount: Number(amount),
-          tariffId,
-          paymentSettings: paymentSettings || {},
-        }),
+        body: JSON.stringify(requestBody),
       })
 
       // Получаем текст ответа для диагностики
@@ -95,15 +115,43 @@ class PaymentService {
         })
       }
 
-      if (!paymentData.paymentUrl || !paymentData.orderId) {
-        logger.error('Payment', 'Неполные данные от сервера', {
+      // Извлекаем orderId из paymentUrl, если он не передан в ответе
+      if (!paymentData.orderId && paymentData.paymentUrl) {
+        try {
+          const url = new URL(paymentData.paymentUrl)
+          const label = url.searchParams.get('label')
+          if (label && label.startsWith('order_')) {
+            paymentData.orderId = label
+            logger.info('Payment', 'orderId извлечен из paymentUrl', {
+              orderId: paymentData.orderId,
+              label
+            })
+          }
+        } catch (urlError) {
+          logger.warn('Payment', 'Не удалось извлечь orderId из paymentUrl', {
+            paymentUrl: paymentData.paymentUrl,
+            error: urlError.message
+          })
+        }
+      }
+
+      if (!paymentData.paymentUrl) {
+        logger.error('Payment', 'Неполные данные от сервера: отсутствует paymentUrl', {
           receivedData: paymentData,
           originalData: data,
           hasPaymentUrl: !!paymentData?.paymentUrl,
           hasOrderId: !!paymentData?.orderId,
           allKeys: paymentData ? Object.keys(paymentData) : []
         })
-        throw new Error('Неполные данные от сервера: отсутствует paymentUrl или orderId')
+        throw new Error('Неполные данные от сервера: отсутствует paymentUrl')
+      }
+
+      // Если orderId все еще отсутствует, генерируем его из timestamp
+      if (!paymentData.orderId) {
+        paymentData.orderId = `order_${Date.now()}`
+        logger.warn('Payment', 'orderId сгенерирован из timestamp', {
+          orderId: paymentData.orderId
+        })
       }
 
       logger.info('Payment', 'Ссылка на оплату успешно сгенерирована', {

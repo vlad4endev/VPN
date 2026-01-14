@@ -19,6 +19,9 @@ import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import helmet from 'helmet'
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import fs from 'fs'
 
 // Загружаем переменные окружения
 dotenv.config()
@@ -362,7 +365,47 @@ app.post('/api/test-session', async (req, res) => {
   }
 })
 
+// Обслуживание статических файлов frontend
+// ВАЖНО: Размещается ПОСЛЕ всех API маршрутов, но ПЕРЕД обработкой ошибок
+// Работает если dist существует (независимо от NODE_ENV)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const distPath = path.join(__dirname, '..', 'dist')
+
+// Проверяем существование папки dist
+if (fs.existsSync(distPath)) {
+  // Статические файлы (JS, CSS, images и т.д.)
+  app.use(express.static(distPath, {
+    maxAge: process.env.NODE_ENV === 'production' ? '1y' : '0', // Кэширование только в production
+    etag: true,
+    lastModified: true,
+    index: false // Не использовать index.html по умолчанию
+  }))
+  
+  // SPA fallback: все остальные запросы (не API) отдаем index.html
+  app.get('*', (req, res) => {
+    // Пропускаем API запросы - они уже обработаны выше
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ 
+        success: false, 
+        msg: 'API endpoint not found' 
+      })
+    }
+    
+    // Отдаем index.html для SPA роутинга
+    res.sendFile(path.join(distPath, 'index.html'))
+  })
+  
+  console.log(`📁 Serving static files from: ${distPath}`)
+} else {
+  console.warn(`⚠️ Frontend dist folder not found: ${distPath}`)
+  console.warn('⚠️ Static files will not be served. Frontend build may be missing.')
+  console.warn('💡 Запустите: npm run build')
+}
+
 // Обработка ошибок
+// ВАЖНО: Error-handling middleware должен быть зарегистрирован ПОСЛЕДНИМ
+// Он должен идти после всех маршрутов, включая статические файлы и SPA fallback
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err)
   res.status(500).json({
@@ -381,7 +424,14 @@ app.listen(PORT, HOST, () => {
   console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`)
   console.log(`📡 Проксирует запросы к: ${process.env.XUI_HOST || 'XUI_HOST не установлен'}`)
   console.log(`🌐 Allowed origins: ${allowedOrigins.length > 0 ? allowedOrigins.join(', ') : 'all (development mode)'}`)
-  console.log(`📊 Health check: http://${HOST}:${PORT}/health`)
+  console.log(`📊 Health check: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/health`)
+  
+  // Показываем URL для доступа к frontend
+  const distPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+  if (fs.existsSync(distPath)) {
+    const frontendUrl = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`
+    console.log(`🌐 Frontend доступен на: ${frontendUrl}`)
+  }
 })
 
 // Graceful shutdown

@@ -1,0 +1,25 @@
+[Unit]
+Description=SkyPuth VPN Frontend Server
+After=network.target skyputh-vpn-backend.service
+Requires=skyputh-vpn-backend.service
+
+[Service]
+Type=simple
+# ЗАМЕНИТЕ /path/to/VPN на реальный путь к проекту
+WorkingDirectory=/path/to/VPN
+# Используем serve для статических файлов (npm install -g serve)
+ExecStart=/usr/bin/serve -s dist -l 5173
+Restart=always
+RestartSec=10
+Environment="NODE_ENV=production"
+
+# Безопасность: запуск от непривилегированного пользователя
+User=%i
+Group=%i
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

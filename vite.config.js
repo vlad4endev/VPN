@@ -285,11 +285,37 @@ export default defineConfig(({ mode }) => {
       },
     ],
     server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: false, // Если порт занят, попробует следующий
       proxy: {
         // Прокси для Backend Proxy (новый)
         '/api/vpn': {
           target: 'http://localhost:3001',
           changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, req, res) => {
+              console.error('❌ VPN Proxy error:', err.message);
+              console.error('   Request:', req.method, req.url);
+              // Отправляем ошибку клиенту
+              if (!res.headersSent) {
+                res.writeHead(502, {
+                  'Content-Type': 'application/json',
+                });
+                res.end(JSON.stringify({
+                  success: false,
+                  error: `Backend proxy недоступен: ${err.message}`,
+                  hint: 'Проверьте, что backend proxy запущен на http://localhost:3001'
+                }));
+              }
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log('🔄 VPN Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('✅ VPN Proxy Response:', proxyRes.statusCode, req.url);
+            });
+          },
         },
         // Прокси для платежей через n8n
         '/api/payment': {

@@ -1325,16 +1325,32 @@ class ThreeXUI {
 
   /**
    * Генерация уникального subId для 3x-ui
-   * Формат: timestamp + случайное число (для уникальности)
-   * @returns {string} Уникальный subId (числовая строка, ~22 символа)
+   * Формат: случайная буквенно-цифровая строка (base36: 0-9, a-z)
+   * @returns {string} Уникальный subId (буквенно-цифровая строка, ~16 символов)
    */
   generateSubId() {
-    // Формат: timestamp в миллисекундах (13 цифр) + случайное число (9 цифр)
-    // Это гарантирует уникальность, так как timestamp постоянно увеличивается
-    // Длина: 13 + 9 = 22 символа
-    const timestamp = Date.now()
-    const random = Math.floor(Math.random() * 1000000000) // 0-999999999
-    return `${timestamp}${random.toString().padStart(9, '0')}`
+    // Формат 3x-ui: случайная строка из символов base36 (0-9, a-z)
+    // Длина: ~16 символов (как в примере: "7vyrlrvx1aiwylh1")
+    const length = 16
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyz'
+    let result = ''
+    
+    // Используем crypto.getRandomValues для криптографически стойкого генератора случайных чисел
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const randomValues = new Uint32Array(length)
+      crypto.getRandomValues(randomValues)
+      
+      for (let i = 0; i < length; i++) {
+        result += chars[randomValues[i] % chars.length]
+      }
+    } else {
+      // Fallback для окружений без crypto API
+      for (let i = 0; i < length; i++) {
+        result += chars[Math.floor(Math.random() * chars.length)]
+      }
+    }
+    
+    return result
   }
 
   /**

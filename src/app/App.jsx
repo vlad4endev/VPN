@@ -29,9 +29,10 @@ import { formatTraffic } from '../shared/utils/formatTraffic.js'
 import { validateEmail } from '../features/auth/utils/validateEmail.js'
 import { validatePassword } from '../features/auth/utils/validatePassword.js'
 import { isAdminEmail } from '../shared/constants/admin.js'
+import { APP_ID } from '../shared/constants/app.js'
 
-// Константа appId для пути Firestore
-const appId = 'skyputh'
+// Константа appId для пути Firestore (для обратной совместимости)
+const appId = APP_ID
 
 // Валидация переменных окружения при старте
 logger.info('App', '🔍 Проверка конфигурации переменных окружения...')
@@ -397,26 +398,86 @@ const LandingPage = ({ onSetView }) => (
 
 // Компонент модального окна с ключом (вынесен наружу для предотвращения пересоздания)
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
-  // Используем ссылку на подписку из профиля пользователя
-  // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
-  // Используем первый непустой элемент из массива subid
-  const getFirstSubid = () => {
-    // Проверяем массив subid (с маленькой буквы)
-    if (Array.isArray(user?.subid) && user.subid.length > 0) {
-      const firstSubid = user.subid.find(s => s && String(s).trim() !== '')
-      if (firstSubid) return String(firstSubid).trim()
-    }
-    // Fallback: проверяем subId (с заглавной) для обратной совместимости
-    if (user?.subId && String(user.subId).trim() !== '') {
-      return String(user.subId).trim()
-    }
-    return null
-  }
+  const [subscriptionLink, setSubscriptionLink] = useState(null)
+  const [loadingLink, setLoadingLink] = useState(true)
   
-  const firstSubid = getFirstSubid()
-  const subscriptionLink = user?.subscriptionLink || user?.vpnLink || (firstSubid ? `https://subs.skypath.fun:3458/vk198/${firstSubid}` : null)
+  // Загружаем ссылку подписки: сначала из сохраненной, затем из тарифа, затем дефолтная
+  useEffect(() => {
+    const loadSubscriptionLink = async () => {
+      if (!user) {
+        setLoadingLink(false)
+        return
+      }
+      
+      const getSubId = () => {
+        if (user?.subId && String(user.subId).trim() !== '') {
+          return String(user.subId).trim()
+        }
+        return null
+      }
+      
+      const subId = getSubId()
+      if (!subId) {
+        setSubscriptionLink(null)
+        setLoadingLink(false)
+        return
+      }
+      
+      // ВАЖНО: Приоритет - сначала ссылка из тарифа (актуальная), затем сохраненная, затем дефолтная
+      // Загружаем тариф и используем ссылку из него (если есть tariffId)
+      if (user.tariffId) {
+        try {
+          const db = getFirestore()
+          const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+          const tariffSnapshot = await getDoc(tariffDoc)
+          if (tariffSnapshot.exists()) {
+            const tariff = tariffSnapshot.data()
+            if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
+              // Убираем завершающий слэш, если есть, и добавляем subId
+              const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
+              const linkFromTariff = `${baseLink}/${subId}`
+              setSubscriptionLink(linkFromTariff)
+              setLoadingLink(false)
+              logger.info('App', 'Использована ссылка из тарифа для KeyModal', {
+                tariffId: user.tariffId,
+                tariffName: tariff.name,
+                baseLink: tariff.subscriptionLink,
+                finalLink: linkFromTariff
+              })
+              return
+            }
+          }
+        } catch (err) {
+          logger.warn('App', 'Ошибка загрузки тарифа для KeyModal', {
+            tariffId: user.tariffId
+          }, err)
+        }
+      }
+      
+      // Если ссылки из тарифа нет, проверяем сохраненную ссылку (fallback)
+      if (user.subscriptionLink && user.subscriptionLink.trim()) {
+        setSubscriptionLink(user.subscriptionLink.trim())
+        setLoadingLink(false)
+        logger.info('App', 'Использована сохраненная ссылка для KeyModal (fallback)', {
+          hasTariffId: !!user.tariffId
+        })
+        return
+      }
+      
+      // Если ссылка из тарифа и сохраненная не получены, используем дефолтную
+      const defaultLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      setSubscriptionLink(defaultLink)
+      setLoadingLink(false)
+      logger.info('App', 'Использована дефолтная ссылка для KeyModal', {
+        hasTariffId: !!user.tariffId,
+        defaultLink
+      })
+    }
+    
+    loadSubscriptionLink()
+  }, [user, user?.tariffId, user?.subId, user?.subscriptionLink]) // Обновляем при изменении user или его свойств
   
-  if (!user || !subscriptionLink) return null
+  if (!user || !subscriptionLink || loadingLink) return null
 
   const userStatus = getUserStatus(user, clientStats)
 
@@ -537,7 +598,7 @@ export default function VPNServiceApp() {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [adminTab, setAdminTab] = useState('users')
-  const [dashboardTab, setDashboardTab] = useState('profile')
+  const [dashboardTab, setDashboardTab] = useState('subscription')
   const [editingUser, setEditingUser] = useState(null)
   const [editingServer, setEditingServer] = useState(null)
   const [editingTariff, setEditingTariff] = useState(null)
@@ -1137,33 +1198,8 @@ export default function VPNServiceApp() {
     }
   }, [view]) // Только view, чтобы избежать лишних перерендеров
 
-  // Восстановление view при наличии сохраненного пользователя
-  // Используем useRef для отслеживания, чтобы избежать лишних перерендеров
-  const viewRestoredRef = useRef(false)
-  const currentUserIdRef = useRef(null)
-  const currentUserRoleRef = useRef(null)
-  
-  useEffect(() => {
-    // Обновляем refs только при изменении id или role
-    if (currentUser?.id !== currentUserIdRef.current || currentUser?.role !== currentUserRoleRef.current) {
-      currentUserIdRef.current = currentUser?.id || null
-      currentUserRoleRef.current = currentUser?.role || null
-      
-      if (currentUser && !viewRestoredRef.current) {
-        // Если есть сохраненный пользователь, но view не установлен правильно - восстанавливаем
-        const correctView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
-        if (view !== correctView) {
-          setView(correctView)
-          viewRestoredRef.current = true
-        }
-      }
-      
-      // Сбрасываем флаг при смене пользователя
-      if (!currentUser) {
-        viewRestoredRef.current = false
-      }
-    }
-  }, [currentUser?.id, currentUser?.role, view, setView])
+  // Удалена логика автоматического переопределения view при наличии currentUser
+  // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
 
   // Загрузка пользователей и настроек при монтировании
   // ВАЖНО: Настройки загружаются только для админов, чтобы не перезаписывать локальные изменения
@@ -1268,6 +1304,10 @@ export default function VPNServiceApp() {
         setSuccess('Вход выполнен успешно')
         setLoginData({ email: '', password: '' })
       setView(userData.role === 'admin' ? 'admin' : 'dashboard')
+      // Устанавливаем вкладку "Подписки" после входа
+      if (userData.role !== 'admin') {
+        setDashboardTab('subscription')
+      }
     } catch (err) {
       logger.error('Auth', 'Ошибка входа', { email }, err)
       
@@ -1387,6 +1427,8 @@ export default function VPNServiceApp() {
       setSuccess('Регистрация выполнена успешно! Теперь вы можете получить ключ в личном кабинете.')
         setLoginData({ email: '', password: '', name: '' })
       setView('dashboard')
+      // Устанавливаем вкладку "Подписки" после регистрации
+      setDashboardTab('subscription')
     } catch (err) {
       logger.error('Auth', 'Ошибка регистрации', { email }, err)
       
@@ -2007,7 +2049,10 @@ export default function VPNServiceApp() {
         devices: updatedData?.devices,
         periodMonths: updatedData?.periodMonths,
         paymentStatus: updatedData?.paymentStatus,
-        hasVpnLink: !!updatedData?.vpnLink
+        hasVpnLink: !!updatedData?.vpnLink,
+        hasPaymentUrl: !!updatedData?.paymentUrl,
+        requiresPayment: updatedData?.requiresPayment,
+        allKeys: updatedData ? Object.keys(updatedData) : []
       })
       
       if (!updatedData) {
@@ -2015,6 +2060,23 @@ export default function VPNServiceApp() {
         throw new Error('Не удалось создать подписку: сервис не вернул данные')
       }
       
+      // Если результат содержит ссылку на оплату, возвращаем её БЕЗ создания подписки
+      if (updatedData && updatedData.paymentUrl && updatedData.requiresPayment) {
+        return {
+          paymentUrl: updatedData.paymentUrl,
+          orderId: updatedData.orderId,
+          amount: updatedData.amount,
+          requiresPayment: true,
+          message: updatedData.message || 'Требуется оплата для активации подписки',
+          tariffName: updatedData.tariffName || tariff?.name,
+          tariffId: updatedData.tariffId || tariff?.id,
+          devices: updatedData.devices || devices || 1,
+          periodMonths: updatedData.periodMonths || periodMonths || 1,
+          discount: updatedData.discount || discount || 0
+        }
+      }
+      
+      // Если мы дошли до этого места, подписка была создана успешно
       logger.info('Dashboard', 'Подписка создана через Backend Proxy', { 
         email: currentUser.email,
         uuid: updatedData.uuid,
@@ -2023,7 +2085,7 @@ export default function VPNServiceApp() {
         periodMonths: updatedData.periodMonths,
         paymentStatus: updatedData.paymentStatus
       })
-
+      
       // Обновляем локальное состояние с данными от n8n
       const updatedUser = {
         ...currentUser,
@@ -2063,19 +2125,8 @@ export default function VPNServiceApp() {
       
       setCurrentUser(updatedUser)
       setUsers(users.map(u => u.id === currentUser.id ? updatedUser : u))
-
-      setSelectedTariff(null)
       
-      // Если результат содержит ссылку на оплату, возвращаем её
-      if (updatedData && updatedData.paymentUrl && updatedData.requiresPayment) {
-        return {
-          paymentUrl: updatedData.paymentUrl,
-          orderId: updatedData.orderId,
-          amount: updatedData.amount,
-          requiresPayment: true,
-          message: updatedData.message || 'Требуется оплата для активации подписки'
-        }
-      }
+      setSelectedTariff(null)
       
       // Возвращаем данные, включая ссылку VPN и детали подписки
       return {
@@ -2145,7 +2196,7 @@ export default function VPNServiceApp() {
       return
     }
 
-    await handleCreateSubscription(tariff)
+    return await handleCreateSubscription(tariff)
   }, [currentUser?.id, tariffs, handleCreateSubscription])
 
   // Удаление/отмена подписки
@@ -3559,6 +3610,11 @@ export default function VPNServiceApp() {
     setEditingTariff(prev => prev ? { ...prev, active: newValue } : null)
   }, [])
 
+  const handleTariffSubscriptionLinkChange = useCallback((e) => {
+    const newValue = e.target.value
+    setEditingTariff(prev => prev ? { ...prev, subscriptionLink: newValue } : null)
+  }, [])
+
   // Сохранение тарифа (только редактирование существующих SUPER и MULTI)
   const handleSaveTariff = useCallback(async (tariffData) => {
     if (!db) return
@@ -3783,6 +3839,7 @@ export default function VPNServiceApp() {
           onHandleTariffTrafficGBChange={handleTariffTrafficGBChange}
           onHandleTariffDurationDaysChange={handleTariffDurationDaysChange}
           onHandleTariffActiveChange={handleTariffActiveChange}
+          onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
         />
       </AdminProviderWrapper>
     )
@@ -3828,6 +3885,7 @@ export default function VPNServiceApp() {
         showLogger={showLogger}
         onSetShowLogger={setShowLogger}
         onGetKey={handleGetKey}
+        servers={servers}
       />
     )
   }

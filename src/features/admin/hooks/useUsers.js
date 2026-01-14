@@ -1,4 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { collection, onSnapshot } from 'firebase/firestore'
+import { db } from '../../../lib/firebase/config.js'
+import { APP_ID } from '../../../shared/constants/app.js'
 import { adminService } from '../services/adminService.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
@@ -27,6 +30,7 @@ import { handleFirestoreError, logError, withErrorHandling } from '../utils/erro
 export function useUsers(currentUser, users, setUsers, setCurrentUser, settings, setError, setSuccess) {
   const [editingUser, setEditingUser] = useState(null)
   const [loading, setLoading] = useState(false)
+  const unsubscribeRef = useRef(null)
 
   // Нормализация дат пользователя из Firestore
   // Firestore может возвращать даты как Timestamp объекты, ISO строки или числа
@@ -74,11 +78,60 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
 
     setLoading(true)
     try {
+      logger.info('Admin', '🔄 Начало загрузки пользователей (ручное обновление)')
       const usersList = await adminService.loadUsers()
       // Нормализуем даты для всех пользователей
       const normalizedUsers = usersList.map(normalizeUserDates)
-      setUsers(normalizedUsers)
-      logger.info('Admin', 'Пользователи успешно загружены и нормализованы', { count: normalizedUsers.length })
+      
+      // ВАЖНО: При ручном обновлении ВСЕГДА возвращаем новые данные
+      // Это гарантирует, что пользователь увидит актуальные данные из Firestore
+      // даже если наша проверка не обнаружила изменений
+      // Создаем новые объекты для каждого пользователя, чтобы React увидел изменения
+      const freshUsers = normalizedUsers.map(user => ({ ...user }))
+      
+      setUsers(prevUsers => {
+        // Сравниваем по ID и ключевым полям для логирования
+        const prevUsersMap = new Map(prevUsers.map(u => [u.id, u]))
+        const hasRealChanges = freshUsers.some(newUser => {
+          const prevUser = prevUsersMap.get(newUser.id)
+          if (!prevUser) return true // Новый пользователь
+          
+          // Сравниваем ключевые поля, которые могут измениться
+          return (
+            prevUser.paymentStatus !== newUser.paymentStatus ||
+            prevUser.expiresAt !== newUser.expiresAt ||
+            prevUser.tariffId !== newUser.tariffId ||
+            prevUser.plan !== newUser.plan ||
+            prevUser.subId !== newUser.subId ||
+            prevUser.uuid !== newUser.uuid ||
+            prevUser.name !== newUser.name ||
+            prevUser.email !== newUser.email ||
+            prevUser.devices !== newUser.devices ||
+            prevUser.trafficGB !== newUser.trafficGB
+          )
+        })
+        
+        const countChanged = prevUsers.length !== freshUsers.length
+        
+        if (hasRealChanges || countChanged) {
+          logger.info('Admin', '✅ Обнаружены изменения при ручном обновлении', { 
+            count: freshUsers.length,
+            prevCount: prevUsers.length,
+            hasRealChanges,
+            countChanged
+          })
+        } else {
+          logger.info('Admin', 'ℹ️ Видимых изменений не обнаружено, но обновляем данные принудительно (ручное обновление)', { 
+            count: freshUsers.length
+          })
+        }
+        
+        // ВСЕГДА возвращаем новые данные при ручном обновлении
+        // Используем freshUsers (новые объекты) для гарантии обновления React
+        return freshUsers
+      })
+      
+      logger.info('Admin', '✅ Пользователи успешно загружены и нормализованы', { count: normalizedUsers.length })
     } catch (err) {
       const errorMessage = handleFirestoreError(err)
       logError('Admin', 'loadUsers', err, { userId: currentUser.id })
@@ -87,6 +140,96 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       setLoading(false)
     }
   }, [currentUser, setUsers, setError])
+
+  // Real-time listener для автоматического обновления списка пользователей
+  useEffect(() => {
+    // Проверка прав доступа - только админы могут подписываться на изменения
+    if (!currentUser || currentUser.role !== 'admin' || !db) {
+      return
+    }
+
+    logger.info('Admin', 'Подписка на real-time обновления пользователей', { adminId: currentUser.id })
+
+    try {
+      const usersCollection = collection(db, `artifacts/${APP_ID}/public/data/users_v4`)
+      
+      // Подписываемся на изменения в коллекции пользователей
+      const unsubscribe = onSnapshot(
+        usersCollection,
+        (snapshot) => {
+          const usersList = []
+          snapshot.forEach((docSnapshot) => {
+            usersList.push({
+              id: docSnapshot.id,
+              ...docSnapshot.data(),
+            })
+          })
+          
+          // Нормализуем даты для всех пользователей
+          const normalizedUsers = usersList.map(normalizeUserDates)
+          
+          // Обновляем состояние только если данные действительно изменились
+          setUsers(prevUsers => {
+            // Сравниваем по ID и ключевым полям для более точного определения изменений
+            const prevUsersMap = new Map(prevUsers.map(u => [u.id, u]))
+            const hasRealChanges = normalizedUsers.some(newUser => {
+              const prevUser = prevUsersMap.get(newUser.id)
+              if (!prevUser) return true // Новый пользователь
+              
+              // Сравниваем ключевые поля, которые могут измениться
+              return (
+                prevUser.paymentStatus !== newUser.paymentStatus ||
+                prevUser.expiresAt !== newUser.expiresAt ||
+                prevUser.tariffId !== newUser.tariffId ||
+                prevUser.plan !== newUser.plan ||
+                prevUser.subId !== newUser.subId ||
+                prevUser.uuid !== newUser.uuid ||
+                prevUser.name !== newUser.name ||
+                prevUser.email !== newUser.email ||
+                prevUser.devices !== newUser.devices ||
+                prevUser.trafficGB !== newUser.trafficGB
+              )
+            })
+            
+            // Также проверяем, изменилось ли количество пользователей
+            const countChanged = prevUsers.length !== normalizedUsers.length
+            
+            if (hasRealChanges || countChanged) {
+              logger.info('Admin', '🔄 Обнаружены изменения в данных пользователей (real-time), обновление списка', { 
+                count: normalizedUsers.length,
+                prevCount: prevUsers.length,
+                hasRealChanges,
+                countChanged
+              })
+              return normalizedUsers
+            }
+            
+            // Если изменений нет, возвращаем предыдущее состояние
+            return prevUsers
+          })
+        },
+        (error) => {
+          logger.error('Admin', 'Ошибка real-time подписки на пользователей', { adminId: currentUser.id }, error)
+          setError('Ошибка обновления списка пользователей')
+        }
+      )
+
+      // Сохраняем функцию отписки
+      unsubscribeRef.current = unsubscribe
+
+      // Очистка при размонтировании или изменении пользователя
+      return () => {
+        if (unsubscribeRef.current) {
+          logger.info('Admin', 'Отписка от real-time обновлений пользователей', { adminId: currentUser.id })
+          unsubscribeRef.current()
+          unsubscribeRef.current = null
+        }
+      }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка настройки real-time подписки на пользователей', { adminId: currentUser.id }, err)
+      setError('Ошибка настройки обновления списка пользователей')
+    }
+  }, [currentUser, db, setUsers, setError])
 
   // Обновление пользователя с валидацией
   const handleUpdateUser = useCallback(async (userId, updates) => {
@@ -167,37 +310,31 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       // Нормализация данных перед сохранением
       const normalizedUser = normalizeUser(updatedUser)
       
-      // Логируем subid отдельно для отладки
-      const oldSubid = Array.isArray(user.subid) ? user.subid : (user.subid ? [user.subid] : [])
-      const newSubid = normalizedUser.subid || []
-      const subidChanged = JSON.stringify(oldSubid) !== JSON.stringify(newSubid)
+      // Логируем subId отдельно для отладки
+      const oldSubId = user.subId || (user.subid ? (Array.isArray(user.subid) ? user.subid[0] : user.subid) : '')
+      const newSubId = normalizedUser.subId || ''
+      const subIdChanged = String(oldSubId || '').trim() !== String(newSubId || '').trim()
       
       logger.info('Admin', 'Сохранение пользователя из карточки', { 
         userId, 
         fields: Object.keys(normalizedUser),
-        subidChanged: subidChanged,
-        oldSubid: oldSubid,
-        newSubid: newSubid,
+        subIdChanged: subIdChanged,
+        oldSubId: oldSubId,
+        newSubId: newSubId,
         changes: Object.keys(normalizedUser).filter(key => {
           const oldValue = user[key]
           const newValue = normalizedUser[key]
-          // Специальная проверка для массивов (subid)
-          if (Array.isArray(oldValue) || Array.isArray(newValue)) {
-            return JSON.stringify(oldValue) !== JSON.stringify(newValue)
-          }
-          return oldValue !== newValue
+          return String(oldValue || '').trim() !== String(newValue || '').trim()
         })
       })
       
       console.log('🔍 handleSaveUserCard: Данные перед сохранением', {
         userId,
         normalizedUser,
-        subid: normalizedUser.subid,
-        subidType: Array.isArray(normalizedUser.subid) ? 'array' : typeof normalizedUser.subid,
-        subidLength: Array.isArray(normalizedUser.subid) ? normalizedUser.subid.length : normalizedUser.subid ? 1 : 0,
-        oldSubid,
-        newSubid,
-        subidChanged,
+        subId: normalizedUser.subId,
+        oldSubId,
+        newSubId,
+        subIdChanged,
       })
       
       // Сохранение в Firestore и 3x-ui
@@ -219,9 +356,7 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
             console.log('✅ Обновление локального состояния пользователя', {
               userId,
               updatedUser,
-              subid: updatedUser.subid,
-              subidType: Array.isArray(updatedUser.subid) ? 'array' : typeof updatedUser.subid,
-              subidLength: Array.isArray(updatedUser.subid) ? updatedUser.subid.length : 0,
+              subId: updatedUser.subId,
               allFields: Object.keys(updatedUser),
             })
             return updatedUser

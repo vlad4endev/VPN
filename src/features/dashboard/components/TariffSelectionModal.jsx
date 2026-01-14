@@ -8,7 +8,8 @@ const TariffSelectionModal = ({
   onConfirm, 
   isLoading = false,
   natrockPorts = [],
-  settings = null
+  settings = null,
+  servers = []
 }) => {
   const [selectedDevices, setSelectedDevices] = useState(1)
   const [selectedPort, setSelectedPort] = useState('')
@@ -19,38 +20,41 @@ const TariffSelectionModal = ({
   const isSuper = tariff?.name?.toLowerCase() === 'super' || tariff?.plan?.toLowerCase() === 'super'
   const isMulti = tariff?.name?.toLowerCase() === 'multi' || tariff?.plan?.toLowerCase() === 'multi'
 
-  // Загружаем натрек-порты из настроек для Multi тарифа
-  useEffect(() => {
-    if (isMulti && settings?.natrockPorts && settings.natrockPorts.length > 0) {
-      setSelectedPort(settings.natrockPorts[0])
-    }
-  }, [isMulti, settings])
+  // Для MULTI тарифа: находим серверы с отметкой multi (через tariffIds)
+  const multiServers = isMulti && tariff?.id 
+    ? servers.filter(server => 
+        server.active && 
+        server.tariffIds && 
+        Array.isArray(server.tariffIds) && 
+        server.tariffIds.includes(tariff.id)
+      )
+    : []
 
   // Для SUPER тарифа: расчет итоговой стоимости с учетом периода и скидки
-  const devicePrice = 150 // Цена одного устройства в рублях за месяц
+  // Используем цену из тарифа (цена за устройство за месяц)
+  const devicePrice = tariff?.price || 150 // Цена одного устройства в рублях за месяц (из настроек тарифа)
   const baseMonthlyPrice = selectedDevices * devicePrice
   const totalMonthlyPrice = baseMonthlyPrice * selectedPeriod
   
-  // Скидка 10% для годовой оплаты (12 месяцев)
+  // Для MULTI тарифа: расчет итоговой стоимости с учетом периода и скидки
+  // Используем цену из тарифа (цена за месяц)
+  const multiBasePrice = tariff?.price || 0 // Цена тарифа MULTI за месяц
+  const multiTotalMonthlyPrice = multiBasePrice * selectedPeriod
+  
+  // Скидка 10% для годовой оплаты (12 месяцев) - для обоих тарифов
   const discount = selectedPeriod === 12 ? 0.1 : 0
-  const discountAmount = discount > 0 ? totalMonthlyPrice * discount : 0
-  const totalPrice = totalMonthlyPrice - discountAmount
+  const discountAmount = discount > 0 ? (isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice) * discount : 0
+  const totalPrice = (isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice) - discountAmount
 
   const handleConfirm = () => {
     logger.debug('TariffSelectionModal', 'handleConfirm вызван', {
       confirmed,
       paymentMode,
       isMulti,
-      selectedPort,
       isSuper,
-      selectedDevices
+      selectedDevices,
+      selectedPeriod
     })
-
-    if (isMulti && !selectedPort) {
-      logger.warn('TariffSelectionModal', 'Порт не выбран для Multi тарифа')
-      alert('Пожалуйста, выберите натрек-порт для тарифа Multi')
-      return
-    }
     
     if (!confirmed) {
       logger.debug('TariffSelectionModal', 'Первое подтверждение - показываем выбор оплаты')
@@ -68,9 +72,9 @@ const TariffSelectionModal = ({
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: isMulti ? selectedPort : null,
-      totalPrice: isSuper ? totalPrice : tariff?.price || 0,
-      periodMonths: isSuper ? selectedPeriod : 1,
+      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      totalPrice: totalPrice,
+      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
       discount: discount,
       discountAmount: discountAmount,
       paymentMode: paymentMode, // 'pay_now' или 'pay_later'
@@ -104,20 +108,13 @@ const TariffSelectionModal = ({
   const handlePayLater = () => {
     logger.debug('TariffSelectionModal', 'Выбрана оплата позже (тестовый период)')
     
-    // Проверка для Multi тарифа
-    if (isMulti && !selectedPort) {
-      logger.error('TariffSelectionModal', 'Порт не выбран для Multi тарифа')
-      alert('Пожалуйста, выберите натрек-порт для тарифа Multi')
-      return
-    }
-    
     // Формируем данные подписки
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: isMulti ? selectedPort : null,
-      totalPrice: isSuper ? totalPrice : tariff?.price || 0,
-      periodMonths: isSuper ? selectedPeriod : 1,
+      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      totalPrice: totalPrice,
+      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
       discount: discount,
       discountAmount: discountAmount,
       paymentMode: 'pay_later',
@@ -178,20 +175,13 @@ const TariffSelectionModal = ({
   const handlePayNow = () => {
     logger.debug('TariffSelectionModal', 'Выбрана оплата сейчас')
     
-    // Проверка для Multi тарифа
-    if (isMulti && !selectedPort) {
-      logger.error('TariffSelectionModal', 'Порт не выбран для Multi тарифа в handlePayNow')
-      alert('Пожалуйста, выберите натрек-порт для тарифа Multi')
-      return
-    }
-    
     // Формируем данные подписки
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: isMulti ? selectedPort : null,
-      totalPrice: isSuper ? totalPrice : tariff?.price || 0,
-      periodMonths: isSuper ? selectedPeriod : 1,
+      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      totalPrice: totalPrice,
+      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
       discount: discount,
       discountAmount: discountAmount,
       paymentMode: 'pay_now',
@@ -380,48 +370,99 @@ const TariffSelectionModal = ({
             </div>
           )}
 
-          {/* Для Multi тарифа: выбор натрек-порта - Mobile First */}
+          {/* Для Multi тарифа: выбор периода оплаты (как в SUPER) */}
           {isMulti && (
-            <div className="space-y-3 sm:space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
-                  Выберите натрек-порт
+                  Период оплаты
                 </label>
-                {natrockPorts && natrockPorts.length > 0 ? (
-                  <select
-                    value={selectedPort}
-                    onChange={(e) => setSelectedPort(e.target.value)}
-                    className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-800 border border-slate-700 rounded-lg text-white text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
-                    disabled={isLoading || confirmed}
-                  >
-                    {natrockPorts.map((port) => (
-                      <option key={port} value={port}>
-                        Порт {port}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="p-3 sm:p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
-                    <div className="flex items-start sm:items-center gap-2 text-yellow-400">
-                      <AlertCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0 mt-0.5 sm:mt-0" />
-                      <span className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
-                        Список натрек-портов не настроен в админ панели
-                      </span>
-                    </div>
-                  </div>
-                )}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { months: 1, label: '1 месяц' },
+                    { months: 3, label: '3 месяца' },
+                    { months: 6, label: '6 месяцев' },
+                    { months: 12, label: 'Год', badge: '−10%' },
+                  ].map((option) => (
+                    <button
+                      key={option.months}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPeriod(option.months)
+                        setConfirmed(false)
+                        setPaymentMode(null)
+                      }}
+                      disabled={isLoading || confirmed}
+                      className={`min-h-[44px] px-2 sm:px-3 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm ${
+                        selectedPeriod === option.months
+                          ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                      } disabled:opacity-50 disabled:cursor-not-allowed relative touch-manipulation`}
+                    >
+                      {option.label}
+                      {option.badge && (
+                        <span className="absolute -top-1.5 sm:-top-2 -right-1.5 sm:-right-2 bg-green-500 text-white text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs px-1 sm:px-1.5 py-0.5 rounded-full font-bold">
+                          {option.badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
+              <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Тариф:</span>
                   <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{tariff?.name}</span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Цена за месяц:</span>
+                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiBasePrice} ₽</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Период:</span>
+                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
+                    {selectedPeriod === 1 ? '1 месяц' :
+                     selectedPeriod === 3 ? '3 месяца' :
+                     selectedPeriod === 6 ? '6 месяцев' :
+                     'Год'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center flex-wrap gap-1">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">Стоимость ({selectedPeriod} {selectedPeriod === 1 ? 'месяц' : selectedPeriod < 5 ? 'месяца' : 'месяцев'}):</span>
+                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiTotalMonthlyPrice.toFixed(2)} ₽</span>
+                </div>
+                {discount > 0 && (
+                  <>
+                    <div className="flex justify-between items-center text-green-400">
+                      <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
+                      <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{discountAmount.toFixed(2)} ₽</span>
+                    </div>
+                  </>
+                )}
                 <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
-                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Цена:</span>
-                  <span className="text-blue-400 font-bold text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] sm:text-2xl">{tariff?.price || 0} ₽</span>
+                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Итого:</span>
+                  <span className="text-blue-400 font-bold text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] sm:text-2xl">{totalPrice.toFixed(2)} ₽</span>
                 </div>
               </div>
+
+              {multiServers.length > 0 && (
+                <div className="bg-blue-900/20 border border-blue-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 text-blue-400 mb-2">
+                    <AlertCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Доступные серверы</span>
+                  </div>
+                  <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
+                    Найдено {multiServers.length} {multiServers.length === 1 ? 'сервер' : multiServers.length < 5 ? 'сервера' : 'серверов'} с отметкой MULTI
+                  </p>
+                </div>
+              )}
+
+              {!confirmed && (
+                <p className="text-slate-400 text-sm text-center">
+                  Нажмите "Подтвердить" для продолжения
+                </p>
+              )}
             </div>
           )}
 
@@ -437,6 +478,16 @@ const TariffSelectionModal = ({
                 {isSuper && (
                   <>
                     {' '}на {selectedDevices} {selectedDevices === 1 ? 'устройство' : 'устройства'}
+                    {' '}на {selectedPeriod === 1 ? '1 месяц' :
+                            selectedPeriod === 3 ? '3 месяца' :
+                            selectedPeriod === 6 ? '6 месяцев' :
+                            'год'}
+                    {' '}за {totalPrice.toFixed(2)} ₽
+                    {discount > 0 && <span className="text-green-400 ml-1">(со скидкой {Math.round(discount * 100)}%)</span>}
+                  </>
+                )}
+                {isMulti && (
+                  <>
                     {' '}на {selectedPeriod === 1 ? '1 месяц' :
                             selectedPeriod === 3 ? '3 месяца' :
                             selectedPeriod === 6 ? '6 месяцев' :
@@ -504,7 +555,6 @@ const TariffSelectionModal = ({
                 onClick={handleConfirm}
                 disabled={
                   isLoading || 
-                  (isMulti && !selectedPort) ||
                   (isSuper && selectedDevices < 1)
                 }
                 className="btn-icon-only-mobile min-h-[44px] flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"

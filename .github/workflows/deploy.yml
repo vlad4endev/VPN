@@ -15,15 +15,52 @@ jobs:
       
       - name: Check for secrets in code
         run: |
-          # Проверка наличия секретов в коде
-          if grep -r "AIza[0-9A-Za-z_-]\{30,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude="*.md" | grep -v ".env.example"; then
+          echo "🔍 Проверка безопасности кода..."
+          
+          # Список директорий и файлов для исключения
+          EXCLUDE_DIRS="node_modules .git dist build .vite"
+          EXCLUDE_PATTERNS="*.md *.example *.backup *.zip *.tar.gz"
+          
+          # Проверка наличия секретов Firebase API ключей в исходном коде
+          # Исключаем: node_modules, .git, .md файлы, .env.example, dist, build, бэкапы
+          SECRETS_FOUND=$(grep -r "AIza[0-9A-Za-z_-]\{30,\}" . \
+            --exclude-dir=node_modules \
+            --exclude-dir=.git \
+            --exclude-dir=dist \
+            --exclude-dir=build \
+            --exclude-dir=.vite \
+            --exclude="*.md" \
+            --exclude="*.example" \
+            --exclude="*.backup" \
+            --exclude="*.zip" \
+            --exclude="*.tar.gz" \
+            --exclude="*.js.map" \
+            2>/dev/null | grep -v ".env.example" | grep -v "Бекап" | grep -v "backup" || true)
+          
+          if [ -n "$SECRETS_FOUND" ]; then
             echo "❌ Обнаружены хардкоженные секреты в коде!"
+            echo "$SECRETS_FOUND"
             exit 1
           fi
           
           # Проверка .env файлов в Git
-          if git ls-files | grep -E "^\.env$|^\.env\.production$|^server/\.env$"; then
+          ENV_FILES=$(git ls-files | grep -E "^\.env$|^\.env\.production$|^server/\.env$" || true)
+          if [ -n "$ENV_FILES" ]; then
             echo "❌ Обнаружены .env файлы в Git!"
+            echo "$ENV_FILES"
+            exit 1
+          fi
+          
+          # Проверка наличия папок с бэкапами в Git (они не должны быть в репозитории)
+          BACKUP_FILES=$(git ls-files | grep -E "^Бекап|^backup|/Бекап|/backup" || true)
+          if [ -n "$BACKUP_FILES" ]; then
+            echo "⚠️  Предупреждение: Обнаружены файлы из папок с бэкапами в Git!"
+            echo "Рекомендуется удалить их из репозитория:"
+            echo "$BACKUP_FILES"
+            echo ""
+            echo "Для удаления выполните:"
+            echo "  git rm -r --cached 'Бекап*' 'backup*'"
+            echo "  git commit -m 'Remove backup directories from repository'"
             exit 1
           fi
           

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Plus, Trash2, Link2 } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2 } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
 import { UserCardPropTypes } from './UserCard.propTypes.js'
@@ -51,33 +51,54 @@ const UserCard = ({
   const [saveError, setSaveError] = useState(null)
 
   // Обновляем editingUser при изменении user prop
+  // ВАЖНО: Всегда используем актуальные данные из user prop для синхронизации
   useEffect(() => {
     if (user) {
-      // Убеждаемся, что subid всегда массив
-      const normalizedSubid = Array.isArray(user.subid) 
-        ? user.subid.filter(s => s !== null && s !== undefined && String(s).trim() !== '')
-        : (user.subid && String(user.subid).trim() !== '' ? [String(user.subid).trim()] : [])
+      // Используем subId (строка), приоритет у subId, если нет - используем subid (для обратной совместимости)
+      const normalizedSubId = user.subId 
+        ? String(user.subId).trim() 
+        : (user.subid 
+          ? (Array.isArray(user.subid) && user.subid.length > 0 
+              ? String(user.subid[0]).trim() 
+              : String(user.subid).trim())
+          : '')
+      
+      // Нормализуем UUID - всегда берем из актуальных данных user
+      const normalizedUUID = user.uuid ? String(user.uuid).trim() : ''
       
       console.log('UserCard: Загрузка пользователя в форму редактирования', {
         userId: user.id,
         email: user.email,
+        uuidFromUser: user.uuid,
+        normalizedUUID: normalizedUUID,
+        subIdFromUser: user.subId,
         subidFromUser: user.subid,
-        subidType: Array.isArray(user.subid) ? 'array' : typeof user.subid,
-        normalizedSubid: normalizedSubid,
-        normalizedSubidLength: normalizedSubid.length,
+        normalizedSubId: normalizedSubId,
       })
       
-      setEditingUser({ 
-        ...user,
-        subid: normalizedSubid
+      setEditingUser(prev => {
+        // Обновляем только если данные действительно изменились
+        const newEditingUser = { 
+          ...user,
+          subId: normalizedSubId,
+          uuid: normalizedUUID || prev.uuid || '' // Сохраняем текущий UUID если новый пустой (пользователь может редактировать)
+        }
+        
+        // Если UUID изменился в user, обновляем его
+        if (normalizedUUID && normalizedUUID !== prev.uuid) {
+          newEditingUser.uuid = normalizedUUID
+        }
+        
+        return newEditingUser
       })
       setErrors({})
       setSaveError(null)
     }
-  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subid])
+  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid])
 
-  // Вычисляем статус на основе editingUser
-  const userStatus = getUserStatus(editingUser)
+  // Вычисляем статус на основе актуальных данных пользователя (user prop)
+  // Это гарантирует, что статус всегда соответствует реальным данным из Firestore
+  const userStatus = getUserStatus(user || editingUser)
 
   // Уникальные ID для полей формы
   const fieldIds = {
@@ -89,7 +110,7 @@ const UserCard = ({
     subscriptionLink: `user-card-subscription-link-${user.id}`,
     trafficGB: `user-card-traffic-gb-${user.id}`,
     devices: `user-card-devices-${user.id}`,
-    subid: `user-card-subid-${user.id}`,
+    subId: `user-card-subid-${user.id}`,
   }
 
   // Обработчик изменений полей с валидацией
@@ -165,41 +186,10 @@ const UserCard = ({
     handleFieldChange('expiresAt', value)
   }, [handleFieldChange])
 
-  // Обработчики для работы с subid (массив)
-  const handleAddSubid = useCallback(() => {
-    setEditingUser(prev => {
-      const currentSubid = Array.isArray(prev.subid) ? prev.subid : (prev.subid ? [prev.subid] : [])
-      return {
-        ...prev,
-        subid: [...currentSubid, '']
-      }
-    })
-  }, [])
-
-  const handleRemoveSubid = useCallback((index) => {
-    setEditingUser(prev => {
-      const currentSubid = Array.isArray(prev.subid) ? prev.subid : (prev.subid ? [prev.subid] : [])
-      const updatedSubid = currentSubid.filter((_, i) => i !== index)
-      return {
-        ...prev,
-        subid: updatedSubid
-      }
-    })
-  }, [])
-
-  const handleSubidChange = useCallback((index, value) => {
-    setEditingUser(prev => {
-      const currentSubid = Array.isArray(prev.subid) ? prev.subid : (prev.subid ? [prev.subid] : [])
-      const updatedSubid = [...currentSubid]
-      // Не используем trim() здесь, чтобы пользователь мог редактировать без проблем
-      // trim() будет применен при нормализации перед сохранением
-      updatedSubid[index] = value
-      return {
-        ...prev,
-        subid: updatedSubid
-      }
-    })
-  }, [])
+  // Обработчик для работы с subId (строка)
+  const handleSubIdChange = useCallback((e) => {
+    handleFieldChange('subId', e.target.value)
+  }, [handleFieldChange])
 
   // Генерация UUID из контекста
   const handleGenerateUUID = useCallback(() => {
@@ -235,38 +225,37 @@ const UserCard = ({
       return
     }
 
-    // Валидация перед сохранением
-    const validation = validateUser(editingUser)
-    if (!validation.isValid) {
-      setSaveError(validation.errors.join(', '))
-      // Помечаем поля с ошибками
-      const fieldErrors = {}
-      validation.errors.forEach(error => {
-        // Можно улучшить, сопоставляя ошибки с полями
-        if (error.includes('UUID')) fieldErrors.uuid = error
-        if (error.includes('Email')) fieldErrors.email = error
-        if (error.includes('телефон')) fieldErrors.phone = error
-        if (error.includes('трафик')) fieldErrors.trafficGB = error
-        if (error.includes('устройств')) fieldErrors.devices = error
-      })
-      setErrors(fieldErrors)
-      return
-    }
-
     setIsSaving(true)
     setSaveError(null)
     setErrors({})
 
     try {
-      // Нормализуем данные перед сохранением (normalizeUser уже обрабатывает subid правильно)
+      // Нормализуем данные перед сохранением (normalizeUser уже обрабатывает subId правильно)
       const normalizedUser = normalizeUser(editingUser)
+      
+      // Валидация после нормализации (чтобы все поля были в правильном формате)
+      const validation = validateUser(normalizedUser)
+      if (!validation.isValid) {
+        setSaveError(validation.errors.join(', '))
+        // Помечаем поля с ошибками
+        const fieldErrors = {}
+        validation.errors.forEach(error => {
+          // Можно улучшить, сопоставляя ошибки с полями
+          if (error.includes('UUID')) fieldErrors.uuid = error
+          if (error.includes('Email')) fieldErrors.email = error
+          if (error.includes('телефон')) fieldErrors.phone = error
+          if (error.includes('трафик')) fieldErrors.trafficGB = error
+          if (error.includes('устройств')) fieldErrors.devices = error
+        })
+        setErrors(fieldErrors)
+        setIsSaving(false)
+        return
+      }
       
       console.log('UserCard: Сохранение пользователя', {
         id: normalizedUser.id,
         fields: Object.keys(normalizedUser),
-        subid: normalizedUser.subid,
-        subidCount: normalizedUser.subid?.length || 0,
-        subidType: Array.isArray(normalizedUser.subid) ? 'array' : typeof normalizedUser.subid,
+        subId: normalizedUser.subId,
         hasHandleSaveUserCard: !!handleSaveUserCard,
         handleSaveUserCardType: typeof handleSaveUserCard,
       })
@@ -275,8 +264,7 @@ const UserCard = ({
       
       // Успешное сохранение - ошибки очищены автоматически
       console.log('UserCard: Пользователь успешно сохранен', {
-        savedSubid: normalizedUser.subid,
-        savedSubidCount: normalizedUser.subid?.length || 0
+        savedSubId: normalizedUser.subId
       })
     } catch (err) {
       console.error('UserCard: Ошибка сохранения:', err)
@@ -289,23 +277,9 @@ const UserCard = ({
 
   // Формируем ссылку на подписку
   // Формат: https://subs.skypath.fun:3458/vk198/{SUBID}
-  // Используем первый непустой элемент из массива subid
-  const getFirstSubid = () => {
-    // Проверяем массив subid (с маленькой буквы)
-    if (Array.isArray(editingUser.subid) && editingUser.subid.length > 0) {
-      const firstSubid = editingUser.subid.find(s => s && String(s).trim() !== '')
-      if (firstSubid) return String(firstSubid).trim()
-    }
-    // Fallback: проверяем subId (с заглавной) для обратной совместимости
-    if (editingUser.subId && String(editingUser.subId).trim() !== '') {
-      return String(editingUser.subId).trim()
-    }
-    return null
-  }
-  
-  const firstSubid = getFirstSubid()
-  const subscriptionLink = firstSubid
-    ? `https://subs.skypath.fun:3458/vk198/${firstSubid}`
+  // Используем subId (строка)
+  const subscriptionLink = editingUser.subId && String(editingUser.subId).trim() !== ''
+    ? `https://subs.skypath.fun:3458/vk198/${String(editingUser.subId).trim()}`
     : editingUser.subscriptionLink || editingUser.vpnLink || null
 
   return (
@@ -393,7 +367,7 @@ const UserCard = ({
                     id={fieldIds.uuid}
                     name="uuid"
                     type="text"
-                    value={editingUser.uuid || ''}
+                    value={editingUser.uuid || user?.uuid || ''}
                     onChange={handleUUIDChange}
                     className={`flex-1 px-4 py-2 bg-slate-900 border rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.uuid ? 'border-red-500' : 'border-slate-700'
@@ -408,9 +382,9 @@ const UserCard = ({
                   >
                     <RefreshCw className="w-4 h-4" />
                   </button>
-                  {editingUser.uuid && (
+                  {(editingUser.uuid || user?.uuid) && (
                     <button
-                      onClick={() => onCopy?.(editingUser.uuid)}
+                      onClick={() => onCopy?.(editingUser.uuid || user?.uuid || '')}
                       className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
                       title="Копировать UUID"
                       type="button"
@@ -419,6 +393,11 @@ const UserCard = ({
                     </button>
                   )}
                 </div>
+                {user?.uuid && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    Актуальный UUID из базы данных: {user.uuid}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -436,18 +415,28 @@ const UserCard = ({
                   <div className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium ${
                     userStatus.status === 'active' ? 'bg-green-900/30 text-green-400' :
                     userStatus.status === 'expired' ? 'bg-red-900/30 text-red-400' :
+                    userStatus.status === 'unpaid' ? 'bg-red-900/30 text-red-400' :
+                    userStatus.status === 'test_period' ? 'bg-yellow-900/30 text-yellow-400' :
+                    userStatus.status === 'inactive' ? 'bg-orange-900/30 text-orange-400' :
+                    userStatus.status === 'no-subscription' ? 'bg-slate-700 text-slate-400' :
                     'bg-slate-700 text-slate-400'
                   }`}>
                     {userStatus.status === 'active' && <CheckCircle2 className="w-4 h-4" />}
-                    {userStatus.status === 'expired' && <XCircle className="w-4 h-4" />}
-                    {userStatus.status === 'no-key' && <AlertCircle className="w-4 h-4" />}
+                    {(userStatus.status === 'expired' || userStatus.status === 'unpaid') && <XCircle className="w-4 h-4" />}
+                    {(userStatus.status === 'no-key' || userStatus.status === 'no-subscription') && <AlertCircle className="w-4 h-4" />}
+                    {userStatus.status === 'test_period' && <AlertCircle className="w-4 h-4" />}
+                    {userStatus.status === 'inactive' && <AlertCircle className="w-4 h-4" />}
                     {userStatus.label}
                   </div>
                 </div>
                 <p className="text-slate-500 text-xs mt-1">
                   {userStatus.status === 'no-key' && 'Добавьте UUID для активации'}
+                  {userStatus.status === 'no-subscription' && 'У пользователя нет активной подписки'}
                   {userStatus.status === 'expired' && 'Установите дату окончания в будущем'}
+                  {userStatus.status === 'unpaid' && 'Подписка не оплачена'}
+                  {userStatus.status === 'inactive' && 'Подписка неактивна'}
                   {userStatus.status === 'active' && 'Подписка активна'}
+                  {userStatus.status === 'test_period' && 'Активен тестовый период'}
                 </p>
               </div>
               <div>
@@ -565,63 +554,27 @@ const UserCard = ({
 
           {/* SubID */}
           <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
-                <Link2 className="w-5 h-5" />
-                SubID
-              </h3>
-              <button
-                onClick={handleAddSubid}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2 text-sm"
-                type="button"
-                title="Добавить SubID"
-              >
-                <Plus className="w-4 h-4" />
-                Добавить
-              </button>
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <Link2 className="w-5 h-5" />
+              SubID
+            </h3>
+            <div>
+              <label htmlFor={fieldIds.subId} className="block text-slate-300 text-sm font-medium mb-2">
+                SubID пользователя
+              </label>
+              <input
+                id={fieldIds.subId}
+                name="subId"
+                type="text"
+                value={editingUser.subId || ''}
+                onChange={handleSubIdChange}
+                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Введите SubID (например: 7vyrlrvx1aiwylh1)"
+              />
+              <p className="text-slate-500 text-xs mt-2">
+                SubID используется для формирования ссылки на подписку в формате 3x-ui
+              </p>
             </div>
-            <div className="space-y-2">
-              {Array.isArray(editingUser.subid) && editingUser.subid.length > 0 ? (
-                editingUser.subid.map((subid, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <input
-                      id={`${fieldIds.subid}-${index}`}
-                      name={`subid-${index}`}
-                      type="text"
-                      value={subid || ''}
-                      onChange={(e) => handleSubidChange(index, e.target.value)}
-                      className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder={`SubID ${index + 1}`}
-                    />
-                    <button
-                      onClick={() => handleRemoveSubid(index)}
-                      className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors flex items-center gap-2"
-                      type="button"
-                      title="Удалить SubID"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="text-slate-400 text-sm py-2 px-4 bg-slate-900 border border-slate-700 rounded">
-                  SubID не добавлены. Нажмите "Добавить" чтобы добавить новый SubID.
-                </div>
-              )}
-              {(!editingUser.subid || editingUser.subid.length === 0) && (
-                <button
-                  onClick={handleAddSubid}
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 border-dashed rounded text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors flex items-center justify-center gap-2"
-                  type="button"
-                >
-                  <Plus className="w-4 h-4" />
-                  Добавить первый SubID
-                </button>
-              )}
-            </div>
-            <p className="text-slate-500 text-xs mt-2">
-              SubID используются для подписок в 3x-ui. Можно добавить несколько значений.
-            </p>
           </div>
 
           {/* Дополнительная информация о подписке от n8n */}
@@ -631,21 +584,23 @@ const UserCard = ({
               Дополнительная информация о подписке
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Период оплаты */}
-              {editingUser.periodMonths && (
-                <div>
-                  <label className="block text-slate-300 text-sm font-medium mb-2">Период оплаты</label>
-                  <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200">
-                    {editingUser.periodMonths} {editingUser.periodMonths === 1 ? 'месяц' : editingUser.periodMonths < 5 ? 'месяца' : 'месяцев'}
-                  </div>
+              {/* Период оплаты - всегда показываем */}
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Период оплаты</label>
+                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200">
+                  {editingUser.periodMonths ? (
+                    `${editingUser.periodMonths} ${editingUser.periodMonths === 1 ? 'месяц' : editingUser.periodMonths < 5 ? 'месяца' : 'месяцев'}`
+                  ) : (
+                    <span className="text-slate-500">Не указан</span>
+                  )}
                 </div>
-              )}
+              </div>
               
-              {/* Статус оплаты */}
-              {editingUser.paymentStatus && (
-                <div>
-                  <label className="block text-slate-300 text-sm font-medium mb-2">Статус оплаты</label>
-                  <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded">
+              {/* Статус оплаты - всегда показываем */}
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Статус оплаты</label>
+                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded">
+                  {editingUser.paymentStatus ? (
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                       editingUser.paymentStatus === 'paid' ? 'bg-green-900/30 text-green-300' :
                       editingUser.paymentStatus === 'test_period' ? 'bg-yellow-900/30 text-yellow-300' :
@@ -655,30 +610,36 @@ const UserCard = ({
                       {editingUser.paymentStatus === 'paid' ? 'Оплачено' :
                        editingUser.paymentStatus === 'test_period' ? 'Тестовый период' :
                        editingUser.paymentStatus === 'unpaid' ? 'Не оплачено' :
-                       editingUser.paymentStatus || 'Не указан'}
+                       editingUser.paymentStatus}
                     </span>
-                  </div>
+                  ) : (
+                    <span className="text-slate-500 text-sm">Не указан</span>
+                  )}
                 </div>
-              )}
+              </div>
               
-              {/* Тестовый период */}
-              {editingUser.testPeriodStartDate && (
-                <div>
-                  <label className="block text-slate-300 text-sm font-medium mb-2">Начало тестового периода</label>
-                  <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                    {formatDate?.(editingUser.testPeriodStartDate) || new Date(editingUser.testPeriodStartDate).toLocaleString()}
-                  </div>
+              {/* Тестовый период - всегда показываем */}
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Начало тестового периода</label>
+                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
+                  {editingUser.testPeriodStartDate ? (
+                    formatDate?.(editingUser.testPeriodStartDate) || new Date(editingUser.testPeriodStartDate).toLocaleString()
+                  ) : (
+                    <span className="text-slate-500">Не указано</span>
+                  )}
                 </div>
-              )}
+              </div>
               
-              {editingUser.testPeriodEndDate && (
-                <div>
-                  <label className="block text-slate-300 text-sm font-medium mb-2">Окончание тестового периода</label>
-                  <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                    {formatDate?.(editingUser.testPeriodEndDate) || new Date(editingUser.testPeriodEndDate).toLocaleString()}
-                  </div>
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Окончание тестового периода</label>
+                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
+                  {editingUser.testPeriodEndDate ? (
+                    formatDate?.(editingUser.testPeriodEndDate) || new Date(editingUser.testPeriodEndDate).toLocaleString()
+                  ) : (
+                    <span className="text-slate-500">Не указано</span>
+                  )}
                 </div>
-              )}
+              </div>
               
               {/* NatRock порт (для Multi тарифа) */}
               {editingUser.natrockPort && (

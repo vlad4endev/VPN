@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
 import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard } from 'lucide-react'
+import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
@@ -66,6 +67,7 @@ const AdminPanel = ({
   onHandleTariffTrafficGBChange,
   onHandleTariffDurationDaysChange,
   onHandleTariffActiveChange,
+  onHandleTariffSubscriptionLinkChange,
 }) => {
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
@@ -155,49 +157,49 @@ const AdminPanel = ({
       <Sidebar currentUser={currentUser} view="admin" onSetView={onSetView} onLogout={onHandleLogout} />
       <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 lg:overflow-y-auto">
         <div className="w-full max-w-[90rem] mx-auto">
-          {/* Шапка - Mobile First */}
-          <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm mb-[clamp(1rem,0.8rem+1vw,2rem)] border border-slate-800">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+          {/* Шапка - Mobile First компактная */}
+          <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 mb-3 sm:mb-4 border border-slate-800">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
               <div className="flex-1 min-w-0">
-                <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-slate-200 flex items-center gap-2">
-                  <Settings className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                <h1 className="text-lg sm:text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-slate-200 flex items-center gap-2">
+                  <Settings className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                   <span className="truncate">Админ-панель</span>
                 </h1>
-                <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-1">Управление системой</p>
+                <p className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-0.5">Управление системой</p>
               </div>
-              <div className="flex items-center gap-2 sm:gap-3 md:gap-4 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => setShowMonitoring(true)}
-                  className="btn-icon-only-mobile min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base flex-1 sm:flex-initial touch-manipulation"
+                  className="btn-icon-only-mobile min-h-[36px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm flex-1 sm:flex-initial touch-manipulation"
                   title="Открыть мониторинг сервера"
                   aria-label="Открыть мониторинг"
                 >
-                  <Monitor className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="btn-text whitespace-nowrap">Мониторинг</span>
                 </button>
                 <button
                   onClick={() => onSetShowLogger(true)}
-                  className="btn-icon-only-mobile min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base flex-1 sm:flex-initial touch-manipulation"
+                  className="btn-icon-only-mobile min-h-[36px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm flex-1 sm:flex-initial touch-manipulation"
                   title="Открыть логи"
                   aria-label="Открыть логи"
                 >
-                  <Bug className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <Bug className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="btn-text whitespace-nowrap">Логи</span>
                 </button>
               </div>
             </div>
           </div>
 
-        {/* Табы - Mobile First: горизонтальная прокрутка на мобильных */}
-        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 mb-[clamp(1rem,0.8rem+1vw,2rem)] overflow-hidden">
-          <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide -mx-1 sm:mx-0">
+        {/* Табы - Mobile First: компактные с горизонтальной прокруткой */}
+        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 mb-3 sm:mb-4 overflow-hidden">
+          <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide">
             {tabs.map((tab) => {
               const Icon = tab.icon
               return (
                 <button
                   key={tab.id}
                   onClick={() => onSetAdminTab(tab.id)}
-                  className={`min-h-[44px] flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 md:px-6 py-3 sm:py-3.5 md:py-4 font-medium transition-all whitespace-nowrap flex-shrink-0 min-w-fit touch-manipulation ${
+                  className={`min-h-[40px] sm:min-h-[44px] flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 md:px-4 lg:px-6 py-2 sm:py-2.5 md:py-3 font-medium transition-all whitespace-nowrap flex-shrink-0 touch-manipulation ${
                     adminTab === tab.id
                       ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800/50'
                       : 'text-slate-400 hover:text-slate-200 active:text-slate-200 hover:bg-slate-800/30 active:bg-slate-800/50'
@@ -205,8 +207,8 @@ const AdminPanel = ({
                   aria-label={tab.label}
                   aria-selected={adminTab === tab.id}
                 >
-                  <Icon className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{tab.label}</span>
+                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                  <span className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{tab.label}</span>
                 </button>
               )
             })}
@@ -258,10 +260,10 @@ const AdminPanel = ({
                 </div>
                 <button
                   onClick={onHandleAddServer}
-                  className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation"
+                  className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                   aria-label="Добавить сервер"
                 >
-                  <PlusCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <PlusCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                   <span className="btn-text whitespace-nowrap">Добавить сервер</span>
                 </button>
               </div>
@@ -438,18 +440,18 @@ const AdminPanel = ({
                             newServerIdRef.current = null
                             onSetEditingServer(null)
                           }}
-                          className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation"
+                          className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                           aria-label="Отмена"
                         >
-                          <X className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                          <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                           <span className="btn-text">Отмена</span>
                         </button>
                         <button
                           type="submit"
-                          className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation"
+                          className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                           aria-label="Сохранить"
                         >
-                          <Save className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                          <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                           <span className="btn-text">Сохранить</span>
                         </button>
                       </div>
@@ -521,7 +523,7 @@ const AdminPanel = ({
                                 <button
                                   onClick={() => onHandleTestServerSession(server)}
                                   disabled={isTesting}
-                                  className="btn-icon-only-mobile min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl text-sm sm:text-base transition-all flex items-center justify-center gap-2 touch-manipulation flex-1 sm:flex-initial"
+                                  className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-base transition-all flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation flex-1 sm:flex-initial"
                                   title="Получить данные сессии и сохранить cookies"
                                   aria-label="Получить данные сессии"
                                 >
@@ -549,18 +551,18 @@ const AdminPanel = ({
                                     })
                                     onSetEditingServer(serverToEdit)
                                   }}
-                                  className="btn-icon-only-mobile min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl text-sm sm:text-base transition-all flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation flex-1 sm:flex-initial"
+                                  className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-base transition-all flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation flex-1 sm:flex-initial"
                                   aria-label="Редактировать сервер"
                                 >
-                                  <Edit2 className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                                  <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                                   <span className="btn-text whitespace-nowrap">Редактировать</span>
                                 </button>
                                 <button
                                   onClick={() => onHandleDeleteServer(server.id)}
-                                  className="btn-icon-only-mobile min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg sm:rounded-xl text-sm sm:text-base transition-all flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation flex-1 sm:flex-initial"
+                                  className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm md:text-base transition-all flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation flex-1 sm:flex-initial"
                                   aria-label="Удалить сервер"
                                 >
-                                  <Trash2 className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                                  <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                                   <span className="btn-text whitespace-nowrap">Удалить</span>
                                 </button>
                               </div>
@@ -673,6 +675,23 @@ const AdminPanel = ({
                     />
                   </div>
                   <div className="md:col-span-2">
+                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-subscription-link`} className="block text-slate-300 text-sm font-medium mb-2">
+                      Ссылка для подписок (без subId)
+                    </label>
+                    <input
+                      id={`tariff-${editingTariff.id || 'new'}-subscription-link`}
+                      name="tariff-subscription-link"
+                      type="url"
+                      value={editingTariff.subscriptionLink || ''}
+                      onChange={onHandleTariffSubscriptionLinkChange}
+                      className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                      placeholder="https://subs.skypath.fun:3458/vk198/"
+                    />
+                    <p className="text-slate-500 text-xs mt-1">
+                      Введите ссылку без subId. При оформлении подписки к ней будет добавлен subId пользователя.
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
                     <label htmlFor={`tariff-${editingTariff.id || 'new'}-active`} className="flex items-center gap-2">
                       <input
                         id={`tariff-${editingTariff.id || 'new'}-active`}
@@ -689,18 +708,18 @@ const AdminPanel = ({
                 <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 mt-4 sm:mt-5">
                   <button
                     onClick={() => onSetEditingTariff(null)}
-                    className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation"
+                    className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                     aria-label="Отмена"
                   >
-                    <X className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                     <span className="btn-text">Отмена</span>
                   </button>
                   <button
                     onClick={() => onHandleSaveTariff(editingTariff)}
-                    className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base touch-manipulation"
+                    className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                     aria-label="Сохранить тариф"
                   >
-                    <Save className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
                     <span className="btn-text">Сохранить</span>
                   </button>
                 </div>
@@ -753,10 +772,10 @@ const AdminPanel = ({
                       <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
                         <button
                           onClick={() => onSetEditingTariff({ ...tariff })}
-                          className="btn-icon-only-mobile min-h-[44px] min-w-[44px] flex-1 sm:flex-initial px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
+                          className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] min-w-[32px] sm:min-w-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                           aria-label="Редактировать тариф"
                         >
-                          <Edit2 className="w-4 h-4 flex-shrink-0" />
+                          <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                           <span className="btn-text">Редактировать</span>
                         </button>
                         {(() => {
@@ -768,10 +787,10 @@ const AdminPanel = ({
                             return (
                               <button
                                 onClick={() => onHandleDeleteTariff(tariff.id)}
-                                className="btn-icon-only-mobile min-h-[44px] min-w-[44px] flex-1 sm:flex-initial px-3 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
+                                className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] min-w-[32px] sm:min-w-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                                 aria-label="Удалить тариф"
                               >
-                                <Trash2 className="w-4 h-4 flex-shrink-0" />
+                                <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                                 <span className="btn-text">Удалить</span>
                               </button>
                             )
@@ -823,10 +842,10 @@ const AdminPanel = ({
                           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                             <button
                               onClick={() => onSetEditingTariff({ ...tariff })}
-                              className="min-h-[44px] px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
+                              className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                               aria-label="Редактировать тариф"
                             >
-                              <Edit2 className="w-4 h-4 flex-shrink-0" />
+                              <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span>Редактировать</span>
                             </button>
                             {(() => {
@@ -838,10 +857,10 @@ const AdminPanel = ({
                                 return (
                                   <button
                                     onClick={() => onHandleDeleteTariff(tariff.id)}
-                                    className="min-h-[44px] px-3 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
+                                    className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                                     aria-label="Удалить тариф"
                                   >
-                                    <Trash2 className="w-4 h-4 flex-shrink-0" />
+                                    <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                                     <span>Удалить</span>
                                   </button>
                                 )

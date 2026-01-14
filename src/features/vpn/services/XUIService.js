@@ -188,10 +188,10 @@ class XUIService {
       // Улучшенная обработка ошибок с понятными сообщениями
       let errorMessage = error.message || 'Не удалось добавить клиента'
       
-      if (error.response?.status === 500 || error.response?.status === 400) {
+      if (error.response?.status === 500 || error.response?.status === 400 || error.response?.status === 503) {
         const errorData = error.response?.data
         
-        // Сначала проверяем errorMessage (новый формат от n8n)
+        // Сначала проверяем errorMessage (новый формат от backend proxy)
         if (errorData?.errorMessage) {
           errorMessage = errorData.errorMessage
           
@@ -200,8 +200,9 @@ class XUIService {
             errorMessage = errorMessage + '\n\n' +
               '📖 Подробная инструкция по исправлению: см. файл N8N_WORKFLOW_SETUP.md в корне проекта'
           }
-        } else if (errorData?.error || errorData?.msg) {
-          const n8nError = errorData.error || errorData.msg
+        } else if (errorData?.error) {
+          // Проверяем поле error (может быть строкой или объектом)
+          const n8nError = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error)
           
           // Проверяем, является ли это ошибкой незарегистрированного webhook
           if (n8nError.includes('not registered') || n8nError.includes('not found')) {
@@ -209,13 +210,37 @@ class XUIService {
           } else {
             errorMessage = `Ошибка на стороне n8n: ${n8nError}`
           }
+        } else if (errorData?.msg) {
+          errorMessage = errorData.msg
+        } else if (errorData?.errorDetails) {
+          // Проверяем поле errorDetails от backend proxy
+          const detailsStr = typeof errorData.errorDetails === 'string' 
+            ? errorData.errorDetails 
+            : JSON.stringify(errorData.errorDetails, null, 2)
+          errorMessage = `Внутренняя ошибка сервера (${error.response.status}). Детали: ${detailsStr.substring(0, 500)}`
+        } else if (errorData?.details) {
+          // Проверяем поле details от backend proxy (старый формат)
+          errorMessage = `Внутренняя ошибка сервера (${error.response.status}). Детали: ${typeof errorData.details === 'string' ? errorData.details : JSON.stringify(errorData.details, null, 2)}`
+        } else if (errorData && typeof errorData === 'object' && Object.keys(errorData).length > 0) {
+          // Показываем полные данные ответа для отладки (ограничиваем длину)
+          const fullErrorData = JSON.stringify(errorData, null, 2)
+          errorMessage = `Внутренняя ошибка сервера (${error.response.status}). Проверьте логи n8n и backend proxy.\n\nОтвет сервера: ${fullErrorData.substring(0, 1000)}${fullErrorData.length > 1000 ? '...' : ''}`
+        } else if (errorData && typeof errorData === 'string' && errorData.trim()) {
+          // Если ответ - строка
+          errorMessage = `Внутренняя ошибка сервера (${error.response.status}). Ответ: ${errorData.substring(0, 500)}`
         } else {
-          errorMessage = 'Внутренняя ошибка сервера (500). Проверьте логи n8n и backend proxy.'
+          // Пустой ответ - скорее всего backend proxy не запущен или ошибка сети
+          errorMessage = `Внутренняя ошибка сервера (${error.response.status}). Получен пустой ответ от сервера.\n\n` +
+            `🔧 Проверьте:\n` +
+            `1. Запущен ли backend proxy на http://localhost:3001\n` +
+            `2. Настроен ли n8n workflow и активирован ли он\n` +
+            `3. Логи backend proxy в консоли\n` +
+            `4. Webhook URL: ${errorData?.webhookUrl || 'не указан'}`
         }
       } else if (error.response?.status === 404) {
         errorMessage = 'Webhook не найден. Проверьте правильность N8N_WEBHOOK_ID и что workflow активен в n8n.'
       } else if (error.response?.data?.errorMessage) {
-        // Ошибка от n8n с детальным сообщением
+        // Ошибка от n8n с детальным сообщением (для других статусов)
         errorMessage = error.response.data.errorMessage
         
         // Если это ошибка конфигурации workflow, добавляем инструкции

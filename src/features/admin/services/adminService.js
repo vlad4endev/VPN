@@ -1,4 +1,4 @@
-import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
@@ -57,36 +57,31 @@ export const adminService = {
       
       // Подготавливаем обновления: сохраняем все поля, включая name и phone
       // ВАЖНО: Явно указываем все поля, чтобы сохранить пустые значения и null
-      // ВАЖНО: subid всегда должен быть массивом, даже если пустым
+      // ВАЖНО: subId всегда должен быть строкой
       const updateData = {
         ...updates,
-        // Явно устанавливаем subid как массив (даже если пустой)
-        subid: updates.subid !== undefined 
-          ? (Array.isArray(updates.subid) ? updates.subid : (updates.subid ? [updates.subid] : []))
-          : undefined, // Если subid не указан, не перезаписываем его
         updatedAt: new Date().toISOString(),
       }
       
-      // Удаляем subid из updateData, если он undefined (чтобы не перезаписать существующее значение)
-      if (updateData.subid === undefined) {
-        delete updateData.subid
+      // Явно устанавливаем subId как строку (нормализуем значение)
+      if (updates.subId !== undefined && updates.subId !== null) {
+        updateData.subId = String(updates.subId).trim()
+      } else if (updates.subId === null || updates.subId === '') {
+        // Если subId явно установлен в null или пустую строку, сохраняем как пустую строку
+        updateData.subId = ''
       }
       
       logger.info('Admin', 'Сохранение в Firestore', { 
         userId, 
         updateData, 
         updateDataKeys: Object.keys(updateData),
-        subid: updateData.subid,
-        subidType: Array.isArray(updateData.subid) ? 'array' : typeof updateData.subid,
-        subidLength: Array.isArray(updateData.subid) ? updateData.subid.length : 0,
+        subId: updateData.subId,
       })
       console.log('🔥 Сохранение в Firestore:', { 
         userId, 
         updateData,
         updateDataKeys: Object.keys(updateData),
-        subid: updateData.subid,
-        subidType: Array.isArray(updateData.subid) ? 'array' : typeof updateData.subid,
-        subidLength: Array.isArray(updateData.subid) ? updateData.subid.length : 0,
+        subId: updateData.subId,
       })
       
       // ВАЖНО: Используем setDoc с merge вместо updateDoc для гарантии сохранения всех полей
@@ -109,23 +104,21 @@ export const adminService = {
             devices: savedData.devices,
             tariffId: savedData.tariffId,
             plan: savedData.plan,
-            subid: savedData.subid,
-            subidType: Array.isArray(savedData.subid) ? 'array' : typeof savedData.subid,
-            subidLength: Array.isArray(savedData.subid) ? savedData.subid.length : savedData.subid ? 1 : 0,
+            subId: savedData.subId,
           }
         })
         
-        // Проверяем, что subid сохранился правильно
-        if (updateData.subid !== undefined) {
-          const savedSubid = savedData.subid
-          const expectedSubid = updateData.subid
-          if (JSON.stringify(savedSubid) !== JSON.stringify(expectedSubid)) {
-            console.warn('⚠️ Предупреждение: subid может быть сохранен некорректно', {
-              expected: expectedSubid,
-              saved: savedSubid,
+        // Проверяем, что subId сохранился правильно
+        if (updateData.subId !== undefined) {
+          const savedSubId = savedData.subId || savedData.subid // Обратная совместимость
+          const expectedSubId = updateData.subId
+          if (String(savedSubId || '').trim() !== String(expectedSubId || '').trim()) {
+            console.warn('⚠️ Предупреждение: subId может быть сохранен некорректно', {
+              expected: expectedSubId,
+              saved: savedSubId,
             })
           } else {
-            console.log('✅ subid успешно сохранен:', savedSubid)
+            console.log('✅ subId успешно сохранен:', savedSubId)
           }
         }
       } else {
@@ -133,29 +126,29 @@ export const adminService = {
       }
 
       // Если обновляем данные в 3x-ui (expiryTime, totalGB, limitIp, subId)
-      // Обновляем в 3x-ui если изменились: expiresAt, trafficGB, devices, uuid, или subid
+      // Обновляем в 3x-ui если изменились: expiresAt, trafficGB, devices, uuid, или subId
       const mergedUser = { ...user, ...updates }
       
-      // Проверяем, изменился ли subid (правильное сравнение массивов)
-      const oldSubid = Array.isArray(user.subid) ? user.subid : (user.subid ? [user.subid] : [])
-      const newSubid = Array.isArray(updates.subid) ? updates.subid : (updates.subid ? [updates.subid] : [])
-      const subidChanged = JSON.stringify(oldSubid) !== JSON.stringify(newSubid)
+      // Проверяем, изменился ли subId (строка)
+      const oldSubId = user.subId || (user.subid ? (Array.isArray(user.subid) ? user.subid[0] : user.subid) : '')
+      const newSubId = updates.subId || ''
+      const subIdChanged = String(oldSubId || '').trim() !== String(newSubId || '').trim()
       
       const shouldUpdateXui = mergedUser.uuid && (
         updates.expiresAt !== undefined || 
         updates.trafficGB !== undefined || 
         updates.devices !== undefined || 
         updates.uuid !== undefined ||
-        (updates.subid !== undefined && subidChanged)
+        (updates.subId !== undefined && subIdChanged)
       )
       
       console.log('🔍 adminService.updateUser: Проверка обновления в 3x-ui', {
         userId,
         shouldUpdateXui,
         hasUuid: !!mergedUser.uuid,
-        subidChanged,
-        oldSubid,
-        newSubid,
+        subIdChanged,
+        oldSubId,
+        newSubId,
         updatesKeys: Object.keys(updates),
       })
       
@@ -164,16 +157,8 @@ export const adminService = {
         if (inboundId) {
           try {
             const expiryTime = mergedUser.expiresAt ? new Date(mergedUser.expiresAt).getTime() : 0
-            // Получаем первый subid из массива (3x-ui использует один subId для клиента)
-            // Если subid - массив, берем первый непустой элемент, иначе сам subid или пустую строку
-            let subId = ''
-            if (mergedUser.subid) {
-              if (Array.isArray(mergedUser.subid) && mergedUser.subid.length > 0) {
-                subId = mergedUser.subid.find(s => s && s.trim() !== '') || mergedUser.subid[0] || ''
-              } else if (typeof mergedUser.subid === 'string' && mergedUser.subid.trim() !== '') {
-                subId = mergedUser.subid.trim()
-              }
-            }
+            // Используем subId (строка) из обновлений или из mergedUser
+            const subId = String(mergedUser.subId || '').trim()
             
             await ThreeXUI.updateClient(inboundId, mergedUser.email, {
               expiryTime: expiryTime,
@@ -408,6 +393,150 @@ export const adminService = {
       logger.info('Admin', 'Тариф удален', { tariffId })
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
+      throw err
+    }
+  },
+
+  /**
+   * Перегенерация уникальных subId для всех пользователей
+   * @returns {Promise<Object>} Результат операции с количеством обновленных пользователей
+   */
+  async regenerateAllSubIds() {
+    if (!db) {
+      throw new Error('База данных недоступна')
+    }
+
+    try {
+      logger.info('Admin', 'Начало перегенерации subId для всех пользователей')
+      
+      // Получаем всех пользователей
+      const usersCollection = collection(db, `artifacts/${APP_ID}/public/data/users_v4`)
+      const usersSnapshot = await getDocs(usersCollection)
+      
+      const users = []
+      usersSnapshot.forEach((docSnapshot) => {
+        users.push({
+          id: docSnapshot.id,
+          ...docSnapshot.data(),
+        })
+      })
+      
+      logger.info('Admin', `Найдено пользователей для обновления: ${users.length}`)
+      
+      let updatedCount = 0
+      let errorCount = 0
+      const errors = []
+      
+      // Генерируем уникальные subId для каждого пользователя
+      const usedSubIds = new Set()
+      
+      for (const user of users) {
+        try {
+          // Генерируем новый subId (формат base36: 16 символов)
+          let newSubId = ThreeXUI.generateSubId()
+          
+          // Проверяем уникальность (хотя вероятность дубликата очень мала)
+          let attempts = 0
+          const maxAttempts = 10
+          while (usedSubIds.has(newSubId) && attempts < maxAttempts) {
+            logger.warn('Admin', `subId ${newSubId} уже использован, генерируем новый`, {
+              userId: user.id,
+              attempt: attempts + 1
+            })
+            newSubId = ThreeXUI.generateSubId()
+            attempts++
+          }
+          
+          if (usedSubIds.has(newSubId)) {
+            // Если не удалось сгенерировать уникальный после всех попыток
+            throw new Error(`Не удалось сгенерировать уникальный subId после ${maxAttempts} попыток`)
+          }
+          
+          usedSubIds.add(newSubId)
+          
+          // Обновляем subId в Firestore
+          const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+          await updateDoc(userDoc, {
+            subId: newSubId,
+            updatedAt: new Date().toISOString(),
+          })
+          
+          updatedCount++
+          logger.info('Admin', `subId перегенерирован для пользователя`, {
+            userId: user.id,
+            email: user.email,
+            oldSubId: user.subId,
+            newSubId: newSubId
+          })
+        } catch (err) {
+          errorCount++
+          const errorInfo = {
+            userId: user.id,
+            email: user.email,
+            error: err.message
+          }
+          errors.push(errorInfo)
+          logger.error('Admin', 'Ошибка перегенерации subId для пользователя', errorInfo, err)
+        }
+      }
+      
+      const result = {
+        total: users.length,
+        updated: updatedCount,
+        errors: errorCount,
+        errorDetails: errors
+      }
+      
+      logger.info('Admin', 'Перегенерация subId завершена', result)
+      return result
+    } catch (err) {
+      logger.error('Admin', 'Ошибка перегенерации subId для всех пользователей', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Удаление всех платежей со статусом 'pending' для всех пользователей
+   * @returns {Promise<Object>} Результат удаления (количество удаленных платежей)
+   */
+  async clearAllPendingPayments() {
+    if (!db) {
+      throw new Error('База данных недоступна')
+    }
+
+    try {
+      logger.info('Admin', 'Очистка всех платежей со статусом pending для всех пользователей')
+      
+      const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+      const pendingQuery = query(
+        paymentsCollection,
+        where('status', '==', 'pending')
+      )
+      const pendingSnapshot = await getDocs(pendingQuery)
+      
+      if (pendingSnapshot.empty) {
+        logger.info('Admin', 'Платежи со статусом pending не найдены')
+        return { deleted: 0, message: 'Не найдено платежей со статусом pending' }
+      }
+      
+      const deletePromises = []
+      pendingSnapshot.forEach((docSnapshot) => {
+        deletePromises.push(deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/payments`, docSnapshot.id)))
+      })
+      
+      await Promise.all(deletePromises)
+      
+      const deletedCount = deletePromises.length
+      logger.info('Admin', 'Все платежи со статусом pending удалены', { 
+        deletedCount 
+      })
+      
+      return { 
+        deleted: deletedCount, 
+        message: `Удалено ${deletedCount} платежей со статусом pending` 
+      }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка удаления всех платежей со статусом pending', null, err)
       throw err
     }
   },

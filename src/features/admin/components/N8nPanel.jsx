@@ -7,7 +7,9 @@ import {
   AlertCircle,
   Link2,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Activity,
+  Zap
 } from 'lucide-react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
@@ -21,7 +23,9 @@ import { useAdminContext } from '../context/AdminContext.jsx'
 const N8nPanel = ({ onSaveSettings }) => {
   const { settings } = useAdminContext()
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [activeWebhookUrl, setActiveWebhookUrl] = useState('') // Действующий webhook из Firestore
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
@@ -30,48 +34,60 @@ const N8nPanel = ({ onSaveSettings }) => {
   const justSavedRef = useRef(false)
 
   // Загрузка webhook URL при монтировании
-  useEffect(() => {
-    const loadWebhookUrl = async () => {
-      if (justSavedRef.current) {
-        logger.debug('Admin', 'Пропуск загрузки URL - только что сохранен')
-        setLoading(false)
-        return
-      }
+  const loadWebhookUrl = useCallback(async (isRefresh = false) => {
+    if (justSavedRef.current && !isRefresh) {
+      logger.debug('Admin', 'Пропуск загрузки URL - только что сохранен')
+      if (!isRefresh) setLoading(false)
+      return
+    }
 
-      if (!db) {
-        setError('База данных недоступна')
-        setLoading(false)
-        return
-      }
+    if (!db) {
+      setError('База данных недоступна')
+      if (!isRefresh) setLoading(false)
+      return
+    }
 
-      try {
-        logger.info('Admin', 'Загрузка webhook URL из Firestore')
-        const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-        const settingsSnapshot = await getDoc(settingsDoc)
-        
-        if (settingsSnapshot.exists()) {
-          const data = settingsSnapshot.data()
-          const url = data.n8nWebhookUrl || data.webhookUrl || ''
-          logger.info('Admin', 'Webhook URL загружен из Firestore', { 
-            n8nWebhookUrl: data.n8nWebhookUrl,
-            webhookUrl: data.webhookUrl,
-            loadedUrl: url
-          })
-          setWebhookUrl(url)
-        } else {
-          logger.debug('Admin', 'Документ настроек не существует в Firestore')
-          setWebhookUrl('')
-        }
-      } catch (err) {
-        logger.error('Admin', 'Ошибка загрузки настроек n8n', null, err)
-        setError('Ошибка загрузки настроек')
-      } finally {
+    try {
+      if (isRefresh) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+      
+      logger.info('Admin', 'Загрузка webhook URL из Firestore', { isRefresh })
+      const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+      const settingsSnapshot = await getDoc(settingsDoc)
+      
+      if (settingsSnapshot.exists()) {
+        const data = settingsSnapshot.data()
+        const url = data.n8nWebhookUrl || data.webhookUrl || ''
+        logger.info('Admin', 'Webhook URL загружен из Firestore', { 
+          n8nWebhookUrl: data.n8nWebhookUrl,
+          webhookUrl: data.webhookUrl,
+          loadedUrl: url
+        })
+        setWebhookUrl(url)
+        setActiveWebhookUrl(url) // Сохраняем действующий webhook
+      } else {
+        logger.debug('Admin', 'Документ настроек не существует в Firestore')
+        setWebhookUrl('')
+        setActiveWebhookUrl('')
+      }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка загрузки настроек n8n', null, err)
+      setError('Ошибка загрузки настроек')
+    } finally {
+      if (isRefresh) {
+        setRefreshing(false)
+      } else {
         setLoading(false)
       }
     }
+  }, [])
 
-    loadWebhookUrl()
-  }, []) // Загружаем только при монтировании
+  useEffect(() => {
+    loadWebhookUrl(false)
+  }, [loadWebhookUrl]) // Загружаем только при монтировании
 
   // Обновление из контекста settings (если они изменились)
   useEffect(() => {
@@ -88,8 +104,16 @@ const N8nPanel = ({ onSaveSettings }) => {
         currentUrl: webhookUrl
       })
       setWebhookUrl(url)
+      setActiveWebhookUrl(url)
     }
   }, [settings, webhookUrl])
+
+  // Обработчик обновления webhook из Firestore
+  const handleRefresh = useCallback(async () => {
+    await loadWebhookUrl(true)
+    setSuccess('Webhook URL обновлен из базы данных')
+    setTimeout(() => setSuccess(null), 2000)
+  }, [loadWebhookUrl])
 
   // Сохранение webhook URL
   const handleSave = useCallback(async () => {
@@ -140,6 +164,7 @@ const N8nPanel = ({ onSaveSettings }) => {
       
       // ВАЖНО: Явно обновляем локальное состояние СРАЗУ после сохранения, чтобы URL отображался в поле
       setWebhookUrl(savedUrl)
+      setActiveWebhookUrl(savedUrl) // Обновляем действующий webhook
       
       // Вызываем callback для обновления локального состояния в родительском компоненте
       if (onSaveSettings) {
@@ -236,10 +261,88 @@ const N8nPanel = ({ onSaveSettings }) => {
           </div>
         )}
 
+        {/* Блок с действующим webhook */}
+        {activeWebhookUrl && (
+          <div className="bg-gradient-to-r from-green-900/20 to-emerald-900/20 border-2 border-green-700/50 rounded-lg p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-2 bg-green-600/20 rounded-lg">
+                  <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-green-400" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-green-300 flex items-center gap-2">
+                    Действующий Webhook
+                    <span className="px-2 py-0.5 bg-green-600/30 border border-green-500/50 rounded text-xs font-semibold text-green-200">
+                      Активен
+                    </span>
+                  </h3>
+                  <p className="text-xs sm:text-sm text-green-400/80 mt-0.5">
+                    Этот webhook используется системой для всех операций с n8n
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="p-2 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                title="Обновить из базы данных"
+              >
+                <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 text-slate-300 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 sm:p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Link2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                <span className="text-xs sm:text-sm font-semibold text-slate-400 uppercase tracking-wide">
+                  Текущий URL
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-sm sm:text-base font-mono text-green-200 break-all pr-2">
+                  {activeWebhookUrl}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(activeWebhookUrl)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                  className="p-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg transition-colors flex-shrink-0"
+                  title="Копировать URL"
+                >
+                  <Copy className={`w-4 h-4 ${copied ? 'text-green-400' : 'text-slate-300'}`} />
+                </button>
+                <a
+                  href={activeWebhookUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 bg-blue-600/50 hover:bg-blue-600/70 rounded-lg transition-colors flex-shrink-0"
+                  title="Открыть в новой вкладке"
+                >
+                  <ExternalLink className="w-4 h-4 text-white" />
+                </a>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-slate-700/50">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm text-slate-400">
+                <div className="flex items-center gap-1.5">
+                  <Zap className="w-3 h-3 sm:w-4 sm:h-4 text-yellow-400" />
+                  <span>Используется для:</span>
+                </div>
+                <span className="px-2 py-1 bg-slate-800/50 rounded text-slate-300">Создание подписок</span>
+                <span className="px-2 py-1 bg-slate-800/50 rounded text-slate-300">Удаление клиентов</span>
+                <span className="px-2 py-1 bg-slate-800/50 rounded text-slate-300">Статистика</span>
+                <span className="px-2 py-1 bg-slate-800/50 rounded text-slate-300">Платежи</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Блок настройки webhook */}
         <div className="space-y-4">
           <div>
             <label className="block text-slate-300 text-sm sm:text-base font-medium mb-2">
-              Webhook URL
+              {activeWebhookUrl ? 'Изменить Webhook URL' : 'Настроить Webhook URL'}
             </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input
@@ -274,9 +377,26 @@ const N8nPanel = ({ onSaveSettings }) => {
               </div>
             </div>
             <p className="text-slate-500 text-xs sm:text-sm mt-2">
-              Введите полный URL webhook из вашего n8n инстанса. Этот URL будет использоваться для всех интеграций с n8n.
+              {activeWebhookUrl 
+                ? 'Введите новый URL webhook для замены текущего. После сохранения он станет действующим.'
+                : 'Введите полный URL webhook из вашего n8n инстанса. Этот URL будет использоваться для всех интеграций с n8n.'
+              }
             </p>
           </div>
+
+          {!activeWebhookUrl && (
+            <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm sm:text-base text-yellow-300">
+                  <p className="font-semibold mb-1">Webhook не настроен</p>
+                  <p className="text-yellow-200/90">
+                    Настройте webhook URL для работы интеграции с n8n. Без него операции с n8n не будут выполняться.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="bg-blue-900/20 border border-blue-800/50 rounded-lg p-4">
             <div className="flex items-start gap-3">
@@ -287,6 +407,9 @@ const N8nPanel = ({ onSaveSettings }) => {
                   <li>Изменение webhook URL применяется ко всем операциям, использующим n8n</li>
                   <li>Убедитесь, что URL корректный и доступен</li>
                   <li>Сохраните изменения для применения настроек</li>
+                  {activeWebhookUrl && (
+                    <li>Текущий действующий webhook отображается выше</li>
+                  )}
                 </ul>
               </div>
             </div>

@@ -13,13 +13,15 @@
 ### Шаг 2: Проверьте .env файл
 Убедитесь, что файл `.env` существует в корне проекта и содержит:
 ```
-VITE_FIREBASE_API_KEY=AIzaSyBiqe1iDUOYxFoUgNhtXoPBKdjXuEhlTVY
-VITE_FIREBASE_AUTH_DOMAIN=skypathvpn.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=skypathvpn
-VITE_FIREBASE_STORAGE_BUCKET=skypathvpn.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=269116595714
-VITE_FIREBASE_APP_ID=1:269116595714:web:9f26a4ed0445150a5b911b
+VITE_FIREBASE_API_KEY=AIzaSy...your_api_key_here
+VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project-id.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789012
+VITE_FIREBASE_APP_ID=1:123456789012:web:abc123def456
 ```
+
+**⚠️ ВАЖНО:** Замените все значения на реальные из вашего Firebase проекта!
 
 ### Шаг 3: Запустите dev сервер ЗАНОВО
 ```bash

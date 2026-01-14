@@ -33,16 +33,19 @@ const SubscriptionSuccessModal = ({
     }
   }
 
-  // Ссылки для скачивания приложений (можно настроить в админ панели)
-  const downloadLinks = {
-    windows: 'https://github.com/MatsuriDayo/nekoray/releases',
-    android: 'https://play.google.com/store/apps/details?id=com.v2ray.ang',
-    ios: 'https://apps.apple.com/app/v2rayng/id1534545688',
-    macos: 'https://github.com/MatsuriDayo/nekoray/releases',
+  // Ссылки для скачивания приложений через happ://add/url_подписки
+  // Это позволяет пользователю сразу получить загруженную подписку в happ proxy
+  const getDownloadLink = () => {
+    if (!vpnLink) return '#'
+    // Используем URL подписки напрямую в happ:// схеме
+    // Формат: happ://add/url_подписки
+    return `happ://add/${vpnLink}`
   }
+  
+  const downloadLink = getDownloadLink()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
       <div
         className="bg-slate-900 border border-slate-800 w-full max-w-[90vw] sm:max-w-2xl rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -221,12 +224,10 @@ const SubscriptionSuccessModal = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               {/* Windows */}
               <a
-                href={downloadLinks.windows}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={downloadLink}
                 className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Скачать для Windows"
-                title="Скачать для Windows"
+                aria-label="Добавить подписку в приложение для Windows"
+                title="Добавить подписку в приложение для Windows"
               >
                 <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Windows</span>
@@ -235,12 +236,10 @@ const SubscriptionSuccessModal = ({
 
               {/* Android */}
               <a
-                href={downloadLinks.android}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={downloadLink}
                 className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Скачать для Android"
-                title="Скачать для Android"
+                aria-label="Добавить подписку в приложение для Android"
+                title="Добавить подписку в приложение для Android"
               >
                 <Smartphone className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Android</span>
@@ -249,12 +248,10 @@ const SubscriptionSuccessModal = ({
 
               {/* iOS */}
               <a
-                href={downloadLinks.ios}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={downloadLink}
                 className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Скачать для iOS"
-                title="Скачать для iOS"
+                aria-label="Добавить подписку в приложение для iOS"
+                title="Добавить подписку в приложение для iOS"
               >
                 <Tablet className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
@@ -263,12 +260,10 @@ const SubscriptionSuccessModal = ({
 
               {/* macOS */}
               <a
-                href={downloadLinks.macos}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={downloadLink}
                 className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label="Скачать для macOS"
-                title="Скачать для macOS"
+                aria-label="Добавить подписку в приложение для macOS"
+                title="Добавить подписку в приложение для macOS"
               >
                 <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                 <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
