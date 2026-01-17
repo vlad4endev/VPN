@@ -103,6 +103,39 @@ const Dashboard = ({
   // Используем хук для проверки подписок и отправки уведомлений
   useSubscriptionNotifications(currentUser)
 
+  // Обработчик события от уведомлений для открытия окна оплаты
+  useEffect(() => {
+    const handleOpenPaymentModal = (event) => {
+      logger.info('Dashboard', 'Получено событие для открытия окна оплаты', {
+        type: event.detail?.type
+      })
+      
+      // Если есть доступные тарифы, открываем модальное окно с первым доступным тарифом
+      if (tariffs && tariffs.length > 0) {
+        // Находим первый активный тариф или просто первый тариф
+        const availableTariff = tariffs.find(t => t.active !== false) || tariffs[0]
+        if (availableTariff) {
+          setSelectedTariff(availableTariff)
+          setShowTariffModal(true)
+          logger.info('Dashboard', 'Открыто модальное окно оплаты по уведомлению', {
+            tariffId: availableTariff.id,
+            tariffName: availableTariff.name
+          })
+        } else {
+          logger.warn('Dashboard', 'Не найден доступный тариф для открытия окна оплаты')
+        }
+      } else {
+        logger.warn('Dashboard', 'Нет доступных тарифов для открытия окна оплаты')
+      }
+    }
+
+    window.addEventListener('openPaymentModal', handleOpenPaymentModal)
+
+    return () => {
+      window.removeEventListener('openPaymentModal', handleOpenPaymentModal)
+    }
+  }, [tariffs])
+
   // Отладочный useEffect для отслеживания изменений состояния модального окна
   useEffect(() => {
     logger.debug('Dashboard', 'Состояние модального окна изменилось', {

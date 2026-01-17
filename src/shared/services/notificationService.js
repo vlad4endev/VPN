@@ -113,8 +113,23 @@ class NotificationService {
         window.focus()
         notification.close()
         
-        // Если есть URL в данных, переходим на него
-        if (options.data && options.data.url) {
+        // Если это уведомление об оплате подписки, отправляем кастомное событие для открытия модального окна
+        if (options.data && options.data.type && 
+            (options.data.type === 'subscription-expiring-soon' || 
+             options.data.type === 'subscription-expiring-today' || 
+             options.data.type === 'subscription-expired')) {
+          // Отправляем кастомное событие для открытия окна оплаты
+          window.dispatchEvent(new CustomEvent('openPaymentModal', {
+            detail: {
+              type: options.data.type,
+              url: options.data.url
+            }
+          }))
+          logger.info('Notification', 'Отправлено событие для открытия окна оплаты', {
+            type: options.data.type
+          })
+        } else if (options.data && options.data.url) {
+          // Для других уведомлений просто переходим на URL
           window.location.href = options.data.url
         }
       }
@@ -140,13 +155,13 @@ class NotificationService {
   }
 
   /**
-   * Уведомление об окончании подписки за 1 день
+   * Уведомление о необходимости оплаты тарифа
    * @param {string} tariffName - Название тарифа
    * @param {string} expiryDate - Дата окончания
    */
   async notifySubscriptionExpiringSoon(tariffName, expiryDate) {
-    const title = 'Подписка скоро истечет'
-    const body = `Ваша подписка "${tariffName}" истечет завтра (${this.formatDate(expiryDate)}). Продлите подписку, чтобы продолжить пользоваться VPN.`
+    const title = 'Пора оплатить подписку'
+    const body = `Ваша подписка "${tariffName}" скоро истечет. Оплатите тариф, чтобы продолжить пользоваться VPN без перерывов.`
     
     return await this.showNotification(title, {
       body,
@@ -156,18 +171,19 @@ class NotificationService {
       badge: '/favicon.ico',
       data: {
         url: '/dashboard?tab=subscription',
-        type: 'subscription-expiring-soon'
+        type: 'subscription-expiring-soon',
+        action: 'open_payment'
       }
     })
   }
 
   /**
-   * Уведомление об окончании подписки в день окончания
+   * Уведомление о необходимости оплаты тарифа (сегодня последний день)
    * @param {string} tariffName - Название тарифа
    */
   async notifySubscriptionExpiringToday(tariffName) {
-    const title = 'Подписка истекает сегодня'
-    const body = `Ваша подписка "${tariffName}" истекает сегодня. Продлите подписку, чтобы не потерять доступ к VPN.`
+    const title = 'Срочно: оплатите подписку'
+    const body = `Ваша подписка "${tariffName}" истекает сегодня! Оплатите тариф сейчас, чтобы не потерять доступ к VPN.`
     
     return await this.showNotification(title, {
       body,
@@ -177,18 +193,19 @@ class NotificationService {
       badge: '/favicon.ico',
       data: {
         url: '/dashboard?tab=subscription',
-        type: 'subscription-expiring-today'
+        type: 'subscription-expiring-today',
+        action: 'open_payment'
       }
     })
   }
 
   /**
-   * Уведомление об окончании подписки
+   * Уведомление об окончании подписки - срочно оплатить
    * @param {string} tariffName - Название тарифа
    */
   async notifySubscriptionExpired(tariffName) {
-    const title = 'Подписка истекла'
-    const body = `Ваша подписка "${tariffName}" истекла. Продлите подписку, чтобы восстановить доступ к VPN.`
+    const title = 'Подписка истекла - оплатите сейчас'
+    const body = `Ваша подписка "${tariffName}" истекла. Оплатите тариф, чтобы восстановить доступ к VPN.`
     
     return await this.showNotification(title, {
       body,
@@ -198,7 +215,8 @@ class NotificationService {
       badge: '/favicon.ico',
       data: {
         url: '/dashboard?tab=subscription',
-        type: 'subscription-expired'
+        type: 'subscription-expired',
+        action: 'open_payment'
       }
     })
   }

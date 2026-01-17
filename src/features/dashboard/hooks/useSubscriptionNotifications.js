@@ -8,11 +8,8 @@ import logger from '../../../shared/utils/logger.js'
  */
 export function useSubscriptionNotifications(currentUser) {
   const notificationInstance = notificationService.getInstance()
-  const lastNotificationRef = useRef({
-    expiringSoon: null,
-    expiringToday: null,
-    expired: null,
-  })
+  // Отслеживаем время последнего уведомления для ограничения частоты (не чаще 2 раз в день)
+  const lastNotificationTimeRef = useRef(null)
 
   useEffect(() => {
     if (!currentUser || !currentUser.id) {
@@ -30,6 +27,7 @@ export function useSubscriptionNotifications(currentUser) {
         const now = Date.now()
         const oneDayMs = 24 * 60 * 60 * 1000
         const oneHourMs = 60 * 60 * 1000
+        const twelveHoursMs = 12 * 60 * 60 * 1000
 
         // Получаем дату окончания подписки
         let expiryTime = null
@@ -54,51 +52,61 @@ export function useSubscriptionNotifications(currentUser) {
         const tariffName = currentUser.tariffName || 'Ваша подписка'
         const timeUntilExpiry = expiryTime - now
         const daysUntilExpiry = Math.floor(timeUntilExpiry / oneDayMs)
-        const hoursUntilExpiry = Math.floor(timeUntilExpiry / oneHourMs)
+        
+        // Определяем время суток (утро: 6-12, вечер: 18-24)
+        const currentHour = new Date(now).getHours()
+        const isMorning = currentHour >= 6 && currentHour < 12
+        const isEvening = currentHour >= 18 && currentHour < 24
 
-        // Уведомление за 1 день до окончания (от 24 до 25 часов)
-        if (timeUntilExpiry > 0 && timeUntilExpiry <= oneDayMs + oneHourMs && timeUntilExpiry >= oneDayMs - oneHourMs) {
-          const lastNotification = lastNotificationRef.current.expiringSoon
-          const shouldNotify = !lastNotification || (now - lastNotification) > oneDayMs
-
-          if (shouldNotify) {
-            await notificationInstance.notifySubscriptionExpiringSoon(tariffName, expiryTime)
-            lastNotificationRef.current.expiringSoon = now
-            logger.info('SubscriptionNotifications', 'Отправлено уведомление: подписка истекает завтра', {
-              userId: currentUser.id,
-              expiryTime: new Date(expiryTime).toISOString()
-            })
-          }
+        // Проверяем, нужно ли отправлять уведомление (два раза в день)
+        // Отправляем если:
+        // 1. Подписка истекает через 7 дней или меньше ИЛИ уже истекла
+        // 2. Сейчас утро (6-12) или вечер (18-24)
+        // 3. Последнее уведомление было больше 12 часов назад
+        
+        const shouldNotifyByTime = (isMorning || isEvening)
+        const shouldNotifyByExpiry = timeUntilExpiry <= 7 * oneDayMs || timeUntilExpiry <= 0
+        
+        if (!shouldNotifyByTime || !shouldNotifyByExpiry) {
+          return
         }
 
-        // Уведомление в день окончания (от 0 до 24 часов до окончания)
-        if (timeUntilExpiry > 0 && timeUntilExpiry <= oneDayMs && timeUntilExpiry > 0) {
-          const lastNotification = lastNotificationRef.current.expiringToday
-          const shouldNotify = !lastNotification || (now - lastNotification) > oneHourMs
+        // Проверяем, не отправляли ли мы уведомление в последние 12 часов
+        const lastNotificationTime = lastNotificationTimeRef.current
+        const shouldNotify = !lastNotificationTime || (now - lastNotificationTime) > twelveHoursMs
 
-          if (shouldNotify && daysUntilExpiry === 0) {
-            await notificationInstance.notifySubscriptionExpiringToday(tariffName)
-            lastNotificationRef.current.expiringToday = now
-            logger.info('SubscriptionNotifications', 'Отправлено уведомление: подписка истекает сегодня', {
-              userId: currentUser.id,
-              hoursLeft: hoursUntilExpiry
-            })
-          }
+        if (!shouldNotify) {
+          return
         }
 
-        // Уведомление когда подписка уже истекла
+        // Определяем тип уведомления в зависимости от времени до окончания
         if (timeUntilExpiry <= 0) {
-          const lastNotification = lastNotificationRef.current.expired
-          const shouldNotify = !lastNotification || (now - lastNotification) > oneDayMs
-
-          if (shouldNotify) {
-            await notificationInstance.notifySubscriptionExpired(tariffName)
-            lastNotificationRef.current.expired = now
-            logger.info('SubscriptionNotifications', 'Отправлено уведомление: подписка истекла', {
-              userId: currentUser.id,
-              expiredAt: new Date(expiryTime).toISOString()
-            })
-          }
+          // Подписка уже истекла
+          await notificationInstance.notifySubscriptionExpired(tariffName)
+          lastNotificationTimeRef.current = now
+          logger.info('SubscriptionNotifications', 'Отправлено уведомление: подписка истекла', {
+            userId: currentUser.id,
+            expiredAt: new Date(expiryTime).toISOString(),
+            timeOfDay: isMorning ? 'morning' : 'evening'
+          })
+        } else if (daysUntilExpiry === 0) {
+          // Подписка истекает сегодня
+          await notificationInstance.notifySubscriptionExpiringToday(tariffName)
+          lastNotificationTimeRef.current = now
+          logger.info('SubscriptionNotifications', 'Отправлено уведомление: подписка истекает сегодня', {
+            userId: currentUser.id,
+            timeOfDay: isMorning ? 'morning' : 'evening'
+          })
+        } else if (daysUntilExpiry <= 7) {
+          // Подписка истекает в ближайшие 7 дней
+          await notificationInstance.notifySubscriptionExpiringSoon(tariffName, expiryTime)
+          lastNotificationTimeRef.current = now
+          logger.info('SubscriptionNotifications', 'Отправлено уведомление: нужно оплатить подписку', {
+            userId: currentUser.id,
+            daysUntilExpiry,
+            expiryTime: new Date(expiryTime).toISOString(),
+            timeOfDay: isMorning ? 'morning' : 'evening'
+          })
         }
       } catch (error) {
         logger.error('SubscriptionNotifications', 'Ошибка при проверке подписки и отправке уведомлений', {
@@ -107,14 +115,58 @@ export function useSubscriptionNotifications(currentUser) {
       }
     }
 
-    // Проверяем сразу
-    checkSubscriptionAndNotify()
+    // Функция для расчета следующего времени проверки (утро или вечер)
+    const getNextCheckTime = () => {
+      const now = new Date()
+      const currentHour = now.getHours()
+      let nextCheck = new Date(now)
+      
+      if (currentHour < 6) {
+        // До 6 утра - проверяем в 6 утра
+        nextCheck.setHours(6, 0, 0, 0)
+      } else if (currentHour < 12) {
+        // Утро (6-12) - уже прошло, следующая проверка в 18:00
+        nextCheck.setHours(18, 0, 0, 0)
+      } else if (currentHour < 18) {
+        // День (12-18) - следующая проверка в 18:00
+        nextCheck.setHours(18, 0, 0, 0)
+      } else {
+        // Вечер (18-24) - уже прошло, следующая проверка завтра в 6:00
+        nextCheck.setDate(nextCheck.getDate() + 1)
+        nextCheck.setHours(6, 0, 0, 0)
+      }
+      
+      return nextCheck.getTime() - now.getTime()
+    }
 
-    // Проверяем каждые 30 минут
-    const interval = setInterval(checkSubscriptionAndNotify, 30 * 60 * 1000)
+    // Проверяем сразу, если сейчас утро или вечер
+    const currentHour = new Date().getHours()
+    if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
+      checkSubscriptionAndNotify()
+    }
+
+    // Устанавливаем таймер на следующую проверку (утро или вечер)
+    const scheduleNextCheck = () => {
+      const delay = getNextCheckTime()
+      setTimeout(() => {
+        checkSubscriptionAndNotify()
+        // После проверки планируем следующую
+        scheduleNextCheck()
+      }, delay)
+    }
+    
+    scheduleNextCheck()
+
+    // Дополнительно проверяем каждый час на случай пропуска основного таймера
+    const hourlyCheck = setInterval(() => {
+      const currentHour = new Date().getHours()
+      if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
+        checkSubscriptionAndNotify()
+      }
+    }, 60 * 60 * 1000)
 
     return () => {
-      clearInterval(interval)
+      clearInterval(hourlyCheck)
     }
   }, [
     currentUser?.id,
