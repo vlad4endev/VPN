@@ -1,13 +1,6 @@
-import React from 'react'
 import { AdminProvider as AdminContextProvider } from '../context/AdminContext.jsx'
 import { useAdmin } from '../hooks/useAdmin.js'
 import { ensureFunction } from '../utils/safeExecute.js'
-
-// Проверка доступности React
-if (!React || !React.useState) {
-  console.error('❌ React не доступен в AdminProvider!', { React, useState: React?.useState })
-  throw new Error('React не инициализирован. Проверьте импорты и конфигурацию сборки.')
-}
 
 /**
  * Обертка-провайдер для админ-панели
