@@ -423,13 +423,14 @@ const Dashboard = ({
 
                 // Вызываем создание подписки через onHandleCreateSubscription (используем ref для стабильности)
                 // ВАЖНО: передаем periodMonths и devices из payment, чтобы подписка была создана с правильными параметрами
+                // paymentMode: 'paid' - платёж уже оплачен, поэтому используем режим 'paid' для правильной обработки
                 const subscriptionResult = await onHandleCreateSubscriptionRef.current(
                   tariff,
                   payment.devices || 1,
                   null, // natrockPort - не используется для SUPER тарифа
                   payment.periodMonths || 1,
                   false, // testPeriod - уже оплачено
-                  'pay_now', // paymentMode - платёж уже оплачен, но режим pay_now для корректной обработки
+                  'paid', // paymentMode - платёж УЖЕ оплачен, используем режим 'paid' для правильной обработки
                   payment.discount || 0
                 )
 
