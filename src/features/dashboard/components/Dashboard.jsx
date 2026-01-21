@@ -149,6 +149,20 @@ const Dashboard = ({
     })
   }, [showSuccessModal, subscriptionSuccess])
 
+  // Сохраняем стабильные ссылки на функции и данные, чтобы избежать перезапуска useEffect
+  const onHandleCreateSubscriptionRef = useRef(onHandleCreateSubscription)
+  const tariffsRef = useRef(tariffs)
+  const currentUserRef = useRef(currentUser)
+  const subscriptionSuccessRef = useRef(subscriptionSuccess)
+
+  // Обновляем refs при изменении
+  useEffect(() => {
+    onHandleCreateSubscriptionRef.current = onHandleCreateSubscription
+    tariffsRef.current = tariffs
+    currentUserRef.current = currentUser
+    subscriptionSuccessRef.current = subscriptionSuccess
+  }, [onHandleCreateSubscription, tariffs, currentUser, subscriptionSuccess])
+
   // Проверка статуса платежа с задержками и повторными попытками
   useEffect(() => {
     if (!paymentOrderId || !showPaymentProcessing) {
@@ -170,14 +184,14 @@ const Dashboard = ({
     // Сбрасываем счетчик попыток
     paymentCheckAttemptsRef.current = 0
 
-    // Этап 1: Через 3 секунды меняем сообщение на "Ожидаем платеж"
+    // Этап 1: Через 5 секунд меняем сообщение на "Ожидаем платеж" (увеличено с 3 до 5 секунд)
     const waitingTimeout = setTimeout(() => {
       logger.debug('Dashboard', 'Переход в режим ожидания платежа', { orderId: paymentOrderId })
       setPaymentProcessingMessage('Ожидаем платеж')
       setPaymentProcessingStatus('waiting')
-    }, 3000)
+    }, 5000)
 
-    // Этап 2: Через 2 секунды (итого 5 секунд) начинаем проверку
+    // Этап 2: Через 10 секунд (итого 15 секунд) начинаем проверку (увеличено с 5 до 15 секунд, чтобы дать время на оплату)
     const checkingTimeout = setTimeout(async () => {
       logger.debug('Dashboard', 'Начинаем проверку платежа через webhook', { orderId: paymentOrderId })
       setPaymentProcessingMessage('Проверяем платеж')
@@ -238,10 +252,12 @@ const Dashboard = ({
                                     statuspayLower === 'успешно'
                 
                 if (isPaidStatus) {
-                  // Получаем данные подписки из subscriptionSuccess или currentUser
-                  const subscriptionData = subscriptionSuccess || {}
-                  const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                  const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                  // Получаем данные подписки из subscriptionSuccess или currentUser (используем refs для стабильности)
+                  const subscriptionData = subscriptionSuccessRef.current || {}
+                  const tariffsList = tariffsRef.current || []
+                  const currentUserData = currentUserRef.current
+                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   // Создаем объект payment из данных n8n
                   payment = {
@@ -249,11 +265,11 @@ const Dashboard = ({
                     status: 'completed',
                     originalStatus: n8nPayment?.statuspay,
                     amount: parseFloat(n8nPayment?.sum) || subscriptionData.amount || 0,
-                    userId: n8nPayment?.uuid || currentUser?.id || null,
+                    userId: n8nPayment?.uuid || currentUserData?.id || null,
                     tariffId: tariff?.id || null,
                     tariffName: tariff?.name || subscriptionData.tariffName || null,
-                    devices: subscriptionData.devices || currentUser?.devices || 1,
-                    periodMonths: subscriptionData.periodMonths || currentUser?.periodMonths || 1,
+                    devices: subscriptionData.devices || currentUserData?.devices || 1,
+                    periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
                     discount: subscriptionData.discount || 0
                   }
                   
@@ -291,16 +307,20 @@ const Dashboard = ({
                 
                 if (isPaidStatus) {
                   // Получаем данные подписки из subscriptionSuccess или currentUser
-                  const subscriptionData = subscriptionSuccess || {}
+                  // Используем refs для стабильности
+                  const subscriptionData = subscriptionSuccessRef.current || {}
+                  const tariffsList = tariffsRef.current || []
+                  const currentUserData = currentUserRef.current
+                  
                   logger.info('Dashboard', 'Получение данных подписки из объекта n8n (автоматическая проверка)', {
-                    hasSubscriptionSuccess: !!subscriptionSuccess,
+                    hasSubscriptionSuccess: !!subscriptionSuccessRef.current,
                     subscriptionTariffName: subscriptionData.tariffName,
-                    currentUserTariffId: currentUser?.tariffId,
-                    availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
+                    currentUserTariffId: currentUserData?.tariffId,
+                    availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
                   })
                   
-                  const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                  const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   // Создаем объект payment из данных n8n
                   payment = {
@@ -308,7 +328,7 @@ const Dashboard = ({
                     status: 'completed',
                     originalStatus: n8nPayment?.statuspay,
                     amount: parseFloat(n8nPayment?.sum) || subscriptionData.amount || 0,
-                    userId: n8nPayment?.uuid || currentUser?.id || null,
+                    userId: n8nPayment?.uuid || currentUserData?.id || null,
                     tariffId: tariff?.id || null,
                     tariffName: tariff?.name || subscriptionData.tariffName || null,
                     devices: subscriptionData.devices || currentUser?.devices || 1,
@@ -362,14 +382,16 @@ const Dashboard = ({
               }
 
               try {
-                // Находим тариф по tariffId из платежа
-                // Если tariffId не указан, берем из subscriptionSuccess или currentUser
-                let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
+                // Находим тариф по tariffId из платежа (используем refs для стабильности)
+                const tariffsList = tariffsRef.current || []
+                const subscriptionData = subscriptionSuccessRef.current || {}
+                const currentUserData = currentUserRef.current
+                
+                let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
                 
                 if (!tariff) {
-                  const subscriptionData = subscriptionSuccess || {}
-                  const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                  tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   if (tariff) {
                     payment.tariffId = tariff.id
@@ -381,7 +403,7 @@ const Dashboard = ({
                   logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
                     tariffId: payment.tariffId,
                     orderId: paymentOrderId,
-                    availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
+                    availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
                   })
                   window.location.reload()
                   return
@@ -389,7 +411,7 @@ const Dashboard = ({
 
                 // Создаем подписку с данными из платежа
                 logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
-                  userId: currentUser.id,
+                  userId: currentUserData?.id,
                   tariffId: tariff.id,
                   tariffName: tariff.name,
                   devices: payment.devices || 1,
@@ -399,9 +421,9 @@ const Dashboard = ({
                   fullPayment: payment
                 })
 
-                // Вызываем создание подписки через onHandleCreateSubscription
+                // Вызываем создание подписки через onHandleCreateSubscription (используем ref для стабильности)
                 // ВАЖНО: передаем periodMonths и devices из payment, чтобы подписка была создана с правильными параметрами
-                const subscriptionResult = await onHandleCreateSubscription(
+                const subscriptionResult = await onHandleCreateSubscriptionRef.current(
                   tariff,
                   payment.devices || 1,
                   null, // natrockPort - не используется для SUPER тарифа
@@ -554,7 +576,7 @@ const Dashboard = ({
 
       // Запускаем первую проверку
       performCheck()
-    }, 5000) // Итого 5 секунд (3 сек ожидание + 2 сек до начала проверки)
+    }, 10000) // Итого 15 секунд (5 сек ожидание + 10 сек до начала проверки) - увеличено для дачи времени на оплату
 
     // Cleanup: останавливаем все таймауты и интервалы
     return () => {
@@ -570,7 +592,9 @@ const Dashboard = ({
       }
       paymentCheckAttemptsRef.current = 0
     }
-  }, [paymentOrderId, showPaymentProcessing, tariffs, onHandleCreateSubscription, currentUser])
+    // Убираем зависимости tariffs, onHandleCreateSubscription, currentUser, subscriptionSuccess из массива зависимостей
+    // Используем refs для доступа к актуальным значениям без перезапуска useEffect
+  }, [paymentOrderId, showPaymentProcessing])
 
   // Отслеживание закрытия окна оплаты
   useEffect(() => {
@@ -627,20 +651,23 @@ const Dashboard = ({
                                       statuspayLower === 'успешно'
                   
                   if (isPaidStatus) {
-                    const subscriptionData = subscriptionSuccess || {}
-                    const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                    const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                    // Используем refs для стабильности
+                    const subscriptionData = subscriptionSuccessRef.current || {}
+                    const tariffsList = tariffsRef.current || []
+                    const currentUserData = currentUserRef.current
+                    const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                    const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                     
                     payment = {
                       orderId: n8nPayment?.orderid || paymentOrderId,
                       status: 'completed',
                       originalStatus: n8nPayment?.statuspay,
                       amount: parseFloat(n8nPayment?.sum) || 0,
-                      userId: n8nPayment?.uuid || currentUser?.id || null,
+                      userId: n8nPayment?.uuid || currentUserData?.id || null,
                       tariffId: tariff?.id || null,
                       tariffName: tariff?.name || subscriptionData.tariffName || null,
-                      devices: subscriptionData.devices || currentUser?.devices || 1,
-                      periodMonths: subscriptionData.periodMonths || currentUser?.periodMonths || 1,
+                      devices: subscriptionData.devices || currentUserData?.devices || 1,
+                      periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
                       discount: subscriptionData.discount || 0
                     }
                   }
@@ -657,20 +684,23 @@ const Dashboard = ({
                                       statuspayLower === 'успешно'
                   
                   if (isPaidStatus) {
-                    const subscriptionData = subscriptionSuccess || {}
-                    const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                    const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                    // Используем refs для стабильности
+                    const subscriptionData = subscriptionSuccessRef.current || {}
+                    const tariffsList = tariffsRef.current || []
+                    const currentUserData = currentUserRef.current
+                    const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                    const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                     
                     payment = {
                       orderId: n8nPayment?.orderid || paymentOrderId,
                       status: 'completed',
                       originalStatus: n8nPayment?.statuspay,
                       amount: parseFloat(n8nPayment?.sum) || 0,
-                      userId: n8nPayment?.uuid || currentUser?.id || null,
+                      userId: n8nPayment?.uuid || currentUserData?.id || null,
                       tariffId: tariff?.id || null,
                       tariffName: tariff?.name || subscriptionData.tariffName || null,
-                      devices: subscriptionData.devices || currentUser?.devices || 1,
-                      periodMonths: subscriptionData.periodMonths || currentUser?.periodMonths || 1,
+                      devices: subscriptionData.devices || currentUserData?.devices || 1,
+                      periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
                       discount: subscriptionData.discount || 0
                     }
                     
@@ -689,17 +719,20 @@ const Dashboard = ({
                   status: payment.status
                 })
                 
-                // Находим тариф
-                let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
+                // Находим тариф (используем refs для стабильности)
+                const tariffsList = tariffsRef.current || []
+                const subscriptionData = subscriptionSuccessRef.current || {}
+                const currentUserData = currentUserRef.current
+                
+                let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
                 if (!tariff) {
-                  const subscriptionData = subscriptionSuccess || {}
-                  const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
-                  tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                 }
                 
-                if (tariff && onHandleCreateSubscription) {
-                  // Создаем подписку с данными из платежа
-                  await onHandleCreateSubscription(
+                if (tariff && onHandleCreateSubscriptionRef.current) {
+                  // Создаем подписку с данными из платежа (используем ref для стабильности)
+                  await onHandleCreateSubscriptionRef.current(
                     tariff,
                     payment.devices || 1,
                     null,
@@ -752,7 +785,9 @@ const Dashboard = ({
     return () => {
       clearInterval(checkWindowClosed)
     }
-  }, [paymentWindowRef, paymentOrderId, tariffs, onHandleCreateSubscription, currentUser])
+    // Убираем зависимости tariffs, onHandleCreateSubscription, currentUser из массива зависимостей
+    // Используем refs для доступа к актуальным значениям без перезапуска useEffect
+  }, [paymentWindowRef, paymentOrderId])
 
   // Синхронизация данных с n8n при загрузке компонента
   useEffect(() => {
