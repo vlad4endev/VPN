@@ -15,6 +15,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import dotenv from 'dotenv'
 import os from 'os'
+import firebaseAdmin from 'firebase-admin'
 
 dotenv.config()
 
@@ -25,7 +26,6 @@ let db = null
 // Инициализация Firebase Admin SDK (асинхронная)
 async function initFirebaseAdmin() {
   try {
-    const firebaseAdmin = await import('firebase-admin')
     const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID
     
     if (!projectId) {
@@ -1412,7 +1412,7 @@ app.post('/api/payment/verify', async (req, res) => {
             hasOrderid: !!result?.orderid,
             hasStatuspay: !!result?.statuspay
           })
-        } else {
+          
           // Если данных в формате n8n нет, проверяем стандартные поля
           paymentData = result?.payment || result?.data?.payment || null
           
