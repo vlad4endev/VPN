@@ -7,10 +7,14 @@ import logger from '../../../shared/utils/logger.js'
  * @param {Object} currentUser - Текущий пользователь
  */
 export function useSubscriptionNotifications(currentUser) {
+  // ВАЖНО: Все хуки должны вызываться всегда, в одном и том же порядке
+  // Нельзя делать ранний return до вызова всех хуков - это нарушает правила хуков React
+  
   // Отслеживаем время последнего уведомления для ограничения частоты (не чаще 2 раз в день)
   const lastNotificationTimeRef = useRef(null)
 
   useEffect(() => {
+    // Проверяем наличие currentUser внутри useEffect
     if (!currentUser || !currentUser.id) {
       return
     }
