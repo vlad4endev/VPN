@@ -309,7 +309,20 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
 // ========== Routes ==========
 
 /**
- * Health Check
+ * Health Check (простой для скриптов запуска)
+ * GET /health
+ */
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'n8n-webhook-proxy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  })
+})
+
+/**
+ * Health Check (полный)
  * GET /api/vpn/health
  * 
  * Простая проверка доступности сервера без обращения к n8n.
