@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import notificationService from '../../../shared/services/notificationService.js'
 import logger from '../../../shared/utils/logger.js'
 
@@ -7,7 +7,6 @@ import logger from '../../../shared/utils/logger.js'
  * @param {Object} currentUser - Текущий пользователь
  */
 export function useSubscriptionNotifications(currentUser) {
-  const notificationInstance = notificationService.getInstance()
   // Отслеживаем время последнего уведомления для ограничения частоты (не чаще 2 раз в день)
   const lastNotificationTimeRef = useRef(null)
 
@@ -15,6 +14,9 @@ export function useSubscriptionNotifications(currentUser) {
     if (!currentUser || !currentUser.id) {
       return
     }
+
+    // Получаем экземпляр notificationService внутри useEffect
+    const notificationInstance = notificationService.getInstance()
 
     // Проверяем разрешение на уведомления
     if (!notificationInstance.hasPermission()) {
@@ -172,7 +174,6 @@ export function useSubscriptionNotifications(currentUser) {
     currentUser?.id,
     currentUser?.expiresAt,
     currentUser?.testPeriodEndDate,
-    currentUser?.tariffName,
-    notificationInstance
+    currentUser?.tariffName
   ])
 }

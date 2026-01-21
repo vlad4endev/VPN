@@ -2053,7 +2053,7 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
     
     // Создаем или обновляем клиента в 3x-ui
     let clientId = userData.uuid
-    const needsClientCreation = !clientId || clientId.trim() === ''
+    const needsClientCreation = !clientId || typeof clientId !== 'string' || clientId.trim() === ''
     
     if (needsClientCreation) {
       // Генерируем новый UUID v4
@@ -2113,7 +2113,7 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
     
     // Генерируем subId для ссылки на подписку (если его еще нет)
     let subId = userData.subId
-    if (!subId || subId.trim() === '') {
+    if (!subId || typeof subId !== 'string' || subId.trim() === '') {
       // Генерируем subId из userId (первые 8 символов) + случайное число
       const userIdShort = userId.substring(0, 8)
       const randomNum = Math.floor(Math.random() * 10000)
