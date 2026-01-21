@@ -792,22 +792,73 @@ app.post('/api/payment/generate-link', async (req, res) => {
     
     console.log('✅ n8n-webhook-proxy: Получен ответ от n8n для генерации ссылки:', {
       hasResult: !!result,
-      resultType: Array.isArray(result) ? 'array' : typeof result,
+      resultType: typeof result,
+      isArray: Array.isArray(result),
       resultLength: Array.isArray(result) ? result.length : undefined,
+      resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
+      hasError: !!(result?.error || result?.errorMessage || result?.message),
+      errorMessage: result?.error || result?.errorMessage || result?.message,
       hasPaymentUrl: Array.isArray(result) ? !!result[0]?.paymentUrl : !!result?.paymentUrl,
       hasOrderId: Array.isArray(result) ? !!result[0]?.orderId : !!result?.orderId,
-      resultKeys: result ? (Array.isArray(result) ? (result[0] ? Object.keys(result[0]) : []) : Object.keys(result)) : [],
-      fullResult: JSON.stringify(result, null, 2).substring(0, 500)
+      fullResult: JSON.stringify(result, null, 2).substring(0, 1000)
     })
+
+    // Проверяем, что result не пустой и не является ошибкой
+    if (!result) {
+      console.error('❌ n8n-webhook-proxy: n8n вернул пустой ответ')
+      return res.status(500).json({
+        success: false,
+        error: 'n8n workflow вернул пустой ответ. Проверьте конфигурацию workflow.',
+      })
+    }
+
+    // Проверяем на ошибки от n8n
+    if (result.error || result.errorMessage || result.message) {
+      const errorMsg = result.error || result.errorMessage || result.message
+      console.error('❌ n8n-webhook-proxy: n8n вернул ошибку:', errorMsg)
+      
+      // Специальная обработка для ошибки "No item to return was found"
+      if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId.',
+        })
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: `Ошибка n8n workflow: ${errorMsg}`,
+      })
+    }
     
     // callN8NWebhook возвращает данные из response.data
     // n8n может вернуть массив или объект, поэтому обрабатываем оба случая
     let responseData = null
     
     if (Array.isArray(result)) {
+      if (result.length === 0) {
+        console.error('❌ n8n-webhook-proxy: n8n вернул пустой массив')
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow вернул пустой массив. Проверьте конфигурацию workflow.',
+        })
+      }
+      
       // Если ответ - массив, берем первый элемент
       // n8n может возвращать [{ json: { paymentUrl: ... } }] или [{ paymentUrl: ... }]
-      const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId) || {}
+      const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId)
+      
+      if (!firstItem) {
+        console.error('❌ n8n-webhook-proxy: Не найдены данные платежа в ответе n8n:', {
+          resultLength: result.length,
+          firstItemKeys: result[0] ? Object.keys(result[0]) : [],
+          resultPreview: JSON.stringify(result).substring(0, 500)
+        })
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow не вернул данные платежа. Убедитесь, что workflow возвращает paymentUrl и orderId.',
+        })
+      }
       
       // Проверяем, есть ли поле json (стандартный формат n8n)
       if (firstItem.json) {
@@ -985,9 +1036,82 @@ app.post('/api/payments/create', async (req, res) => {
 
     const result = await callN8NWebhook(webhookUrl, paymentData)
 
+    console.log('📥 n8n-webhook-proxy: Получен ответ от n8n для создания платежа:', {
+      resultType: typeof result,
+      isArray: Array.isArray(result),
+      arrayLength: Array.isArray(result) ? result.length : null,
+      resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
+      hasError: !!(result?.error || result?.errorMessage || result?.message),
+      errorMessage: result?.error || result?.errorMessage || result?.message,
+      resultPreview: JSON.stringify(result).substring(0, 1000)
+    })
+
+    // Проверяем, что result не пустой и не является ошибкой
+    if (!result) {
+      console.error('❌ n8n-webhook-proxy: n8n вернул пустой ответ')
+      return res.status(500).json({
+        success: false,
+        error: 'n8n workflow вернул пустой ответ. Проверьте конфигурацию workflow.',
+      })
+    }
+
+    // Проверяем на ошибки от n8n
+    if (result.error || result.errorMessage || result.message) {
+      const errorMsg = result.error || result.errorMessage || result.message
+      console.error('❌ n8n-webhook-proxy: n8n вернул ошибку:', errorMsg)
+      
+      // Специальная обработка для ошибки "No item to return was found"
+      if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId.',
+        })
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: `Ошибка n8n workflow: ${errorMsg}`,
+      })
+    }
+
     // Обрабатываем ответ от n8n
-    const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId) || {}
-    const responseData = firstItem.json || firstItem
+    // n8n может возвращать массив [{ json: {...} }] или объект { paymentUrl: ... }
+    let firstItem = null
+    let responseData = null
+
+    if (Array.isArray(result)) {
+      if (result.length === 0) {
+        console.error('❌ n8n-webhook-proxy: n8n вернул пустой массив')
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow вернул пустой массив. Проверьте конфигурацию workflow.',
+        })
+      }
+      firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId)
+      if (!firstItem) {
+        console.error('❌ n8n-webhook-proxy: Не найдены данные платежа в ответе n8n:', {
+          resultLength: result.length,
+          firstItemKeys: result[0] ? Object.keys(result[0]) : [],
+          resultPreview: JSON.stringify(result).substring(0, 500)
+        })
+        return res.status(500).json({
+          success: false,
+          error: 'n8n workflow не вернул данные платежа. Убедитесь, что workflow возвращает paymentUrl и orderId.',
+        })
+      }
+      responseData = firstItem.json || firstItem
+    } else {
+      // Если result - объект, используем его напрямую
+      responseData = result
+    }
+
+    console.log('📦 n8n-webhook-proxy: Обработанные данные от n8n:', {
+      hasPaymentUrl: !!responseData?.paymentUrl,
+      hasOrderId: !!responseData?.orderId,
+      responseDataKeys: responseData ? Object.keys(responseData) : [],
+      paymentUrl: responseData?.paymentUrl,
+      orderId: responseData?.orderId
+    })
 
     // Извлекаем orderId из paymentUrl, если он не передан в ответе n8n
     if (!responseData.orderId && responseData.paymentUrl) {
