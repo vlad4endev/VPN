@@ -125,9 +125,8 @@ export function useAdmin({
   }, [usersHook.generateSubId])
 
   return {
-    // Состояние вкладки
-    adminTab,
-    setAdminTab,
+    // Состояние вкладки управляется в AdminProviderWrapper, не возвращаем его здесь
+    // adminTab и setAdminTab передаются как пропсы, но не возвращаются
     
     // Настройки
     settings: settingsHook.settings,

@@ -224,9 +224,9 @@ export const AdminProviderWrapper = ({ children, ...adminProps }) => {
       'handleTariffActiveChange'
     ),
     
-    // Состояние вкладки
-    adminTab: adminHandlers.adminTab,
-    setAdminTab: adminHandlers.setAdminTab,
+    // Состояние вкладки - используем локальное состояние из AdminProviderWrapper
+    adminTab: adminTab,
+    setAdminTab: setAdminTab,
   }
   
   // ВАЖНО: Убеждаемся, что contextValue всегда определен
