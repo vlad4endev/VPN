@@ -131,78 +131,110 @@ class PaymentService {
 
       logger.info('Payment', 'Получен ответ от сервера (parsed)', {
         hasData: !!data,
-        dataKeys: data ? Object.keys(data) : [],
+        dataKeys: data ? (Array.isArray(data) ? ['[array]'] : Object.keys(data)) : [],
         hasPaymentUrl: !!data?.paymentUrl,
         hasOrderId: !!data?.orderId,
         success: data?.success,
         hasError: !!data?.error,
         dataType: Array.isArray(data) ? 'array' : typeof data,
+        isArray: Array.isArray(data),
+        arrayLength: Array.isArray(data) ? data.length : 0,
         dataPreview: JSON.stringify(data).substring(0, 1000),
         fullData: data
       })
 
+      // Обрабатываем случай, когда ответ - массив (n8n может возвращать массив)
+      let paymentData = null
+      let rawData = data
+      
+      if (Array.isArray(data)) {
+        if (data.length === 0) {
+          logger.error('Payment', 'Ответ от сервера - пустой массив', { data })
+          throw new Error('Неполный ответ от сервера: получен пустой массив')
+        }
+        paymentData = data[0]
+        rawData = paymentData
+        logger.info('Payment', 'Ответ от сервера - массив, извлечен первый элемент', {
+          arrayLength: data.length,
+          hasPaymentUrl: !!paymentData?.paymentUrl,
+          hasOrderId: !!paymentData?.orderId,
+          hasStatus: !!paymentData?.status,
+          hasStatusPay: !!paymentData?.statusPay,
+          keys: paymentData ? Object.keys(paymentData) : []
+        })
+      } else {
+        paymentData = data
+      }
+
       // Проверяем на ошибки в ответе (даже если HTTP статус 200)
-      if (data.error || (data.success === false)) {
-        const errorMessage = data.error || data.message || 'Неизвестная ошибка от сервера'
+      // Проверяем как в объекте, так и в извлеченных данных из массива
+      const errorMessage = rawData?.error || paymentData?.error || rawData?.message || paymentData?.message
+      const hasError = rawData?.error || paymentData?.error || rawData?.success === false || paymentData?.success === false
+      
+      if (hasError) {
         logger.error('Payment', 'Ошибка в ответе от сервера', { 
           error: errorMessage, 
-          success: data.success,
+          success: rawData?.success ?? paymentData?.success,
+          rawData,
+          paymentData,
           fullData: data 
         })
         
         // Специальная обработка для ошибки "No item to return was found"
-        if (errorMessage.includes('No item to return') || errorMessage.includes('No item to return was found')) {
+        if (errorMessage && (errorMessage.includes('No item to return') || errorMessage.includes('No item to return was found'))) {
           throw new Error('Ошибка n8n workflow: workflow не вернул данные. Проверьте конфигурацию workflow в n8n.')
         }
         
-        throw new Error(errorMessage)
+        throw new Error(errorMessage || 'Неизвестная ошибка от сервера')
       }
 
-      // Обрабатываем случай, когда ответ - массив
-      let paymentData = data
-      if (Array.isArray(data) && data.length > 0) {
-        paymentData = data[0]
-        logger.info('Payment', 'Ответ от сервера - массив, извлечен первый элемент', {
-          hasPaymentUrl: !!paymentData?.paymentUrl,
-          hasOrderId: !!paymentData?.orderId
+      // Проверяем, что paymentData существует
+      if (!paymentData || typeof paymentData !== 'object') {
+        logger.error('Payment', 'Неполный ответ от сервера: paymentData отсутствует или не является объектом', {
+          paymentData,
+          originalData: data,
+          dataType: typeof data,
+          isArray: Array.isArray(data)
         })
+        throw new Error('Неполный ответ от сервера: данные отсутствуют или имеют неверный формат')
       }
 
       // Детальная проверка обязательных полей с информативным сообщением
       const requiredFields = ['paymentUrl']
-      const optionalFields = ['orderId', 'amount', 'status']
+      const optionalFields = ['orderId', 'amount', 'status', 'statusPay']
       
       logger.info('Payment', 'Проверка обязательных полей в ответе', {
-        paymentDataKeys: paymentData ? Object.keys(paymentData) : [],
-        hasPaymentUrl: !!paymentData?.paymentUrl,
-        hasOrderId: !!paymentData?.orderId,
-        hasAmount: !!paymentData?.amount,
-        hasStatus: !!paymentData?.status,
-        paymentUrlType: typeof paymentData?.paymentUrl,
-        paymentUrlValue: paymentData?.paymentUrl ? String(paymentData.paymentUrl).substring(0, 100) : null
+        paymentDataKeys: Object.keys(paymentData),
+        hasPaymentUrl: !!paymentData.paymentUrl,
+        hasOrderId: !!paymentData.orderId,
+        hasAmount: !!paymentData.amount,
+        hasStatus: !!paymentData.status,
+        hasStatusPay: !!paymentData.statusPay,
+        paymentUrlType: typeof paymentData.paymentUrl,
+        paymentUrlValue: paymentData.paymentUrl ? String(paymentData.paymentUrl).substring(0, 100) : null,
+        fullPaymentData: paymentData
       })
 
       // Проверяем наличие обязательных полей
       const missingFields = requiredFields.filter(field => {
-        const value = paymentData?.[field]
+        const value = paymentData[field]
         return !value || (typeof value === 'string' && value.trim() === '')
       })
 
       if (missingFields.length > 0) {
         logger.error('Payment', 'Неполный ответ от сервера: отсутствуют обязательные поля', {
           missingFields,
-          receivedFields: paymentData ? Object.keys(paymentData) : [],
+          receivedFields: Object.keys(paymentData),
           paymentData: paymentData,
           originalData: data,
-          allKeys: paymentData ? Object.keys(paymentData) : [],
           paymentUrlCheck: {
-            exists: !!paymentData?.paymentUrl,
-            type: typeof paymentData?.paymentUrl,
-            value: paymentData?.paymentUrl,
-            isEmpty: paymentData?.paymentUrl === '' || paymentData?.paymentUrl === null || paymentData?.paymentUrl === undefined
+            exists: !!paymentData.paymentUrl,
+            type: typeof paymentData.paymentUrl,
+            value: paymentData.paymentUrl,
+            isEmpty: paymentData.paymentUrl === '' || paymentData.paymentUrl === null || paymentData.paymentUrl === undefined
           }
         })
-        throw new Error(`Неполный ответ от сервера. Отсутствуют обязательные поля: ${missingFields.join(', ')}. Полученные поля: ${paymentData ? Object.keys(paymentData).join(', ') : 'нет данных'}`)
+        throw new Error(`Неполный ответ от сервера. Отсутствуют обязательные поля: ${missingFields.join(', ')}. Полученные поля: ${Object.keys(paymentData).join(', ')}`)
       }
 
       // Извлекаем orderId из paymentUrl, если он не передан в ответе
