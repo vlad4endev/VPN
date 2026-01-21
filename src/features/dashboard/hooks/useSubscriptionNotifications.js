@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import notificationService from '../../../shared/services/notificationService.js'
 import logger from '../../../shared/utils/logger.js'
 
