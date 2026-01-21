@@ -1462,22 +1462,40 @@ app.post('/api/payment/webhook', async (req, res) => {
     })
     
     // Логируем успешную обработку платежа
-    if (result?.status === 'success' || result?.success) {
+    // Проверяем статус платежа в ответе от n8n
+    const isPaymentSuccess = result?.status === 'success' || 
+                             result?.success === true || 
+                             result?.statuspay === 'ОПЛАЧЕНО' ||
+                             result?.statuspay === 'оплачено' ||
+                             (result?.result && (result.result.statuspay === 'ОПЛАЧЕНО' || result.result.statuspay === 'оплачено'))
+    
+    if (isPaymentSuccess) {
       console.log('🎉 n8n-webhook-proxy: Платеж успешно обработан!', {
-        orderId: result?.orderId || req.body?.label,
+        orderId: result?.orderId || result?.orderid || req.body?.label,
         operationId: req.body?.operation_id,
-        amount: req.body?.amount
+        amount: req.body?.amount,
+        status: result?.status,
+        statuspay: result?.statuspay || result?.result?.statuspay
       })
       
       // После успешной обработки платежа n8n, обновляем подписку пользователя
       // Это гарантирует, что подписка будет создана/обновлена даже если пользователь закрыл страницу
       if (db && userData.userId && req.body?.label) {
+        console.log('🔄 n8n-webhook-proxy: Запуск активации подписки после успешной оплаты', {
+          userId: userData.userId,
+          orderId: req.body.label
+        })
+        
         try {
           await activateSubscriptionAfterPayment(
             userData.userId,
             req.body.label,
-            result?.orderId || req.body?.label
+            result?.orderId || result?.orderid || req.body?.label
           )
+          console.log('✅ n8n-webhook-proxy: Активация подписки завершена успешно', {
+            userId: userData.userId,
+            orderId: req.body.label
+          })
         } catch (activationError) {
           // Логируем ошибку, но не прерываем ответ YooMoney
           console.error('❌ n8n-webhook-proxy: Ошибка активации подписки после оплаты', {
@@ -1487,7 +1505,20 @@ app.post('/api/payment/webhook', async (req, res) => {
             stack: activationError.stack
           })
         }
+      } else {
+        console.warn('⚠️ n8n-webhook-proxy: Недостаточно данных для активации подписки', {
+          hasDb: !!db,
+          hasUserId: !!userData.userId,
+          hasOrderId: !!req.body?.label
+        })
       }
+    } else {
+      console.log('ℹ️ n8n-webhook-proxy: Платеж обработан, но статус не "успешно"', {
+        orderId: req.body?.label,
+        resultStatus: result?.status,
+        resultSuccess: result?.success,
+        resultStatuspay: result?.statuspay || result?.result?.statuspay
+      })
     }
     
     // YooMoney ожидает ответ 200 OK для успешной обработки
@@ -2021,6 +2052,31 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
       }
     }
     
+    // Генерируем subId для ссылки на подписку (если его еще нет)
+    let subId = userData.subId
+    if (!subId || subId.trim() === '') {
+      // Генерируем subId из userId (первые 8 символов) + случайное число
+      const userIdShort = userId.substring(0, 8)
+      const randomNum = Math.floor(Math.random() * 10000)
+      subId = `${userIdShort}${randomNum}`
+      userUpdateData.subId = subId
+      console.log('🔄 n8n-webhook-proxy: subId сгенерирован для ссылки на подписку', {
+        userId,
+        subId
+      })
+    }
+    
+    // Формируем ссылку на подписку
+    let subscriptionLink = null
+    if (tariffData.subscriptionLinkTemplate) {
+      subscriptionLink = tariffData.subscriptionLinkTemplate.replace('{subId}', subId)
+    } else {
+      // Дефолтная ссылка, если в тарифе не указана
+      subscriptionLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+    }
+    userUpdateData.vpnLink = subscriptionLink
+    userUpdateData.subscriptionLink = subscriptionLink
+    
     // Обновляем пользователя
     await usersCollection.doc(userId).update(userUpdateData)
     console.log('✅ n8n-webhook-proxy: Данные пользователя обновлены после оплаты', {
@@ -2028,7 +2084,9 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
       tariffId,
       expiresAt: new Date(expiresAt).toISOString(),
       devices,
-      periodMonths
+      periodMonths,
+      subscriptionLink,
+      subId
     })
     
     // 6. Обновляем статус платежа и помечаем, что подписка активирована

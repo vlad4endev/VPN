@@ -1067,6 +1067,17 @@ export const dashboardService = {
       testPeriodEndDate = now + (24 * 60 * 60 * 1000) // 24 часа
       expiryTime = testPeriodEndDate
       paymentStatus = 'test_period'
+    } else if (paymentMode === 'paid') {
+      // Платеж уже оплачен - создаем подписку с оплаченным статусом
+      const durationDays = finalPeriodMonths * 30 // Примерно 30 дней в месяце
+      expiryTime = now + (durationDays * 24 * 60 * 60 * 1000)
+      paymentStatus = 'paid'
+      logger.info('Dashboard', 'Создание подписки с уже оплаченным платежом', {
+        userId: user.id,
+        tariffId: tariff.id,
+        periodMonths: finalPeriodMonths,
+        expiresAt: new Date(expiryTime).toISOString()
+      })
     } else {
       // Обычная оплата: период из параметров или тарифа
       const durationDays = finalPeriodMonths * 30 // Примерно 30 дней в месяце
