@@ -56,9 +56,12 @@ const Dashboard = ({
   const [deletingSubscription, setDeletingSubscription] = useState(false)
   const [showPaymentProcessing, setShowPaymentProcessing] = useState(false)
   const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('Формируем подписку...')
+  const [paymentProcessingStatus, setPaymentProcessingStatus] = useState('processing') // 'processing', 'waiting', 'checking', 'error'
   const [paymentWindowRef, setPaymentWindowRef] = useState(null)
   const [paymentOrderId, setPaymentOrderId] = useState(null)
   const paymentPollingIntervalRef = useRef(null)
+  const paymentCheckTimeoutRef = useRef(null)
+  const paymentCheckAttemptsRef = useRef(0)
 
   // Проверяем наличие активной подписки
   // Показываем подписку если:
@@ -146,184 +149,264 @@ const Dashboard = ({
     })
   }, [showSuccessModal, subscriptionSuccess])
 
-  // Polling статуса платежа после открытия окна оплаты
+  // Проверка статуса платежа с задержками и повторными попытками
   useEffect(() => {
-    if (!paymentOrderId) {
-      // Останавливаем polling если нет активного заказа
+    if (!paymentOrderId || !showPaymentProcessing) {
+      // Очищаем все таймауты и интервалы если нет активного заказа
+      if (paymentCheckTimeoutRef.current) {
+        clearTimeout(paymentCheckTimeoutRef.current)
+        paymentCheckTimeoutRef.current = null
+      }
       if (paymentPollingIntervalRef.current) {
-        clearInterval(paymentPollingIntervalRef.current)
+        clearTimeout(paymentPollingIntervalRef.current) // Используем clearTimeout, так как это setTimeout
         paymentPollingIntervalRef.current = null
       }
+      paymentCheckAttemptsRef.current = 0
       return
     }
 
-    logger.debug('Dashboard', 'Запуск polling статуса платежа', { orderId: paymentOrderId })
+    logger.debug('Dashboard', 'Запуск проверки статуса платежа с задержками', { orderId: paymentOrderId })
 
-    const checkPaymentStatus = async () => {
-      try {
-        const { dashboardService } = await import('../services/dashboardService.js')
-        const payment = await dashboardService.checkPaymentStatus(paymentOrderId)
+    // Сбрасываем счетчик попыток
+    paymentCheckAttemptsRef.current = 0
 
-        if (!payment) {
-          logger.warn('Dashboard', 'Платеж не найден', { orderId: paymentOrderId })
-          return
-        }
+    // Этап 1: Через 3 секунды меняем сообщение на "Ожидаем платеж"
+    const waitingTimeout = setTimeout(() => {
+      logger.debug('Dashboard', 'Переход в режим ожидания платежа', { orderId: paymentOrderId })
+      setPaymentProcessingMessage('Ожидаем платеж')
+      setPaymentProcessingStatus('waiting')
+    }, 3000)
 
-        logger.debug('Dashboard', 'Статус платежа проверен', {
-          orderId: paymentOrderId,
-          status: payment.status
-        })
+    // Этап 2: Через 2 секунды (итого 5 секунд) начинаем проверку
+    const checkingTimeout = setTimeout(async () => {
+      logger.debug('Dashboard', 'Начинаем проверку платежа через webhook', { orderId: paymentOrderId })
+      setPaymentProcessingMessage('Проверяем платеж')
+      setPaymentProcessingStatus('checking')
 
-        // Если платеж не прошел (failed, cancelled, rejected)
-        if (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected') {
-          logger.warn('Dashboard', 'Платеж не прошел', {
-            orderId: paymentOrderId,
-            status: payment.status
-          })
-
-          // Останавливаем polling
-          if (paymentPollingIntervalRef.current) {
-            clearInterval(paymentPollingIntervalRef.current)
-            paymentPollingIntervalRef.current = null
-          }
-
-          // Отправляем уведомление о неуспешной оплате
-          try {
-            const notificationInstance = notificationService.getInstance()
-            if (notificationInstance.hasPermission()) {
-              const reason = payment.status === 'cancelled' 
-                ? 'Платеж отменен' 
-                : payment.status === 'rejected'
-                ? 'Платеж отклонен'
-                : 'Ошибка при обработке платежа'
-              await notificationInstance.notifyPaymentFailed(reason)
-              logger.info('Dashboard', 'Уведомление о неуспешной оплате отправлено', { status: payment.status })
-            }
-          } catch (notificationError) {
-            logger.warn('Dashboard', 'Ошибка отправки уведомления о неуспешной оплате', null, notificationError)
-          }
-
-          // Очищаем состояние
-          setPaymentOrderId(null)
-          setPaymentWindowRef(null)
-          setShowPaymentProcessing(false)
+      // Функция проверки платежа через webhook
+      const checkPaymentViaWebhook = async () => {
+        try {
+          const { dashboardService } = await import('../services/dashboardService.js')
           
-          return
-        }
-
-        // Если платеж завершен, создаем подписку и обновляем клиента в 3x-ui
-        if (payment.status === 'completed') {
-          logger.info('Dashboard', 'Платеж завершен успешно, создаем подписку', {
+          logger.debug('Dashboard', 'Отправка webhook для проверки платежа', {
             orderId: paymentOrderId,
-            amount: payment.amount,
-            tariffId: payment.tariffId,
-            tariffName: payment.tariffName,
-            devices: payment.devices,
-            periodMonths: payment.periodMonths
+            attempt: paymentCheckAttemptsRef.current + 1
           })
 
-          // Останавливаем polling
+          // Отправляем webhook для проверки платежа
+          const verifyResult = await dashboardService.verifyPayment(paymentOrderId)
+
+          if (verifyResult && verifyResult.success) {
+            logger.info('Dashboard', 'Платеж найден через webhook', {
+              orderId: paymentOrderId,
+              attempt: paymentCheckAttemptsRef.current + 1,
+              result: verifyResult.result
+            })
+
+            // Проверяем статус платежа в базе данных
+            const payment = await dashboardService.checkPaymentStatus(paymentOrderId)
+
+            if (payment && payment.status === 'completed') {
+              logger.info('Dashboard', 'Платеж завершен успешно, создаем подписку', {
+                orderId: paymentOrderId,
+                amount: payment.amount,
+                tariffId: payment.tariffId,
+                tariffName: payment.tariffName,
+                devices: payment.devices,
+                periodMonths: payment.periodMonths
+              })
+
+              // Останавливаем все проверки
+              if (paymentCheckTimeoutRef.current) {
+                clearTimeout(paymentCheckTimeoutRef.current)
+                paymentCheckTimeoutRef.current = null
+              }
+              if (paymentPollingIntervalRef.current) {
+                clearTimeout(paymentPollingIntervalRef.current)
+                paymentPollingIntervalRef.current = null
+              }
+
+              try {
+                // Находим тариф по tariffId из платежа
+                const tariff = tariffs.find(t => t.id === payment.tariffId)
+                if (!tariff) {
+                  logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
+                    tariffId: payment.tariffId,
+                    orderId: paymentOrderId
+                  })
+                  window.location.reload()
+                  return
+                }
+
+                // Создаем подписку с данными из платежа
+                logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
+                  userId: currentUser.id,
+                  tariffId: tariff.id,
+                  devices: payment.devices || 1,
+                  periodMonths: payment.periodMonths || 1
+                })
+
+                // Вызываем создание подписки через onHandleCreateSubscription
+                const subscriptionResult = await onHandleCreateSubscription(
+                  tariff,
+                  payment.devices || 1,
+                  null, // natrockPort - не используется для SUPER тарифа
+                  payment.periodMonths || 1,
+                  false, // testPeriod - уже оплачено
+                  'pay_now', // paymentMode
+                  payment.discount || 0
+                )
+
+                logger.info('Dashboard', 'Подписка создана после успешной оплаты', {
+                  hasVpnLink: !!subscriptionResult?.vpnLink,
+                  tariffName: subscriptionResult?.tariffName
+                })
+
+                // Отправляем уведомление об успешной оплате
+                try {
+                  const notificationInstance = notificationService.getInstance()
+                  if (notificationInstance.hasPermission()) {
+                    await notificationInstance.notifyPaymentSuccess(
+                      payment.tariffName || tariff.name || 'Подписка',
+                      payment.amount || 0
+                    )
+                    logger.info('Dashboard', 'Уведомление об успешной оплате отправлено')
+                  }
+                } catch (notificationError) {
+                  logger.warn('Dashboard', 'Ошибка отправки уведомления об успешной оплате', null, notificationError)
+                }
+
+                // Закрываем модальное окно обработки
+                setShowPaymentProcessing(false)
+                setPaymentOrderId(null)
+                setPaymentWindowRef(null)
+
+                // Закрываем модальное окно успеха (если открыто)
+                setShowSuccessModal(false)
+                setSubscriptionSuccess(null)
+
+                // Обновляем страницу, чтобы загрузить обновленные данные пользователя
+                setTimeout(() => {
+                  window.location.reload()
+                }, 500)
+              } catch (error) {
+                logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
+                  orderId: paymentOrderId
+                }, error)
+                setTimeout(() => {
+                  window.location.reload()
+                }, 1000)
+              }
+              return true // Платеж найден и обработан
+            } else if (payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected')) {
+              logger.warn('Dashboard', 'Платеж не прошел', {
+                orderId: paymentOrderId,
+                status: payment.status
+              })
+
+              // Останавливаем все проверки
+              if (paymentCheckTimeoutRef.current) {
+                clearTimeout(paymentCheckTimeoutRef.current)
+                paymentCheckTimeoutRef.current = null
+              }
+              if (paymentPollingIntervalRef.current) {
+                clearTimeout(paymentPollingIntervalRef.current)
+                paymentPollingIntervalRef.current = null
+              }
+
+              // Показываем ошибку
+              setPaymentProcessingMessage('Платеж не прошел')
+              setPaymentProcessingStatus('error')
+
+              // Очищаем состояние через 3 секунды
+              setTimeout(() => {
+                setShowPaymentProcessing(false)
+                setPaymentOrderId(null)
+                setPaymentWindowRef(null)
+                setPaymentProcessingStatus('processing')
+                setPaymentProcessingMessage('Формируем подписку...')
+              }, 3000)
+
+              return true // Платеж обработан (не прошел)
+            }
+          }
+
+          // Если платеж не найден, продолжаем проверку
+          paymentCheckAttemptsRef.current++
+          logger.debug('Dashboard', 'Платеж не найден, продолжаем проверку', {
+            orderId: paymentOrderId,
+            attempt: paymentCheckAttemptsRef.current,
+            maxAttempts: 6
+          })
+
+          return false // Платеж не найден
+        } catch (error) {
+          logger.error('Dashboard', 'Ошибка проверки платежа через webhook', {
+            orderId: paymentOrderId,
+            attempt: paymentCheckAttemptsRef.current + 1
+          }, error)
+          paymentCheckAttemptsRef.current++
+          return false // Продолжаем попытки при ошибке
+        }
+      }
+
+      // Выполняем проверку сразу и затем каждые 3 секунды, максимум 6 попыток
+      const performCheck = async () => {
+        if (paymentCheckAttemptsRef.current >= 6) {
+          logger.warn('Dashboard', 'Достигнуто максимальное количество попыток проверки платежа', {
+            orderId: paymentOrderId,
+            attempts: paymentCheckAttemptsRef.current
+          })
+
+          // Останавливаем все проверки
           if (paymentPollingIntervalRef.current) {
-            clearInterval(paymentPollingIntervalRef.current)
+            clearTimeout(paymentPollingIntervalRef.current)
             paymentPollingIntervalRef.current = null
           }
 
-          try {
-            // Находим тариф по tariffId из платежа
-            const tariff = tariffs.find(t => t.id === payment.tariffId)
-            if (!tariff) {
-              logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
-                tariffId: payment.tariffId,
-                orderId: paymentOrderId
-              })
-              // Все равно перезагружаем страницу, webhook мог обработать платеж
-              window.location.reload()
-              return
-            }
+          // Показываем ошибку
+          setPaymentProcessingMessage('Платеж не прошел')
+          setPaymentProcessingStatus('error')
 
-            // Создаем подписку с данными из платежа
-            logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
-              userId: currentUser.id,
-              tariffId: tariff.id,
-              devices: payment.devices || 1,
-              periodMonths: payment.periodMonths || 1
-            })
-
-            // Вызываем создание подписки через onHandleCreateSubscription
-            // Передаем данные из платежа
-            const subscriptionResult = await onHandleCreateSubscription(
-              tariff,
-              payment.devices || 1,
-              null, // natrockPort - не используется для SUPER тарифа
-              payment.periodMonths || 1,
-              false, // testPeriod - уже оплачено
-              'pay_now', // paymentMode
-              payment.discount || 0
-            )
-
-            logger.info('Dashboard', 'Подписка создана после успешной оплаты', {
-              hasVpnLink: !!subscriptionResult?.vpnLink,
-              tariffName: subscriptionResult?.tariffName
-            })
-
-            // Отправляем уведомление об успешной оплате
-            try {
-              const notificationInstance = notificationService.getInstance()
-              if (notificationInstance.hasPermission()) {
-                await notificationInstance.notifyPaymentSuccess(
-                  payment.tariffName || tariff.name || 'Подписка',
-                  payment.amount || 0
-                )
-                logger.info('Dashboard', 'Уведомление об успешной оплате отправлено')
-              }
-            } catch (notificationError) {
-              logger.warn('Dashboard', 'Ошибка отправки уведомления об успешной оплате', null, notificationError)
-            }
-
-            // Очищаем состояние
+          // Очищаем состояние через 3 секунды
+          setTimeout(() => {
+            setShowPaymentProcessing(false)
             setPaymentOrderId(null)
             setPaymentWindowRef(null)
-
-            // Закрываем модальное окно успеха (если открыто)
-            setShowSuccessModal(false)
-            setSubscriptionSuccess(null)
-
-            // Показываем уведомление об успешной оплате перед перезагрузкой
-            setTimeout(() => {
-              // Обновляем страницу, чтобы загрузить обновленные данные пользователя
-              window.location.reload()
-            }, 500)
-          } catch (error) {
-            logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
-              orderId: paymentOrderId
-            }, error)
-            // Все равно перезагружаем страницу, webhook мог обработать платеж
-            setTimeout(() => {
-              window.location.reload()
-            }, 1000)
-          }
+            setPaymentProcessingStatus('processing')
+            setPaymentProcessingMessage('Формируем подписку...')
+            paymentCheckAttemptsRef.current = 0
+          }, 3000)
+          return
         }
-      } catch (error) {
-        logger.error('Dashboard', 'Ошибка проверки статуса платежа', {
-          orderId: paymentOrderId
-        }, error)
+
+        const found = await checkPaymentViaWebhook()
+
+        if (!found && paymentCheckAttemptsRef.current < 6) {
+          // Продолжаем проверку через 3 секунды
+          paymentPollingIntervalRef.current = setTimeout(performCheck, 3000)
+        }
       }
-    }
 
-    // Проверяем статус сразу
-    checkPaymentStatus()
+      // Запускаем первую проверку
+      performCheck()
+    }, 5000) // Итого 5 секунд (3 сек ожидание + 2 сек до начала проверки)
 
-    // Проверяем статус каждые 3 секунды
-    paymentPollingIntervalRef.current = setInterval(checkPaymentStatus, 3000)
-
-    // Cleanup: останавливаем polling при размонтировании или изменении orderId
+    // Cleanup: останавливаем все таймауты и интервалы
     return () => {
+      clearTimeout(waitingTimeout)
+      clearTimeout(checkingTimeout)
+      if (paymentCheckTimeoutRef.current) {
+        clearTimeout(paymentCheckTimeoutRef.current)
+        paymentCheckTimeoutRef.current = null
+      }
       if (paymentPollingIntervalRef.current) {
-        clearInterval(paymentPollingIntervalRef.current)
+        clearTimeout(paymentPollingIntervalRef.current) // Используем clearTimeout, так как это setTimeout, а не setInterval
         paymentPollingIntervalRef.current = null
       }
+      paymentCheckAttemptsRef.current = 0
     }
-  }, [paymentOrderId, tariffs, onHandleCreateSubscription, currentUser])
+  }, [paymentOrderId, showPaymentProcessing, tariffs, onHandleCreateSubscription, currentUser])
 
   // Отслеживание закрытия окна оплаты
   useEffect(() => {
@@ -615,9 +698,6 @@ const Dashboard = ({
       
       console.log('🔍 Dashboard: result после await onHandleCreateSubscription:', result)
       
-      // Закрываем модальное окно обработки платежа
-      setShowPaymentProcessing(false)
-      
       // Если результат содержит ссылку на оплату, открываем её в miniapp
       // Проверяем наличие paymentUrl, даже если requiresPayment не указан явно
       if (result && result.paymentUrl) {
@@ -682,10 +762,16 @@ const Dashboard = ({
         if (paymentWindow) {
           paymentWindow.focus()
           
+          // Обновляем сообщение модального окна обработки - окно меняется
+          setPaymentProcessingMessage('Перенаправление на оплату...')
+          setPaymentProcessingStatus('processing')
+          
           // Сохраняем ссылку на окно и orderId для отслеживания
           setPaymentWindowRef(paymentWindow)
           if (result.orderId) {
             setPaymentOrderId(result.orderId)
+            // Модальное окно обработки остается открытым для отслеживания статуса платежа
+            // Оно будет менять сообщения через useEffect выше
           }
           
           logger.info('Dashboard', 'Окно оплаты открыто, начинаем отслеживание', { 
@@ -696,10 +782,14 @@ const Dashboard = ({
           logger.warn('Dashboard', 'Не удалось открыть окно оплаты (возможно, заблокировано браузером)', {
             paymentUrl: result.paymentUrl
           })
-          // Если окно заблокировано, модальное окно уже показано, пользователь может нажать кнопку в модальном окне
+          // Если окно заблокировано, закрываем модальное окно обработки
+          setShowPaymentProcessing(false)
         }
         return
       }
+      
+      // Закрываем модальное окно обработки платежа если нет ссылки на оплату
+      setShowPaymentProcessing(false)
       
       // Если результат содержит данные подписки, показываем модальное окно успеха
       if (result) {
@@ -1453,9 +1543,16 @@ const Dashboard = ({
         {showPaymentProcessing && (
           <PaymentProcessingModal
             message={paymentProcessingMessage}
+            status={paymentProcessingStatus}
             onClose={() => {
-              // Не позволяем закрыть модальное окно во время обработки
-              // Оно закроется автоматически после получения результата
+              // Закрываем модальное окно только если статус ошибки
+              if (paymentProcessingStatus === 'error') {
+                setShowPaymentProcessing(false)
+                setPaymentOrderId(null)
+                setPaymentWindowRef(null)
+                setPaymentProcessingStatus('processing')
+                setPaymentProcessingMessage('Формируем подписку...')
+              }
             }}
           />
         )}

@@ -87,6 +87,37 @@ class PaymentService {
           responseText: responseText.substring(0, 500),
           parseError: e.message
         })
+        
+        // Проверяем, является ли ответ HTML страницей ошибки
+        // Bug fix: Используем case-insensitive проверку для консистентности с regex
+        const responseTextLower = responseText.toLowerCase()
+        const isHtml = responseTextLower.includes('<!doctype') || responseTextLower.includes('<html')
+        
+        if (isHtml) {
+          // Извлекаем сообщение об ошибке из HTML тегов
+          // Bug fix: Используем [^>]* для пропуска атрибутов тегов
+          let errorMessage = null
+          
+          // Пытаемся извлечь из <pre> тега
+          const preMatch = responseText.match(/<pre[^>]*>(.*?)<\/pre>/is)
+          if (preMatch && preMatch[1]) {
+            errorMessage = preMatch[1].trim()
+          }
+          
+          // Если не нашли в <pre>, пытаемся извлечь из <title>
+          if (!errorMessage) {
+            const titleMatch = responseText.match(/<title[^>]*>(.*?)<\/title>/is)
+            if (titleMatch && titleMatch[1]) {
+              errorMessage = titleMatch[1].trim()
+            }
+          }
+          
+          // Если нашли сообщение, используем его, иначе возвращаем общее сообщение
+          if (errorMessage) {
+            throw new Error(`Ошибка сервера: ${errorMessage}`)
+          }
+        }
+        
         throw new Error('Некорректный формат ответа от сервера')
       }
 
