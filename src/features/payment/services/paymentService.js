@@ -126,14 +126,28 @@ class PaymentService {
         dataKeys: data ? Object.keys(data) : [],
         hasPaymentUrl: !!data?.paymentUrl,
         hasOrderId: !!data?.orderId,
+        success: data?.success,
+        hasError: !!data?.error,
         dataType: Array.isArray(data) ? 'array' : typeof data,
         dataPreview: JSON.stringify(data).substring(0, 1000),
         fullData: data
       })
 
-      if (data.error) {
-        logger.error('Payment', 'Ошибка в ответе от сервера', { error: data.error, fullData: data })
-        throw new Error(data.error)
+      // Проверяем на ошибки в ответе (даже если HTTP статус 200)
+      if (data.error || (data.success === false)) {
+        const errorMessage = data.error || data.message || 'Неизвестная ошибка от сервера'
+        logger.error('Payment', 'Ошибка в ответе от сервера', { 
+          error: errorMessage, 
+          success: data.success,
+          fullData: data 
+        })
+        
+        // Специальная обработка для ошибки "No item to return was found"
+        if (errorMessage.includes('No item to return') || errorMessage.includes('No item to return was found')) {
+          throw new Error('Ошибка n8n workflow: workflow не вернул данные. Проверьте конфигурацию workflow в n8n.')
+        }
+        
+        throw new Error(errorMessage)
       }
 
       // Обрабатываем случай, когда ответ - массив

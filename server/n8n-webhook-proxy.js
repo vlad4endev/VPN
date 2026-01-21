@@ -207,7 +207,27 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
     const response = await axios(config)
     console.log(`✅ n8n response: ${response.status}`)
     
-    return response.data
+    const responseData = response.data
+    
+    // Проверяем, не является ли успешный ответ ошибкой от n8n
+    // n8n может возвращать HTTP 200, но с ошибкой в теле ответа
+    if (responseData && typeof responseData === 'object') {
+      // Проверяем на ошибки в ответе
+      if (responseData.error || responseData.errorMessage || responseData.message) {
+        const errorMsg = responseData.error || responseData.errorMessage || responseData.message
+        console.warn(`⚠️ n8n вернул ошибку в успешном ответе: ${errorMsg}`)
+        
+        // Специальная обработка для "No item to return was found"
+        if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
+          throw new Error('No item to return was found')
+        }
+        
+        // Для других ошибок тоже выбрасываем исключение
+        throw new Error(errorMsg)
+      }
+    }
+    
+    return responseData
   } catch (error) {
     // Детальное логирование ошибки
     const errorData = error.response?.data
