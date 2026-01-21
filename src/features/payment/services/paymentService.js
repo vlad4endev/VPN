@@ -75,7 +75,15 @@ class PaymentService {
           errorData,
           responseText: responseText.substring(0, 500)
         })
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
+        
+        const errorMessage = errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`
+        
+        // Специальная обработка для ошибки "No item to return was found"
+        if (errorMessage.includes('No item to return') || errorMessage.includes('No item to return was found')) {
+          throw new Error('Ошибка n8n workflow: workflow не вернул данные. Проверьте конфигурацию workflow в n8n и убедитесь, что узел "Respond to Webhook" правильно настроен.')
+        }
+        
+        throw new Error(errorMessage)
       }
 
       // Парсим JSON ответ
