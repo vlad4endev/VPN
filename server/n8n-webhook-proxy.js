@@ -1719,16 +1719,37 @@ app.post('/api/payment/verify', async (req, res) => {
       })
       
       // Обрабатываем результат от n8n
-      // n8n может вернуть массив [{ Id, orderid, statuspay: "ОПЛАЧЕНО", ... }] или объект
+      // n8n может вернуть:
+      // 1. Массив [{ Id, orderid, statuspay: "ОПЛАЧЕНО", ... }]
+      // 2. Объект { result: [...], payment: {...} }
+      // 3. Объект { Id, orderid, statuspay: "ОПЛАЧЕНО", ... }
       let paymentData = null
       
-      // Если результат - массив, берем первый элемент
-      if (Array.isArray(result) && result.length > 0) {
-        const n8nPayment = result[0]
+      // Проверяем, есть ли в объекте поле result, которое является массивом
+      let resultArray = null
+      if (result && typeof result === 'object' && !Array.isArray(result) && Array.isArray(result.result)) {
+        resultArray = result.result
+        console.log('📦 n8n-webhook-proxy: Обнаружен объект с полем result (массив)', {
+          resultArrayLength: resultArray.length,
+          hasPayment: !!result.payment,
+          paymentTariffId: result.payment?.tariffId
+        })
+      } else if (Array.isArray(result)) {
+        resultArray = result
+      }
+      
+      // Если результат - массив (или поле result в объекте), берем первый элемент
+      if (resultArray && resultArray.length > 0) {
+        const n8nPayment = resultArray[0]
         console.log('📦 n8n-webhook-proxy: n8n вернул массив, обрабатываем первый элемент', {
           hasOrderid: !!n8nPayment?.orderid,
           statuspay: n8nPayment?.statuspay,
-          hasStatuspay: !!n8nPayment?.statuspay
+          hasStatuspay: !!n8nPayment?.statuspay,
+          hasTariffId: !!n8nPayment?.tariffId,
+          hasTariffid: !!n8nPayment?.tariffid,
+          tariffId: n8nPayment?.tariffId,
+          tariffid: n8nPayment?.tariffid,
+          allKeys: Object.keys(n8nPayment || {})
         })
         
         // Маппим данные из формата n8n в формат приложения
@@ -1747,6 +1768,9 @@ app.post('/api/payment/verify', async (req, res) => {
           paymentStatus = 'cancelled'
         }
         
+        // Извлекаем tariffId с учетом разных вариантов написания
+        const extractedTariffId = n8nPayment?.tariffId || n8nPayment?.tariffid || n8nPayment?.TariffId || n8nPayment?.TariffID || null
+        
         // Формируем данные платежа в формате приложения
         paymentData = {
           id: n8nPayment?.Id?.toString() || n8nPayment?.id?.toString() || null,
@@ -1755,10 +1779,10 @@ app.post('/api/payment/verify', async (req, res) => {
           amount: parseFloat(n8nPayment?.sum) || n8nPayment?.amount || 0,
           status: paymentStatus,
           originalStatus: n8nPayment?.statuspay || n8nPayment?.statuspay || null,
-          tariffId: n8nPayment?.tariffId || null,
-          tariffName: n8nPayment?.tariffName || null,
+          tariffId: extractedTariffId,
+          tariffName: n8nPayment?.tariffName || n8nPayment?.tariffname || null,
           devices: n8nPayment?.devices || 1,
-          periodMonths: n8nPayment?.periodMonths || 1,
+          periodMonths: n8nPayment?.periodMonths || n8nPayment?.periodmonths || 1,
           discount: n8nPayment?.discount || 0,
           createdAt: n8nPayment?.CreatedAt || n8nPayment?.createdAt || null,
           completedAt: n8nPayment?.datapay || n8nPayment?.completedAt || null,
@@ -1770,9 +1794,14 @@ app.post('/api/payment/verify', async (req, res) => {
           originalStatus: paymentData.originalStatus,
           mappedStatus: paymentData.status,
           amount: paymentData.amount,
-          userId: paymentData.userId
+          userId: paymentData.userId,
+          tariffId: paymentData.tariffId,
+          tariffName: paymentData.tariffName,
+          extractedTariffId: extractedTariffId,
+          sourceTariffId: n8nPayment?.tariffId,
+          sourceTariffid: n8nPayment?.tariffid
         })
-      } else if (result && typeof result === 'object' && !Array.isArray(result)) {
+      } else if (result && typeof result === 'object' && !Array.isArray(result) && !result.result) {
         // Если результат - объект (не массив)
         // n8n возвращает объект с данными платежа в корне: { Id, orderid, statuspay: "ОПЛАЧЕНО", ... }
         console.log('📦 n8n-webhook-proxy: n8n вернул объект (не массив), обрабатываем его', {
@@ -1818,7 +1847,7 @@ app.post('/api/payment/verify', async (req, res) => {
             amount: parseFloat(result?.sum) || result?.amount || 0,
             status: paymentStatus,
             originalStatus: result?.statuspay || null,
-            tariffId: result?.tariffId || null,
+            tariffId: result?.tariffId || result?.tariffid || null,
             tariffName: result?.tariffName || null,
             devices: result?.devices || 1,
             periodMonths: result?.periodMonths || 1,
@@ -1875,14 +1904,26 @@ app.post('/api/payment/verify', async (req, res) => {
         hasResult: !!result,
         hasPayment: !!paymentData,
         paymentStatus: paymentData?.status,
-        paymentOrderId: paymentData?.orderId
+        paymentOrderId: paymentData?.orderId,
+        paymentTariffId: paymentData?.tariffId,
+        paymentTariffName: paymentData?.tariffName,
+        paymentDevices: paymentData?.devices,
+        paymentPeriodMonths: paymentData?.periodMonths,
+        paymentDiscount: paymentData?.discount,
+        fullPaymentData: paymentData ? JSON.stringify(paymentData) : 'null'
       })
+      
+      // Если result был объектом с полем result (массив), сохраняем исходную структуру
+      const responseResult = result && typeof result === 'object' && !Array.isArray(result) && result.result 
+        ? result.result 
+        : result
       
       res.json({
         success: true,
         orderId,
-        result: result,
+        result: responseResult,
         // Данные платежа из n8n (если найдены и обработаны)
+        // ВАЖНО: используем paymentData, созданный из result[0] или result.result[0], а не payment из ответа n8n
         payment: paymentData
       })
     } catch (webhookError) {
@@ -2010,9 +2051,11 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
       updatedAt: new Date().toISOString(),
     }
     
-    // Если у пользователя нет UUID, нужно создать клиента в 3x-ui
+    // Создаем или обновляем клиента в 3x-ui
     let clientId = userData.uuid
-    if (!clientId || clientId.trim() === '') {
+    const needsClientCreation = !clientId || clientId.trim() === ''
+    
+    if (needsClientCreation) {
       // Генерируем новый UUID v4
       clientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0
@@ -2020,36 +2063,52 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
         return v.toString(16)
       })
       userUpdateData.uuid = clientId
-      
       console.log('🔄 n8n-webhook-proxy: UUID сгенерирован, создаем клиента в 3x-ui', {
         userId,
         uuid: clientId
       })
-      
-      // Вызываем создание клиента в 3x-ui через n8n
-      try {
-        // Используем дефолтный webhook URL для addClient
-        const webhookUrl = N8N_WEBHOOKS.addClient
-        const addClientData = {
-          clientId: clientId,
-          email: userData.email || null,
-          userId: userId,
-          tariffId: tariffId,
-          devices: devices,
-          periodMonths: periodMonths,
-          inboundId: tariffData.inboundId || null
-        }
-        
-        await callN8NWebhook(webhookUrl, addClientData)
-        console.log('✅ n8n-webhook-proxy: Клиент создан в 3x-ui', { userId, uuid: clientId })
-      } catch (addClientError) {
-        console.error('❌ n8n-webhook-proxy: Ошибка создания клиента в 3x-ui', {
-          userId,
-          uuid: clientId,
-          error: addClientError.message
-        })
-        // Продолжаем обновление подписки даже если не удалось создать клиента
+    } else {
+      console.log('🔄 n8n-webhook-proxy: UUID существует, обновляем клиента в 3x-ui', {
+        userId,
+        uuid: clientId
+      })
+    }
+    
+    // Вызываем создание/обновление клиента в 3x-ui через n8n
+    // ВАЖНО: Вызываем даже если UUID уже есть - нужно обновить expiryTime и другие параметры
+    try {
+      // Используем дефолтный webhook URL для addClient
+      const webhookUrl = N8N_WEBHOOKS.addClient
+      const addClientData = {
+        operation: 'add_client',
+        category: needsClientCreation ? 'new_subscription' : 'update_subscription',
+        clientId: clientId,
+        email: userData.email || null,
+        userId: userId,
+        tariffId: tariffId,
+        devices: devices,
+        periodMonths: periodMonths,
+        inboundId: tariffData.inboundId || null,
+        expiryTime: expiresAt, // В миллисекундах
+        totalGB: tariffData.trafficGB > 0 ? tariffData.trafficGB * 1024 * 1024 * 1024 : 0, // В байтах
+        limitIp: devices
       }
+      
+      await callN8NWebhook(webhookUrl, addClientData)
+      console.log('✅ n8n-webhook-proxy: Клиент создан/обновлен в 3x-ui', { 
+        userId, 
+        uuid: clientId,
+        isNew: needsClientCreation
+      })
+    } catch (addClientError) {
+      console.error('❌ n8n-webhook-proxy: Ошибка создания/обновления клиента в 3x-ui', {
+        userId,
+        uuid: clientId,
+        error: addClientError.message,
+        stack: addClientError.stack
+      })
+      // Продолжаем обновление подписки даже если не удалось создать/обновить клиента
+      // Клиент может быть создан позже через синхронизацию
     }
     
     // Генерируем subId для ссылки на подписку (если его еще нет)

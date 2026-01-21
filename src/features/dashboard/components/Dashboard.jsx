@@ -256,7 +256,15 @@ const Dashboard = ({
                   const subscriptionData = subscriptionSuccessRef.current || {}
                   const tariffsList = tariffsRef.current || []
                   const currentUserData = currentUserRef.current
-                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  
+                  // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
+                  const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
+                  
+                  // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
+                  const tariffId = n8nTariffId
+                    || subscriptionData.tariffId 
+                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
+                    || currentUserData?.tariffId
                   const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   // Создаем объект payment из данных n8n
@@ -312,14 +320,23 @@ const Dashboard = ({
                   const tariffsList = tariffsRef.current || []
                   const currentUserData = currentUserRef.current
                   
+                  // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
+                  const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
+                  
                   logger.info('Dashboard', 'Получение данных подписки из объекта n8n (автоматическая проверка)', {
                     hasSubscriptionSuccess: !!subscriptionSuccessRef.current,
+                    n8nTariffId: n8nTariffId,
+                    subscriptionTariffId: subscriptionData.tariffId,
                     subscriptionTariffName: subscriptionData.tariffName,
                     currentUserTariffId: currentUserData?.tariffId,
                     availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
                   })
                   
-                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
+                  const tariffId = n8nTariffId
+                    || subscriptionData.tariffId 
+                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
+                    || currentUserData?.tariffId
                   const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   // Создаем объект payment из данных n8n
@@ -331,8 +348,8 @@ const Dashboard = ({
                     userId: n8nPayment?.uuid || currentUserData?.id || null,
                     tariffId: tariff?.id || null,
                     tariffName: tariff?.name || subscriptionData.tariffName || null,
-                    devices: subscriptionData.devices || currentUser?.devices || 1,
-                    periodMonths: subscriptionData.periodMonths || currentUser?.periodMonths || 1,
+                    devices: subscriptionData.devices || currentUserData?.devices || 1,
+                    periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
                     discount: subscriptionData.discount || 0
                   }
                   
@@ -390,7 +407,10 @@ const Dashboard = ({
                 let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
                 
                 if (!tariff) {
-                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
+                  // Сначала пытаемся использовать tariffId напрямую, затем ищем по tariffName
+                  const tariffId = subscriptionData.tariffId 
+                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
+                    || currentUserData?.tariffId
                   tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                   
                   if (tariff) {
@@ -468,14 +488,16 @@ const Dashboard = ({
                 setSubscriptionSuccess(null)
 
                 // Обновляем страницу, чтобы загрузить обновленные данные пользователя
-                // Увеличиваем задержку, чтобы убедиться, что данные сохранились в Firestore
+                // Увеличиваем задержку, чтобы убедиться, что данные сохранились в Firestore и клиент создан в 3x-ui
                 logger.info('Dashboard', 'Ожидание перед перезагрузкой страницы для применения изменений', {
-                  orderId: paymentOrderId
+                  orderId: paymentOrderId,
+                  hasVpnLink: !!subscriptionResult?.vpnLink,
+                  hasUuid: !!subscriptionResult?.uuid
                 })
                 setTimeout(() => {
                   logger.info('Dashboard', 'Перезагрузка страницы после успешной оплаты')
                   window.location.reload()
-                }, 1500) // Увеличиваем до 1.5 секунды для надежного сохранения данных
+                }, 5000) // Увеличиваем до 5 секунд для надежного сохранения данных и создания клиента в 3x-ui
               } catch (error) {
                 logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
                   orderId: paymentOrderId
@@ -997,9 +1019,11 @@ const Dashboard = ({
           amount: result.amount,
           requiresPayment: true,
           message: result.message || 'Требуется оплата для активации подписки',
-          tariffName: result.tariffName || subscriptionData.tariff.name,
+          tariffId: result.tariffId || subscriptionData.tariff?.id || null,
+          tariffName: result.tariffName || subscriptionData.tariff?.name || null,
           devices: result.devices || subscriptionData.devices || 1,
-          periodMonths: result.periodMonths || subscriptionData.periodMonths || 1
+          periodMonths: result.periodMonths || subscriptionData.periodMonths || 1,
+          discount: result.discount || subscriptionData.discount || 0
         }
         
         logger.info('Dashboard', 'Устанавливаем subscriptionSuccess и показываем модальное окно', {
@@ -1083,12 +1107,14 @@ const Dashboard = ({
         
         setSubscriptionSuccess({
           vpnLink: result.vpnLink || null,
-          tariffName: result.tariffName || subscriptionData.tariff.name,
+          tariffId: result.tariffId || subscriptionData.tariff?.id || null,
+          tariffName: result.tariffName || subscriptionData.tariff?.name || null,
           devices: result.devices || subscriptionData.devices || 1,
           periodMonths: result.periodMonths || subscriptionData.periodMonths || 1,
           expiresAt: result.expiresAt || null,
           paymentStatus: result.paymentStatus || (subscriptionData.testPeriod ? 'test_period' : 'paid'),
           testPeriod: result.testPeriod !== undefined ? result.testPeriod : (subscriptionData.testPeriod || false),
+          discount: result.discount || subscriptionData.discount || 0
         })
         setShowSuccessModal(true)
       } else {
@@ -1217,13 +1243,16 @@ const Dashboard = ({
               })
               
               // Создаем объект payment для дальнейшей обработки
+              // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
+              const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
+              
               payment = {
                 orderId: n8nPayment?.orderid || orderId,
                 status: 'completed',
                 originalStatus: n8nPayment?.statuspay,
                 amount: parseFloat(n8nPayment?.sum) || 0,
                 userId: n8nPayment?.uuid || currentUser?.id || null,
-                tariffId: null, // Будет получен из subscriptionSuccess или currentUser
+                tariffId: n8nTariffId, // Извлекаем из n8n, затем попробуем восстановить из других источников
                 devices: 1,
                 periodMonths: 1,
                 discount: 0
@@ -1233,12 +1262,18 @@ const Dashboard = ({
               const subscriptionData = subscriptionSuccess || {}
               logger.info('Dashboard', 'Получение данных подписки', {
                 hasSubscriptionSuccess: !!subscriptionSuccess,
+                n8nTariffId: n8nTariffId,
+                subscriptionTariffId: subscriptionData.tariffId,
                 subscriptionTariffName: subscriptionData.tariffName,
                 currentUserTariffId: currentUser?.tariffId,
                 availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
               })
               
-              const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
+              // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
+              const tariffId = n8nTariffId
+                || subscriptionData.tariffId 
+                || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
+                || currentUser?.tariffId
               const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
               
               if (!tariff) {
@@ -1321,13 +1356,16 @@ const Dashboard = ({
               })
               
               // Создаем объект payment для дальнейшей обработки
+              // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
+              const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
+              
               payment = {
                 orderId: n8nPayment?.orderid || orderId,
                 status: 'completed',
                 originalStatus: n8nPayment?.statuspay,
                 amount: parseFloat(n8nPayment?.sum) || 0,
                 userId: n8nPayment?.uuid || currentUser?.id || null,
-                tariffId: null, // Будет получен из subscriptionSuccess или currentUser
+                tariffId: n8nTariffId, // Извлекаем из n8n, затем попробуем восстановить из других источников
                 devices: 1,
                 periodMonths: 1,
                 discount: 0
@@ -1337,12 +1375,18 @@ const Dashboard = ({
               const subscriptionData = subscriptionSuccess || {}
               logger.info('Dashboard', 'Получение данных подписки из объекта n8n', {
                 hasSubscriptionSuccess: !!subscriptionSuccess,
+                n8nTariffId: n8nTariffId,
+                subscriptionTariffId: subscriptionData.tariffId,
                 subscriptionTariffName: subscriptionData.tariffName,
                 currentUserTariffId: currentUser?.tariffId,
                 availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
               })
               
-              const tariffId = subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : currentUser?.tariffId
+              // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
+              const tariffId = n8nTariffId
+                || subscriptionData.tariffId 
+                || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
+                || currentUser?.tariffId
               const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
               
               if (!tariff) {
@@ -1400,6 +1444,40 @@ const Dashboard = ({
         const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
 
         if (payment && isPaid) {
+          // Восстанавливаем tariffId из subscriptionSuccess, если он отсутствует в payment
+          if (!payment.tariffId) {
+            logger.info('Dashboard', 'Восстановление tariffId из subscriptionSuccess', {
+              orderId,
+              hasSubscriptionSuccess: !!subscriptionSuccess,
+              subscriptionTariffId: subscriptionSuccess?.tariffId,
+              subscriptionTariffName: subscriptionSuccess?.tariffName,
+              currentUserTariffId: currentUser?.tariffId
+            })
+            
+            const subscriptionData = subscriptionSuccess || {}
+            // Сначала пытаемся использовать tariffId напрямую, затем ищем по tariffName
+            let tariffId = subscriptionData.tariffId 
+              || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
+              || currentUser?.tariffId
+            
+            if (tariffId) {
+              payment.tariffId = tariffId
+              payment.tariffName = subscriptionData.tariffName || tariffs.find(t => t.id === tariffId)?.name
+              payment.devices = subscriptionData.devices || payment.devices || currentUser?.devices || 1
+              payment.periodMonths = subscriptionData.periodMonths || payment.periodMonths || currentUser?.periodMonths || 1
+              payment.discount = subscriptionData.discount || payment.discount || 0
+              
+              logger.info('Dashboard', 'tariffId восстановлен из subscriptionSuccess', {
+                orderId,
+                tariffId: payment.tariffId,
+                tariffName: payment.tariffName,
+                devices: payment.devices,
+                periodMonths: payment.periodMonths,
+                discount: payment.discount
+              })
+            }
+          }
+
           logger.info('Dashboard', 'Платеж подтвержден n8n (статус: оплачено, ручная проверка), создаем подписку', {
             orderId,
             amount: payment.amount,
@@ -1409,11 +1487,35 @@ const Dashboard = ({
 
           try {
             // Находим тариф по tariffId из платежа
-            const tariff = tariffs.find(t => t.id === payment.tariffId)
+            let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
+            
+            // Если тариф не найден по tariffId, пытаемся найти по tariffName из subscriptionSuccess
+            if (!tariff && subscriptionSuccess?.tariffName) {
+              tariff = tariffs.find(t => t.name === subscriptionSuccess.tariffName)
+              if (tariff) {
+                payment.tariffId = tariff.id
+                logger.info('Dashboard', 'Тариф найден по tariffName из subscriptionSuccess', {
+                  tariffId: tariff.id,
+                  tariffName: tariff.name
+                })
+              }
+            }
+            
+            // Если тариф все еще не найден, используем первый доступный тариф
+            if (!tariff && tariffs.length > 0) {
+              tariff = tariffs[0]
+              payment.tariffId = tariff.id
+              logger.warn('Dashboard', 'Использован первый доступный тариф (fallback)', {
+                tariffId: tariff.id,
+                tariffName: tariff.name
+              })
+            }
+            
             if (!tariff) {
               logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
                 tariffId: payment.tariffId,
-                orderId
+                orderId,
+                availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
               })
               throw new Error('Тариф не найден')
             }
@@ -1724,7 +1826,7 @@ const Dashboard = ({
                                         const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
                                         const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
                                         if (paymentWindow) paymentWindow.focus()
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffName: currentUser.tariffName || 'Не указан', devices: currentUser.devices || 1, periodMonths: currentUser.periodMonths || 1 })
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || 'Не указан', devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
                                         setShowSuccessModal(true)
                                       }
                                     } catch (error) {
@@ -1784,7 +1886,7 @@ const Dashboard = ({
                                           setPaymentOrderId(result.orderId)
                                           logger.info('Dashboard', 'Окно оплаты открыто (unpaid), начинаем отслеживание', { orderId: result.orderId, paymentUrl: result.paymentUrl })
                                         }
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffName: currentUser.tariffName || 'Не указан', devices: currentUser.devices || 1, periodMonths: currentUser.periodMonths || 1 })
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || 'Не указан', devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
                                         setShowSuccessModal(true)
                                       }
                                     } catch (error) {
