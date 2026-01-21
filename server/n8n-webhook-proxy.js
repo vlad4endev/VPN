@@ -215,15 +215,34 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
       // Проверяем на ошибки в ответе
       if (responseData.error || responseData.errorMessage || responseData.message) {
         const errorMsg = responseData.error || responseData.errorMessage || responseData.message
-        console.warn(`⚠️ n8n вернул ошибку в успешном ответе: ${errorMsg}`)
+        console.warn(`⚠️ n8n вернул ошибку в успешном ответе (HTTP ${response.status}): ${errorMsg}`)
         
         // Специальная обработка для "No item to return was found"
         if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
-          throw new Error('No item to return was found')
+          // Создаем объект ошибки, который будет обработан как HTTP ошибка
+          const error = new Error('No item to return was found')
+          error.response = {
+            status: 500,
+            statusText: 'Internal Server Error',
+            data: {
+              error: 'No item to return was found',
+              errorMessage: 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
+            }
+          }
+          throw error
         }
         
         // Для других ошибок тоже выбрасываем исключение
-        throw new Error(errorMsg)
+        const error = new Error(errorMsg)
+        error.response = {
+          status: 500,
+          statusText: 'Internal Server Error',
+          data: {
+            error: errorMsg,
+            errorMessage: `Ошибка n8n workflow: ${errorMsg}`
+          }
+        }
+        throw error
       }
     }
     
@@ -252,13 +271,24 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
     let errorMessage = error.message || 'Ошибка вызова n8n webhook'
     const n8nDetails = errorData?.n8nDetails || {}
     
-    if (errorStatus === 404 || errorStatus === 500 || errorStatus === 400) {
+    // Специальная обработка для "No item to return was found"
+    if (error.message && (error.message.includes('No item to return') || error.message.includes('No item to return was found'))) {
+      // Если ошибка уже обработана в блоке try (HTTP 200 с ошибкой в теле)
+      if (error.response && error.response.data && error.response.data.errorMessage) {
+        errorMessage = error.response.data.errorMessage
+      } else {
+        errorMessage = 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
+      }
+    } else if (errorStatus === 404 || errorStatus === 500 || errorStatus === 400) {
       // Проверяем различные типы ошибок n8n
       if (errorData?.errorMessage) {
         const n8nError = errorData.errorMessage
         
-        // Специальная обработка для ошибки "Unused Respond to Webhook"
-        if (n8nError.includes('Unused Respond to Webhook')) {
+        // Специальная обработка для "No item to return was found" в errorData
+        if (n8nError.includes('No item to return') || n8nError.includes('No item to return was found')) {
+          errorMessage = 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
+        } else if (n8nError.includes('Unused Respond to Webhook')) {
+          // Специальная обработка для ошибки "Unused Respond to Webhook"
           errorMessage = `Ошибка конфигурации n8n workflow:\n\n` +
             `❌ Обнаружен неиспользуемый узел "Respond to Webhook" в workflow.\n\n` +
             `🔧 Решение:\n` +
