@@ -907,6 +907,139 @@ app.post('/api/payment/generate-link', async (req, res) => {
 })
 
 /**
+ * Создание платежа (обратная совместимость со старым API)
+ * POST /api/payments/create
+ * 
+ * Алиас для /api/payment/generate-link для поддержки старой версии фронтенда
+ */
+app.post('/api/payments/create', async (req, res) => {
+  console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/payments/create (legacy endpoint)', {
+    body: req.body,
+    timestamp: new Date().toISOString()
+  })
+  
+  // Используем тот же код, что и для /api/payment/generate-link
+  try {
+    const { userId, amount, tariffId, paymentSettings, userData: requestUserData } = req.body
+
+    // Валидация
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId обязателен'
+      })
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'amount должен быть больше 0'
+      })
+    }
+
+    // Если paymentSettings не переданы из запроса, загружаем из Firestore
+    let finalPaymentSettings = paymentSettings
+    if (!paymentSettings || Object.keys(paymentSettings).length === 0 || 
+        !paymentSettings.yoomoneyWallet || !paymentSettings.yoomoneySecretKey) {
+      console.log('⚠️ paymentSettings не переданы или неполные, загружаем из Firestore')
+      finalPaymentSettings = await loadPaymentSettings()
+      console.log('📝 Загружены настройки платежей из Firestore:', {
+        hasWallet: !!finalPaymentSettings.yoomoneyWallet,
+        hasSecretKey: !!finalPaymentSettings.yoomoneySecretKey
+      })
+    }
+
+    // Получаем webhook URL
+    const webhookUrl = getWebhookUrl('addClient', req)
+    
+    if (!webhookUrl) {
+      console.error('❌ n8n-webhook-proxy: Webhook URL не найден')
+      return res.status(500).json({
+        success: false,
+        error: 'Webhook URL не настроен'
+      })
+    }
+
+    // Формируем данные для n8n workflow
+    const paymentData = {
+      mode: 'createPayment',
+      operation: 'generatePaymentLink',
+      action: 'createPayment',
+      taskType: 'payment',
+      userId: userId,
+      amount: Number(amount),
+      tariffId: tariffId || null,
+      userData: requestUserData || null,
+      paymentSettings: finalPaymentSettings || {},
+    }
+
+    console.log('📤 n8n-webhook-proxy: Отправка webhook в n8n для создания платежа:', {
+      webhookUrl,
+      mode: paymentData.mode,
+      userId: paymentData.userId,
+      amount: paymentData.amount,
+      tariffId: paymentData.tariffId,
+      hasUserData: !!paymentData.userData,
+      hasPaymentSettings: !!paymentData.paymentSettings && Object.keys(paymentData.paymentSettings).length > 0
+    })
+
+    const result = await callN8NWebhook(webhookUrl, paymentData)
+
+    // Обрабатываем ответ от n8n
+    const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId) || {}
+    const responseData = firstItem.json || firstItem
+
+    // Извлекаем orderId из paymentUrl, если он не передан в ответе n8n
+    if (!responseData.orderId && responseData.paymentUrl) {
+      try {
+        const url = new URL(responseData.paymentUrl)
+        const label = url.searchParams.get('label')
+        if (label && label.startsWith('order_')) {
+          responseData.orderId = label
+        }
+      } catch (urlError) {
+        console.warn('⚠️ n8n-webhook-proxy: Не удалось извлечь orderId из paymentUrl', {
+          paymentUrl: responseData.paymentUrl,
+          error: urlError.message
+        })
+      }
+    }
+
+    // Проверяем, что в ответе есть paymentUrl
+    if (!responseData.paymentUrl) {
+      console.error('❌ n8n-webhook-proxy: Отсутствует paymentUrl от n8n workflow:', {
+        result,
+        responseData,
+        firstItem
+      })
+      return res.status(500).json({
+        success: false,
+        error: 'Неполные данные от n8n workflow: отсутствует paymentUrl',
+      })
+    }
+    
+    // Отправляем ответ клиенту
+    res.json({
+      success: true,
+      paymentUrl: responseData.paymentUrl,
+      orderId: responseData.orderId,
+      amount: responseData.amount || amount,
+      status: responseData.status || 'pending',
+    })
+  } catch (error) {
+    console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса payments/create:', {
+      message: error.message,
+      stack: error.stack
+    })
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Ошибка создания платежа',
+    })
+  }
+})
+
+/**
  * Загрузка настроек платежей из Firestore
  */
 async function loadPaymentSettings() {
