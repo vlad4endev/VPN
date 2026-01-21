@@ -44,8 +44,11 @@ cd /path/to/your/project
 # Сохраните незакоммиченные изменения (если есть)
 git stash
 
-# Получите последние изменения
-git fetch origin main
+# Определите правильную ветку (main или master)
+# Скрипт quick-update.sh делает это автоматически
+# Вручную:
+git fetch origin
+git checkout main  # или master, в зависимости от вашего репозитория
 git pull origin main
 ```
 

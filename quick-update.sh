@@ -60,6 +60,45 @@ fi
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
 log_info "Текущая ветка: $CURRENT_BRANCH"
 
+# Определяем основную ветку на remote (main или master)
+log "🔍 Определение основной ветки на remote..."
+REMOTE_BRANCH="main"
+if git ls-remote --heads origin main | grep -q "refs/heads/main"; then
+    REMOTE_BRANCH="main"
+    log_info "Найдена ветка 'main' на remote"
+elif git ls-remote --heads origin master | grep -q "refs/heads/master"; then
+    REMOTE_BRANCH="master"
+    log_info "Найдена ветка 'master' на remote"
+else
+    log_warning "Не удалось определить ветку на remote, используем 'main'"
+fi
+
+# Если локальная ветка отличается от remote, переключаемся или создаем tracking
+if [ "$CURRENT_BRANCH" != "$REMOTE_BRANCH" ]; then
+    log_warning "Локальная ветка '$CURRENT_BRANCH' отличается от remote '$REMOTE_BRANCH'"
+    log_info "Переключение на ветку '$REMOTE_BRANCH'..."
+    
+    # Сохраняем незакоммиченные изменения перед переключением
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        log_warning "Обнаружены незакоммиченные изменения"
+        log_info "Создаем резервную копию изменений..."
+        git stash push -m "Auto-stash before branch switch $(date +'%Y-%m-%d %H:%M:%S')" || true
+    fi
+    
+    # Переключаемся на правильную ветку
+    if git show-ref --verify --quiet refs/heads/$REMOTE_BRANCH; then
+        git checkout $REMOTE_BRANCH
+    else
+        git checkout -b $REMOTE_BRANCH origin/$REMOTE_BRANCH 2>/dev/null || {
+            log_error "Не удалось переключиться на ветку '$REMOTE_BRANCH'"
+            log_info "Попробуйте вручную: git checkout -b $REMOTE_BRANCH origin/$REMOTE_BRANCH"
+            exit 1
+        }
+    fi
+    CURRENT_BRANCH=$REMOTE_BRANCH
+    log_success "Переключено на ветку '$REMOTE_BRANCH'"
+fi
+
 # Сохраняем незакоммиченные изменения (если есть)
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then
     log_warning "Обнаружены незакоммиченные изменения"
@@ -68,22 +107,27 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
 fi
 
 # Получаем последние изменения
-log "📥 Получение изменений с GitHub..."
-git fetch origin $CURRENT_BRANCH || {
+log "📥 Получение изменений с GitHub (ветка: $REMOTE_BRANCH)..."
+git fetch origin $REMOTE_BRANCH || {
     log_error "Не удалось получить изменения с GitHub"
     log_info "Проверьте настройки remote: git remote -v"
+    log_info "Проверьте доступность ветки: git ls-remote --heads origin"
     exit 1
 }
 
 # Проверяем, есть ли обновления
 LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/$CURRENT_BRANCH)
+REMOTE=$(git rev-parse origin/$REMOTE_BRANCH)
 
 if [ "$LOCAL" = "$REMOTE" ]; then
     log_success "Код уже актуален (нет новых коммитов)"
 else
     log_info "Обнаружены новые коммиты, обновляем..."
-    git pull origin $CURRENT_BRANCH
+    git pull origin $REMOTE_BRANCH || {
+        log_error "Не удалось применить изменения"
+        log_info "Попробуйте вручную: git pull origin $REMOTE_BRANCH"
+        exit 1
+    }
     log_success "Код обновлен с GitHub"
 fi
 
