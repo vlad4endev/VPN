@@ -8,7 +8,7 @@ import SubscriptionSuccessModal from './SubscriptionSuccessModal.jsx'
 import PaymentProcessingModal from './PaymentProcessingModal.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import logger from '../../../shared/utils/logger.js'
-import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
+// import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 
@@ -104,7 +104,133 @@ const Dashboard = ({
   }, [currentUser?.expiresAt])
 
   // Используем хук для проверки подписок и отправки уведомлений
-  useSubscriptionNotifications(currentUser)
+  // Временно отключено из-за проблемы с контекстом React
+  // useSubscriptionNotifications(currentUser)
+  
+  // Временная реализация логики уведомлений прямо в компоненте
+  const lastNotificationTimeRef = useRef(null)
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) {
+      return
+    }
+
+    const notificationInstance = notificationService.getInstance()
+    if (!notificationInstance.hasPermission()) {
+      return
+    }
+
+    const checkSubscriptionAndNotify = async () => {
+      try {
+        const now = Date.now()
+        const oneDayMs = 24 * 60 * 60 * 1000
+        const twelveHoursMs = 12 * 60 * 60 * 1000
+
+        let expiryTime = null
+        if (currentUser.expiresAt && currentUser.expiresAt > 0) {
+          expiryTime = typeof currentUser.expiresAt === 'number' 
+            ? currentUser.expiresAt 
+            : new Date(currentUser.expiresAt).getTime()
+        }
+
+        if (!expiryTime && currentUser.testPeriodEndDate) {
+          expiryTime = typeof currentUser.testPeriodEndDate === 'number'
+            ? currentUser.testPeriodEndDate
+            : new Date(currentUser.testPeriodEndDate).getTime()
+        }
+
+        if (!expiryTime || expiryTime <= 0) {
+          return
+        }
+
+        const tariffName = currentUser.tariffName || 'Ваша подписка'
+        const timeUntilExpiry = expiryTime - now
+        const daysUntilExpiry = Math.floor(timeUntilExpiry / oneDayMs)
+        
+        const currentHour = new Date(now).getHours()
+        const isMorning = currentHour >= 6 && currentHour < 12
+        const isEvening = currentHour >= 18 && currentHour < 24
+
+        const shouldNotifyByTime = (isMorning || isEvening)
+        const shouldNotifyByExpiry = timeUntilExpiry <= 7 * oneDayMs || timeUntilExpiry <= 0
+        
+        if (!shouldNotifyByTime || !shouldNotifyByExpiry) {
+          return
+        }
+
+        const lastNotificationTime = lastNotificationTimeRef.current
+        const shouldNotify = !lastNotificationTime || (now - lastNotificationTime) > twelveHoursMs
+
+        if (!shouldNotify) {
+          return
+        }
+
+        if (timeUntilExpiry <= 0) {
+          await notificationInstance.notifySubscriptionExpired(tariffName)
+          lastNotificationTimeRef.current = now
+        } else if (daysUntilExpiry === 0) {
+          await notificationInstance.notifySubscriptionExpiringToday(tariffName)
+          lastNotificationTimeRef.current = now
+        } else if (daysUntilExpiry <= 7) {
+          await notificationInstance.notifySubscriptionExpiringSoon(tariffName, expiryTime)
+          lastNotificationTimeRef.current = now
+        }
+      } catch (error) {
+        logger.error('Dashboard', 'Ошибка при проверке подписки и отправке уведомлений', {
+          userId: currentUser?.id
+        }, error)
+      }
+    }
+
+    const getNextCheckTime = () => {
+      const now = new Date()
+      const currentHour = now.getHours()
+      let nextCheck = new Date(now)
+      
+      if (currentHour < 6) {
+        nextCheck.setHours(6, 0, 0, 0)
+      } else if (currentHour < 12) {
+        nextCheck.setHours(18, 0, 0, 0)
+      } else if (currentHour < 18) {
+        nextCheck.setHours(18, 0, 0, 0)
+      } else {
+        nextCheck.setDate(nextCheck.getDate() + 1)
+        nextCheck.setHours(6, 0, 0, 0)
+      }
+      
+      return nextCheck.getTime() - now.getTime()
+    }
+
+    const currentHour = new Date().getHours()
+    if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
+      checkSubscriptionAndNotify()
+    }
+
+    const scheduleNextCheck = () => {
+      const delay = getNextCheckTime()
+      setTimeout(() => {
+        checkSubscriptionAndNotify()
+        scheduleNextCheck()
+      }, delay)
+    }
+    
+    scheduleNextCheck()
+
+    const hourlyCheck = setInterval(() => {
+      const currentHour = new Date().getHours()
+      if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
+        checkSubscriptionAndNotify()
+      }
+    }, 60 * 60 * 1000)
+
+    return () => {
+      clearInterval(hourlyCheck)
+    }
+  }, [
+    currentUser?.id,
+    currentUser?.expiresAt,
+    currentUser?.testPeriodEndDate,
+    currentUser?.tariffName
+  ])
 
   // Обработчик события от уведомлений для открытия окна оплаты
   useEffect(() => {
