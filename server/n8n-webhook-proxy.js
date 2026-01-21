@@ -838,7 +838,36 @@ app.post('/api/payment/generate-link', async (req, res) => {
       fullPaymentData: JSON.stringify(paymentData, null, 2).substring(0, 1000)
     })
     
-    const result = await callN8NWebhook(webhookUrl, paymentData)
+    let result
+    try {
+      result = await callN8NWebhook(webhookUrl, paymentData)
+    } catch (webhookError) {
+      // Обрабатываем ошибки от callN8NWebhook
+      console.error('❌ n8n-webhook-proxy: Ошибка вызова n8n webhook:', {
+        message: webhookError.message,
+        status: webhookError.response?.status,
+        statusText: webhookError.response?.statusText,
+        errorData: webhookError.response?.data,
+        stack: webhookError.stack?.substring(0, 500)
+      })
+      
+      // Если ошибка уже содержит response.data с errorMessage, используем его
+      if (webhookError.response?.data?.errorMessage) {
+        return res.status(webhookError.response.status || 500).json({
+          success: false,
+          error: webhookError.response.data.errorMessage
+        })
+      }
+      
+      // Иначе используем стандартную обработку
+      const errorMsg = webhookError.message || 'Ошибка вызова n8n workflow'
+      return res.status(webhookError.response?.status || 500).json({
+        success: false,
+        error: errorMsg.includes('No item to return') 
+          ? 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
+          : errorMsg
+      })
+    }
     
     console.log('✅ n8n-webhook-proxy: Получен ответ от n8n для генерации ссылки:', {
       hasResult: !!result,
@@ -850,7 +879,7 @@ app.post('/api/payment/generate-link', async (req, res) => {
       errorMessage: result?.error || result?.errorMessage || result?.message,
       hasPaymentUrl: Array.isArray(result) ? !!result[0]?.paymentUrl : !!result?.paymentUrl,
       hasOrderId: Array.isArray(result) ? !!result[0]?.orderId : !!result?.orderId,
-      fullResult: JSON.stringify(result, null, 2).substring(0, 1000)
+      fullResult: JSON.stringify(result, null, 2).substring(0, 2000)
     })
 
     // Проверяем, что result не пустой и не является ошибкой
@@ -1084,7 +1113,36 @@ app.post('/api/payments/create', async (req, res) => {
       hasPaymentSettings: !!paymentData.paymentSettings && Object.keys(paymentData.paymentSettings).length > 0
     })
 
-    const result = await callN8NWebhook(webhookUrl, paymentData)
+    let result
+    try {
+      result = await callN8NWebhook(webhookUrl, paymentData)
+    } catch (webhookError) {
+      // Обрабатываем ошибки от callN8NWebhook
+      console.error('❌ n8n-webhook-proxy: Ошибка вызова n8n webhook (payments/create):', {
+        message: webhookError.message,
+        status: webhookError.response?.status,
+        statusText: webhookError.response?.statusText,
+        errorData: webhookError.response?.data,
+        stack: webhookError.stack?.substring(0, 500)
+      })
+      
+      // Если ошибка уже содержит response.data с errorMessage, используем его
+      if (webhookError.response?.data?.errorMessage) {
+        return res.status(webhookError.response.status || 500).json({
+          success: false,
+          error: webhookError.response.data.errorMessage
+        })
+      }
+      
+      // Иначе используем стандартную обработку
+      const errorMsg = webhookError.message || 'Ошибка вызова n8n workflow'
+      return res.status(webhookError.response?.status || 500).json({
+        success: false,
+        error: errorMsg.includes('No item to return') 
+          ? 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
+          : errorMsg
+      })
+    }
 
     console.log('📥 n8n-webhook-proxy: Получен ответ от n8n для создания платежа:', {
       resultType: typeof result,
@@ -1093,7 +1151,7 @@ app.post('/api/payments/create', async (req, res) => {
       resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
       hasError: !!(result?.error || result?.errorMessage || result?.message),
       errorMessage: result?.error || result?.errorMessage || result?.message,
-      resultPreview: JSON.stringify(result).substring(0, 1000)
+      resultPreview: JSON.stringify(result).substring(0, 2000)
     })
 
     // Проверяем, что result не пустой и не является ошибкой
@@ -1410,6 +1468,26 @@ app.post('/api/payment/webhook', async (req, res) => {
         operationId: req.body?.operation_id,
         amount: req.body?.amount
       })
+      
+      // После успешной обработки платежа n8n, обновляем подписку пользователя
+      // Это гарантирует, что подписка будет создана/обновлена даже если пользователь закрыл страницу
+      if (db && userData.userId && req.body?.label) {
+        try {
+          await activateSubscriptionAfterPayment(
+            userData.userId,
+            req.body.label,
+            result?.orderId || req.body?.label
+          )
+        } catch (activationError) {
+          // Логируем ошибку, но не прерываем ответ YooMoney
+          console.error('❌ n8n-webhook-proxy: Ошибка активации подписки после оплаты', {
+            userId: userData.userId,
+            orderId: req.body?.label,
+            error: activationError.message,
+            stack: activationError.stack
+          })
+        }
+      }
     }
     
     // YooMoney ожидает ответ 200 OK для успешной обработки
@@ -1813,6 +1891,170 @@ app.post('/api/payment/verify', async (req, res) => {
     })
   }
 })
+
+/**
+ * Активация подписки после успешной оплаты
+ * Вызывается после того, как n8n успешно обработал платеж
+ */
+async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) {
+  if (!db || !userId || !orderId) {
+    console.warn('⚠️ n8n-webhook-proxy: Недостаточно данных для активации подписки', {
+      hasDb: !!db,
+      hasUserId: !!userId,
+      hasOrderId: !!orderId
+    })
+    return
+  }
+
+  try {
+    const APP_ID = process.env.APP_ID || 'skyputh'
+    
+    // 1. Получаем данные платежа из Firestore
+    const paymentsCollection = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+    const paymentQuery = paymentsCollection.where('orderId', '==', orderId).limit(1)
+    const paymentSnapshot = await paymentQuery.get()
+    
+    if (paymentSnapshot.empty) {
+      console.warn('⚠️ n8n-webhook-proxy: Платеж не найден для активации подписки', { orderId })
+      return
+    }
+    
+    const paymentDoc = paymentSnapshot.docs[0]
+    const paymentData = paymentDoc.data()
+    
+    // Проверяем, не была ли подписка уже активирована
+    if (paymentData.subscriptionActivated) {
+      console.log('ℹ️ n8n-webhook-proxy: Подписка уже была активирована для этого платежа', { orderId })
+      return
+    }
+    
+    const tariffId = paymentData.tariffId
+    const devices = paymentData.devices || 1
+    const periodMonths = paymentData.periodMonths || 1
+    const discount = paymentData.discount || 0
+    
+    if (!tariffId) {
+      console.warn('⚠️ n8n-webhook-proxy: tariffId не найден в платеже', { orderId })
+      return
+    }
+    
+    // 2. Получаем данные пользователя из Firestore
+    const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+    const userDoc = await usersCollection.doc(userId).get()
+    
+    if (!userDoc.exists) {
+      console.warn('⚠️ n8n-webhook-proxy: Пользователь не найден для активации подписки', { userId })
+      return
+    }
+    
+    const userData = userDoc.data()
+    
+    // 3. Получаем данные тарифа из Firestore
+    const tariffsCollection = db.collection(`artifacts/${APP_ID}/public/data/tariffs`)
+    const tariffDoc = await tariffsCollection.doc(tariffId).get()
+    
+    if (!tariffDoc.exists) {
+      console.warn('⚠️ n8n-webhook-proxy: Тариф не найден для активации подписки', { tariffId })
+      return
+    }
+    
+    const tariffData = tariffDoc.data()
+    
+    // 4. Вычисляем дату окончания подписки
+    const now = Date.now()
+    const durationDays = periodMonths * 30 // Примерно 30 дней в месяце
+    const expiresAt = now + (durationDays * 24 * 60 * 60 * 1000)
+    
+    // 5. Обновляем данные пользователя в Firestore
+    const userUpdateData = {
+      plan: tariffData.plan || 'free',
+      expiresAt: expiresAt > 0 ? expiresAt : null,
+      tariffName: tariffData.name || null,
+      tariffId: tariffId,
+      devices: devices,
+      periodMonths: periodMonths,
+      paymentStatus: 'paid',
+      discount: discount,
+      unpaidStartDate: null, // Очищаем дату начала неоплаченного периода
+      updatedAt: new Date().toISOString(),
+    }
+    
+    // Если у пользователя нет UUID, нужно создать клиента в 3x-ui
+    let clientId = userData.uuid
+    if (!clientId || clientId.trim() === '') {
+      // Генерируем новый UUID v4
+      clientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0
+        const v = c === 'x' ? r : (r & 0x3) | 0x8
+        return v.toString(16)
+      })
+      userUpdateData.uuid = clientId
+      
+      console.log('🔄 n8n-webhook-proxy: UUID сгенерирован, создаем клиента в 3x-ui', {
+        userId,
+        uuid: clientId
+      })
+      
+      // Вызываем создание клиента в 3x-ui через n8n
+      try {
+        // Используем дефолтный webhook URL для addClient
+        const webhookUrl = N8N_WEBHOOKS.addClient
+        const addClientData = {
+          clientId: clientId,
+          email: userData.email || null,
+          userId: userId,
+          tariffId: tariffId,
+          devices: devices,
+          periodMonths: periodMonths,
+          inboundId: tariffData.inboundId || null
+        }
+        
+        await callN8NWebhook(webhookUrl, addClientData)
+        console.log('✅ n8n-webhook-proxy: Клиент создан в 3x-ui', { userId, uuid: clientId })
+      } catch (addClientError) {
+        console.error('❌ n8n-webhook-proxy: Ошибка создания клиента в 3x-ui', {
+          userId,
+          uuid: clientId,
+          error: addClientError.message
+        })
+        // Продолжаем обновление подписки даже если не удалось создать клиента
+      }
+    }
+    
+    // Обновляем пользователя
+    await usersCollection.doc(userId).update(userUpdateData)
+    console.log('✅ n8n-webhook-proxy: Данные пользователя обновлены после оплаты', {
+      userId,
+      tariffId,
+      expiresAt: new Date(expiresAt).toISOString(),
+      devices,
+      periodMonths
+    })
+    
+    // 6. Обновляем статус платежа и помечаем, что подписка активирована
+    await paymentDoc.ref.update({
+      status: 'completed',
+      subscriptionActivated: true,
+      activatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    })
+    
+    console.log('🎉 n8n-webhook-proxy: Подписка успешно активирована после оплаты', {
+      userId,
+      orderId,
+      tariffId,
+      expiresAt: new Date(expiresAt).toISOString()
+    })
+  } catch (error) {
+    console.error('❌ n8n-webhook-proxy: Ошибка активации подписки после оплаты', {
+      userId,
+      orderId,
+      error: error.message,
+      stack: error.stack
+    })
+    throw error
+  }
+}
 
 /**
  * System Monitoring Routes
