@@ -2120,33 +2120,61 @@ export default function VPNServiceApp() {
       }
       
       // Если мы дошли до этого места, подписка была создана успешно
+      // ВАЖНО: Если paymentMode === 'pay_now' и testPeriod === false, то платеж уже оплачен
+      // Устанавливаем paymentStatus в 'paid', даже если updatedData.paymentStatus не установлен
+      const finalPaymentStatus = (paymentMode === 'pay_now' && !testPeriod) 
+        ? 'paid' 
+        : (updatedData.paymentStatus || currentUser.paymentStatus || 'pending')
+      
       logger.info('Dashboard', 'Подписка создана через Backend Proxy', { 
         email: currentUser.email,
         uuid: updatedData.uuid,
         tariffId: tariff.id,
-        devices: updatedData.devices,
-        periodMonths: updatedData.periodMonths,
-        paymentStatus: updatedData.paymentStatus
+        devices: updatedData.devices || devices,
+        periodMonths: updatedData.periodMonths || periodMonths,
+        paymentStatus: finalPaymentStatus,
+        paymentMode: paymentMode,
+        testPeriod: testPeriod
       })
       
       // Обновляем локальное состояние с данными от n8n
+      // ВАЖНО: Используем переданные параметры (devices, periodMonths) с приоритетом над currentUser,
+      // чтобы после успешной оплаты подписка обновилась с правильными параметрами
+      // ВАЖНО: expiresAt должен быть из updatedData, если он есть (даже если это timestamp число)
       const updatedUser = {
         ...currentUser,
         uuid: updatedData.uuid || currentUser.uuid,
         plan: updatedData.plan || currentUser.plan,
-        expiresAt: updatedData.expiresAt || currentUser.expiresAt,
+        // ВАЖНО: После успешной оплаты expiresAt должен быть пересчитан от текущей даты + период
+        // Если updatedData.expiresAt есть (даже если это timestamp), используем его
+        // Если нет, но период оплачен (pay_now), вычисляем от текущей даты
+        expiresAt: updatedData.expiresAt !== undefined && updatedData.expiresAt !== null 
+          ? updatedData.expiresAt 
+          : (paymentMode === 'pay_now' && !testPeriod 
+              ? (Date.now() + (periodMonths * 30 * 24 * 60 * 60 * 1000))
+              : currentUser.expiresAt),
         tariffName: updatedData.tariffName || currentUser.tariffName || tariff.name,
         tariffId: updatedData.tariffId || currentUser.tariffId || tariff.id,
         devices: updatedData.devices || devices || currentUser.devices || 1,
         natrockPort: updatedData.natrockPort || natrockPort || currentUser.natrockPort || null,
         periodMonths: updatedData.periodMonths || periodMonths || currentUser.periodMonths || 1,
-        paymentStatus: updatedData.paymentStatus || currentUser.paymentStatus || 'pending',
+        paymentStatus: finalPaymentStatus, // Используем вычисленный статус оплаты
         testPeriodStartDate: updatedData.testPeriodStartDate || null,
         testPeriodEndDate: updatedData.testPeriodEndDate || null,
         discount: updatedData.discount || discount || currentUser.discount || 0,
         vpnLink: updatedData.vpnLink || currentUser.vpnLink || null,
         updatedAt: new Date().toISOString(),
       }
+      
+      logger.info('Dashboard', 'Обновление данных пользователя после создания подписки', {
+        userId: currentUser.id,
+        expiresAt: updatedUser.expiresAt ? new Date(updatedUser.expiresAt).toISOString() : null,
+        paymentStatus: updatedUser.paymentStatus,
+        periodMonths: updatedUser.periodMonths,
+        devices: updatedUser.devices,
+        paymentMode: paymentMode,
+        testPeriod: testPeriod
+      })
       
       // Сохраняем обновленные данные в Firestore
       try {

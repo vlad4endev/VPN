@@ -1206,18 +1206,24 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
  * Проверка платежа (вызов webhook для проверки)
  * POST /api/payment/verify
  * 
- * Принимает orderId и отправляет запрос в n8n workflow для проверки платежа
+ * Процесс проверки статуса оплаты:
+ * 1. Принимает orderId от клиента
+ * 2. Отправляет webhook в n8n с orderId (БЕЗ обращения к Firestore)
+ * 3. n8n ищет запись в своей базе данных по orderId
+ * 4. Если запись найдена и статус "оплачено" - n8n возвращает данные платежа
+ * 5. n8n возвращает результат обратно
+ * 6. Сервер возвращает результат клиенту
+ * 7. Клиент обновляет статусы подписки на основе результата от n8n
  */
 app.post('/api/payment/verify', async (req, res) => {
   try {
     console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/payment/verify', {
       hasBody: !!req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
-      orderId: req.body?.orderId,
-      userId: req.body?.userId
+      orderId: req.body?.orderId
     })
     
-    const { orderId, userId, tariffId, amount } = req.body
+    const { orderId } = req.body
     
     if (!orderId) {
       return res.status(400).json({
@@ -1226,126 +1232,258 @@ app.post('/api/payment/verify', async (req, res) => {
       })
     }
 
-    // Если Firebase Admin SDK еще не инициализирован, пытаемся инициализировать
-    if (!db) {
-      await initFirebaseAdmin()
-    }
-
-    if (!db) {
-      console.log('⚠️ Firestore недоступен для проверки платежа')
-      return res.status(503).json({
+    // Получаем webhook URL
+    const webhookUrl = getWebhookUrl('addClient', req)
+    
+    if (!webhookUrl) {
+      console.error('❌ n8n-webhook-proxy: Webhook URL не найден')
+      return res.status(500).json({
         success: false,
-        error: 'Firestore недоступен'
+        error: 'Webhook URL не настроен'
       })
     }
-
+    
+    // Формируем данные для n8n workflow
+    // Явные маркеры для маршрутизации в n8n: operation, action, taskType
+    // Отправляем ТОЛЬКО orderId - n8n сам найдет запись в своей базе данных
+    const verifyData = {
+      mode: 'verifyPayment',
+      operation: 'checkPaymentStatus', // Маркер для маршрутизации в n8n
+      action: 'paymentStatusCheck', // Альтернативный маркер
+      taskType: 'statusCheck', // Тип задачи
+      checkPaymentStatus: true, // Булевый флаг для удобной проверки в n8n
+      orderId: orderId // Единственное обязательное поле - n8n найдет запись по orderId
+    }
+    
+    console.log('📤 n8n-webhook-proxy: Отправка webhook в n8n для проверки статуса платежа (поиск по orderId):', {
+      webhookUrl,
+      orderId,
+      operation: verifyData.operation,
+      action: verifyData.action,
+      taskType: verifyData.taskType,
+      checkPaymentStatus: verifyData.checkPaymentStatus,
+      fullData: JSON.stringify(verifyData)
+    })
+    
     try {
-      const APP_ID = process.env.APP_ID || 'skyputh'
-      const paymentsCollection = db.collection(`artifacts/${APP_ID}/public/data/payments`)
-      const paymentQuery = paymentsCollection.where('orderId', '==', orderId).limit(1)
-      const paymentSnapshot = await paymentQuery.get()
-
-      if (paymentSnapshot.empty) {
-        console.log('⚠️ Платеж не найден для проверки', { orderId })
-        return res.status(404).json({
-          success: false,
-          error: 'Платеж не найден',
-          orderId
+      // Отправляем webhook в n8n - n8n будет искать запись в базе данных по orderId
+      const result = await callN8NWebhook(webhookUrl, verifyData)
+      
+      console.log('✅ n8n-webhook-proxy: Webhook успешно отправлен в n8n, получен ответ:', {
+        hasResult: !!result,
+        resultType: typeof result,
+        resultKeys: result && typeof result === 'object' ? Object.keys(result) : 'N/A',
+        resultPreview: result ? JSON.stringify(result).substring(0, 500) : 'empty'
+      })
+    
+      // Получаем результат обратно от n8n
+      console.log('✅ n8n-webhook-proxy: Получен ответ от n8n (результат поиска в базе данных):', {
+        hasResult: !!result,
+        resultType: Array.isArray(result) ? 'array' : typeof result,
+        resultLength: Array.isArray(result) ? result.length : 'N/A',
+        status: result?.status,
+        success: result?.success,
+        paymentFound: !!result?.payment,
+        paymentStatus: result?.payment?.status,
+        orderId: result?.orderId || result?.payment?.orderId,
+        fullResult: result ? JSON.stringify(result).substring(0, 1000) : 'empty'
+      })
+      
+      // Обрабатываем результат от n8n
+      // n8n может вернуть массив [{ Id, orderid, statuspay: "ОПЛАЧЕНО", ... }] или объект
+      let paymentData = null
+      
+      // Если результат - массив, берем первый элемент
+      if (Array.isArray(result) && result.length > 0) {
+        const n8nPayment = result[0]
+        console.log('📦 n8n-webhook-proxy: n8n вернул массив, обрабатываем первый элемент', {
+          hasOrderid: !!n8nPayment?.orderid,
+          statuspay: n8nPayment?.statuspay,
+          hasStatuspay: !!n8nPayment?.statuspay
         })
-      }
-
-      const paymentDoc = paymentSnapshot.docs[0]
-      const paymentData = paymentDoc.data()
-      
-      // Получаем данные пользователя из Firestore
-      let userData = {
-        uuid: null,
-        email: paymentData.email || null,
-        userId: paymentData.userId || userId
-      }
-      
-      if (userData.userId) {
-        try {
-          const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
-          const userDoc = await usersCollection.doc(userData.userId).get()
+        
+        // Маппим данные из формата n8n в формат приложения
+        // n8n формат: { orderid, statuspay: "ОПЛАЧЕНО", sum, uuid, ... }
+        // Формат приложения: { orderId, status: "completed", amount, userId, ... }
+        const statuspay = n8nPayment?.statuspay || n8nPayment?.statuspay || ''
+        const statuspayLower = String(statuspay).toLowerCase().trim()
+        
+        // Определяем статус платежа
+        let paymentStatus = 'pending'
+        if (statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно') {
+          paymentStatus = 'completed'
+        } else if (statuspayLower === 'не оплачено' || statuspayLower === 'неоплачен' || statuspayLower === 'unpaid' || statuspayLower === 'failed') {
+          paymentStatus = 'failed'
+        } else if (statuspayLower === 'отменен' || statuspayLower === 'cancelled' || statuspayLower === 'rejected') {
+          paymentStatus = 'cancelled'
+        }
+        
+        // Формируем данные платежа в формате приложения
+        paymentData = {
+          id: n8nPayment?.Id?.toString() || n8nPayment?.id?.toString() || null,
+          orderId: n8nPayment?.orderid || n8nPayment?.orderId || orderId,
+          userId: n8nPayment?.uuid || n8nPayment?.userId || null,
+          amount: parseFloat(n8nPayment?.sum) || n8nPayment?.amount || 0,
+          status: paymentStatus,
+          originalStatus: n8nPayment?.statuspay || n8nPayment?.statuspay || null,
+          tariffId: n8nPayment?.tariffId || null,
+          tariffName: n8nPayment?.tariffName || null,
+          devices: n8nPayment?.devices || 1,
+          periodMonths: n8nPayment?.periodMonths || 1,
+          discount: n8nPayment?.discount || 0,
+          createdAt: n8nPayment?.CreatedAt || n8nPayment?.createdAt || null,
+          completedAt: n8nPayment?.datapay || n8nPayment?.completedAt || null,
+          operationId: n8nPayment?.operationId || null
+        }
+        
+        console.log('📦 n8n-webhook-proxy: Данные платежа обработаны из формата n8n', {
+          orderId: paymentData.orderId,
+          originalStatus: paymentData.originalStatus,
+          mappedStatus: paymentData.status,
+          amount: paymentData.amount,
+          userId: paymentData.userId
+        })
+      } else if (result && typeof result === 'object' && !Array.isArray(result)) {
+        // Если результат - объект (не массив)
+        // n8n возвращает объект с данными платежа в корне: { Id, orderid, statuspay: "ОПЛАЧЕНО", ... }
+        console.log('📦 n8n-webhook-proxy: n8n вернул объект (не массив), обрабатываем его', {
+          hasOrderid: !!result?.orderid,
+          statuspay: result?.statuspay,
+          hasStatuspay: !!result?.statuspay,
+          resultKeys: Object.keys(result || {})
+        })
+        
+        // Проверяем, есть ли данные платежа в формате n8n
+        console.log('📦 n8n-webhook-proxy: Проверка данных объекта от n8n', {
+          hasOrderid: !!result?.orderid,
+          orderid: result?.orderid,
+          hasStatuspay: !!result?.statuspay,
+          statuspay: result?.statuspay,
+          conditionCheck: !!(result?.orderid || result?.statuspay)
+        })
+        
+        if (result?.orderid || result?.statuspay) {
+          const statuspay = result?.statuspay || ''
+          const statuspayLower = String(statuspay).toLowerCase().trim()
           
-          if (userDoc.exists) {
-            const userDocData = userDoc.data()
-            userData.email = userDocData.email || userData.email
-            userData.uuid = userDocData.uuid || null
-          }
-        } catch (userDataError) {
-          console.error('❌ Ошибка получения данных пользователя', {
-            userId: userData.userId,
-            error: userDataError.message
+          console.log('📦 n8n-webhook-proxy: Обработка статуса платежа', {
+            statuspay: statuspay,
+            statuspayLower: statuspayLower
           })
+          
+          // Определяем статус платежа
+          let paymentStatus = 'pending'
+          if (statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно') {
+            paymentStatus = 'completed'
+          } else if (statuspayLower === 'не оплачено' || statuspayLower === 'неоплачен' || statuspayLower === 'unpaid' || statuspayLower === 'failed') {
+            paymentStatus = 'failed'
+          } else if (statuspayLower === 'отменен' || statuspayLower === 'cancelled' || statuspayLower === 'rejected') {
+            paymentStatus = 'cancelled'
+          }
+          
+          // Формируем данные платежа в формате приложения
+          paymentData = {
+            id: result?.Id?.toString() || result?.id?.toString() || null,
+            orderId: result?.orderid || result?.orderId || orderId,
+            userId: result?.uuid || result?.userId || null,
+            amount: parseFloat(result?.sum) || result?.amount || 0,
+            status: paymentStatus,
+            originalStatus: result?.statuspay || null,
+            tariffId: result?.tariffId || null,
+            tariffName: result?.tariffName || null,
+            devices: result?.devices || 1,
+            periodMonths: result?.periodMonths || 1,
+            discount: result?.discount || 0,
+            createdAt: result?.CreatedAt || result?.createdAt || null,
+            completedAt: result?.datapay || result?.completedAt || null,
+            operationId: result?.operationId || null
+          }
+          
+          console.log('📦 n8n-webhook-proxy: ✅ Данные платежа обработаны из объекта n8n', {
+            orderId: paymentData.orderId,
+            originalStatus: paymentData.originalStatus,
+            mappedStatus: paymentData.status,
+            amount: paymentData.amount,
+            userId: paymentData.userId
+          })
+        } else {
+          console.log('⚠️ n8n-webhook-proxy: Объект от n8n не содержит orderid или statuspay', {
+            resultKeys: Object.keys(result || {}),
+            hasOrderid: !!result?.orderid,
+            hasStatuspay: !!result?.statuspay
+          })
+        } else {
+          // Если данных в формате n8n нет, проверяем стандартные поля
+          paymentData = result?.payment || result?.data?.payment || null
+          
+          // Если данные платежа есть, но в формате n8n, маппим их
+          if (paymentData && (paymentData.statuspay || paymentData.orderid)) {
+            const statuspay = paymentData.statuspay || ''
+            const statuspayLower = String(statuspay).toLowerCase().trim()
+            
+            let paymentStatus = 'pending'
+            if (statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно') {
+              paymentStatus = 'completed'
+            }
+            
+            paymentData = {
+              ...paymentData,
+              orderId: paymentData.orderid || paymentData.orderId || orderId,
+              status: paymentStatus,
+              originalStatus: paymentData.statuspay,
+              amount: parseFloat(paymentData.sum) || paymentData.amount || 0,
+              userId: paymentData.uuid || paymentData.userId || null
+            }
+          }
         }
       }
       
-      // Загружаем настройки платежей
-      const paymentSettings = await loadPaymentSettings()
-      
-      // Получаем webhook URL
-      const webhookUrl = getWebhookUrl('addClient', req)
-      
-      // Формируем данные для n8n workflow
-      const verifyData = {
-        mode: 'verifyPayment',
-        orderId: orderId,
-        userId: userData.userId,
-        // Данные пользователя
-        userData: {
-          uuid: userData.uuid,
-          email: userData.email,
-          userId: userData.userId
-        },
-        // Данные платежа
-        paymentData: {
-          orderId: orderId,
-          userId: paymentData.userId,
-          tariffId: paymentData.tariffId || tariffId,
-          tariffName: paymentData.tariffName,
-          amount: paymentData.amount || amount,
-          status: paymentData.status,
-          devices: paymentData.devices,
-          periodMonths: paymentData.periodMonths,
-          discount: paymentData.discount,
-          createdAt: paymentData.createdAt
-        },
-        // Настройки платежей
-        paymentSettings: paymentSettings
-      }
-      
-      console.log('📤 n8n-webhook-proxy: Отправка запроса на проверку платежа в n8n:', {
-        webhookUrl,
+      // Возвращаем результат от n8n
+      // Если n8n нашел запись и статус "оплачено", то paymentData будет содержать данные платежа
+      console.log('📤 n8n-webhook-proxy: Отправка ответа клиенту', {
+        success: true,
         orderId,
-        userId: userData.userId,
-        hasPaymentData: !!verifyData.paymentData
-      })
-      
-      const result = await callN8NWebhook(webhookUrl, verifyData)
-      
-      console.log('✅ n8n-webhook-proxy: Получен ответ от n8n для проверки платежа:', {
         hasResult: !!result,
-        status: result?.status,
-        success: result?.success
+        hasPayment: !!paymentData,
+        paymentStatus: paymentData?.status,
+        paymentOrderId: paymentData?.orderId
       })
       
       res.json({
         success: true,
         orderId,
-        result: result
+        result: result,
+        // Данные платежа из n8n (если найдены и обработаны)
+        payment: paymentData
       })
-    } catch (firestoreError) {
-      console.error('❌ Ошибка при запросе к Firestore для проверки платежа:', firestoreError)
+    } catch (webhookError) {
+      console.error('❌ n8n-webhook-proxy: Ошибка при вызове webhook в n8n:', {
+        message: webhookError.message,
+        status: webhookError.response?.status,
+        statusText: webhookError.response?.statusText,
+        errorData: webhookError.response?.data,
+        url: webhookUrl,
+        orderId: orderId,
+        stack: webhookError.stack?.substring(0, 500)
+      })
+      
+      // Если это ошибка от n8n (404, 500 и т.д.), возвращаем её
+      if (webhookError.response) {
+        return res.status(webhookError.response.status || 500).json({
+          success: false,
+          error: webhookError.response.data?.error || webhookError.message || 'Ошибка при проверке платежа в n8n',
+          n8nError: webhookError.response.data
+        })
+      }
+      
+      // Иначе возвращаем общую ошибку
       res.status(500).json({
         success: false,
-        error: 'Ошибка при проверке платежа',
-        details: firestoreError.message
+        error: webhookError.message || 'Ошибка при проверке платежа'
       })
     }
   } catch (error) {
-    console.error('❌ Ошибка при проверке платежа:', {
+    console.error('❌ n8n-webhook-proxy: Ошибка при проверке платежа через n8n:', {
       message: error.message,
       stack: error.stack
     })

@@ -922,7 +922,7 @@ export const dashboardService = {
   /**
    * Проверка платежа через webhook
    * @param {string} orderId - ID заказа
-   * @returns {Promise<Object>} Результат проверки платежа
+   * @returns {Promise<Object>} Результат проверки платежа с данными платежа
    */
   async verifyPayment(orderId) {
     if (!orderId) {
@@ -932,14 +932,8 @@ export const dashboardService = {
     try {
       logger.info('Dashboard', 'Отправка запроса на проверку платежа', { orderId })
 
-      // Получаем данные платежа из Firestore
-      const payment = await this.checkPaymentStatus(orderId)
-      
-      if (!payment) {
-        throw new Error('Платеж не найден')
-      }
-
       // Отправляем запрос на проверку платежа через API
+      // Сервер сам найдет платеж по orderId и проверит его
       const response = await fetch('/api/payment/verify', {
         method: 'POST',
         headers: {
@@ -947,24 +941,41 @@ export const dashboardService = {
         },
         body: JSON.stringify({
           orderId: orderId,
-          userId: payment.userId,
-          tariffId: payment.tariffId,
-          amount: payment.amount,
         }),
       })
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
+        
+        logger.error('Dashboard', 'Ошибка от сервера при проверке платежа', {
+          orderId,
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData.error,
+          fullErrorData: errorData
+        })
+        
         throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`)
       }
 
       const result = await response.json()
 
-      logger.info('Dashboard', 'Платеж проверен через webhook', {
+      logger.info('Dashboard', 'Результат проверки платежа получен от n8n', {
         orderId,
-        success: result.success
+        success: result.success,
+        hasPayment: !!result.payment,
+        paymentStatus: result.payment?.status,
+        hasResult: !!result.result,
+        resultIsArray: Array.isArray(result.result),
+        resultLength: Array.isArray(result.result) ? result.result.length : 'N/A',
+        resultType: typeof result.result,
+        resultKeys: result.result && typeof result.result === 'object' ? Object.keys(result.result) : 'N/A',
+        fullResult: JSON.stringify(result).substring(0, 2000)
       })
 
+      // Возвращаем результат от n8n
+      // n8n уже искал запись в базе данных по orderId и вернул данные, если найдена
+      // Не делаем дополнительных запросов к Firestore или другим API
       return result
     } catch (error) {
       logger.error('Dashboard', 'Ошибка проверки платежа через webhook', {

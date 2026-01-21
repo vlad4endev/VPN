@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { X, Copy, Check, Download, Globe, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock } from 'lucide-react'
+import { X, Copy, Check, Download, Globe, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock, RefreshCw, Loader2 } from 'lucide-react'
 import { getFirestore, doc, getDoc } from 'firebase/firestore'
 import { APP_ID } from '../../../shared/constants/app.js'
 import logger from '../../../shared/utils/logger.js'
@@ -20,10 +20,13 @@ const SubscriptionSuccessModal = ({
   amount = null,
   requiresPayment = false,
   message = null,
-  user = null // Добавляем user для формирования правильной ссылки
+  user = null, // Добавляем user для формирования правильной ссылки
+  onCheckPaymentStatus = null // Функция для ручной проверки статуса оплаты
 }) => {
   const [copied, setCopied] = useState(false)
   const [subscriptionLink, setSubscriptionLink] = useState(vpnLink || null)
+  const [checkingPayment, setCheckingPayment] = useState(false)
+  const [checkPaymentMessage, setCheckPaymentMessage] = useState('')
 
   // Загружаем правильную ссылку на подписку с учетом тарифа
   useEffect(() => {
@@ -109,6 +112,60 @@ const SubscriptionSuccessModal = ({
   const handlePaymentClick = () => {
     if (paymentUrl) {
       window.open(paymentUrl, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  const handleCheckPaymentStatus = async () => {
+    if (!orderId || !onCheckPaymentStatus) {
+      logger.warn('SubscriptionSuccessModal', 'Недостаточно данных для проверки статуса оплаты', {
+        hasOrderId: !!orderId,
+        hasOnCheckPaymentStatus: !!onCheckPaymentStatus
+      })
+      return
+    }
+
+    try {
+      setCheckingPayment(true)
+      setCheckPaymentMessage('Проверяем статус оплаты...')
+      
+      logger.info('SubscriptionSuccessModal', 'Ручная проверка статуса оплаты', { orderId })
+      
+      await onCheckPaymentStatus(orderId)
+      
+      setCheckPaymentMessage('Проверка выполнена. Обновляем данные...')
+      
+      // Через 2 секунды обновим страницу, чтобы показать актуальный статус
+      setTimeout(() => {
+        window.location.reload()
+      }, 2000)
+    } catch (error) {
+      logger.error('SubscriptionSuccessModal', 'Ошибка при проверке статуса оплаты', { orderId }, error)
+      
+      // Формируем понятное сообщение об ошибке
+      let errorMessage = 'Ошибка при проверке статуса. Попробуйте позже.'
+      
+      if (error && error.message) {
+        const errorMsg = error.message.toLowerCase()
+        if (errorMsg.includes('firestore недоступен') || errorMsg.includes('недоступен')) {
+          errorMessage = 'Сервис временно недоступен. Попробуйте позже или обратитесь в поддержку.'
+        } else if (errorMsg.includes('платеж еще не завершен') || errorMsg.includes('не завершен')) {
+          errorMessage = 'Платеж еще не завершен. Подождите немного и попробуйте снова.'
+        } else if (errorMsg.includes('не прошел') || errorMsg.includes('failed') || errorMsg.includes('cancelled')) {
+          errorMessage = error.message
+        } else if (errorMsg.includes('не найден') || errorMsg.includes('not found')) {
+          errorMessage = 'Платеж не найден. Проверьте правильность данных заказа.'
+        } else {
+          errorMessage = error.message || 'Ошибка при проверке статуса. Попробуйте позже.'
+        }
+      }
+      
+      setCheckPaymentMessage(errorMessage)
+      setCheckingPayment(false)
+      
+      // Сбрасываем сообщение через 7 секунд (больше времени для прочтения)
+      setTimeout(() => {
+        setCheckPaymentMessage('')
+      }, 7000)
     }
   }
 
@@ -240,16 +297,59 @@ const SubscriptionSuccessModal = ({
                 )}
               </div>
               
-              <button
-                onClick={handlePaymentClick}
-                className="w-full min-h-[44px] px-4 sm:px-5 py-2.5 sm:py-3 bg-yellow-600 hover:bg-yellow-700 active:bg-yellow-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
-              >
-                <ExternalLink size={18} className="sm:w-5 sm:h-5" />
-                <span>Перейти к оплате</span>
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handlePaymentClick}
+                  className="w-full min-h-[44px] px-4 sm:px-5 py-2.5 sm:py-3 bg-yellow-600 hover:bg-yellow-700 active:bg-yellow-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={checkingPayment}
+                >
+                  <ExternalLink size={18} className="sm:w-5 sm:h-5" />
+                  <span>Перейти к оплате</span>
+                </button>
+                
+                {/* Кнопка ручной проверки статуса оплаты */}
+                {orderId && onCheckPaymentStatus && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleCheckPaymentStatus}
+                      disabled={checkingPayment}
+                      className="w-full min-h-[44px] px-4 sm:px-5 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Проверить статус оплаты"
+                    >
+                      {checkingPayment ? (
+                        <>
+                          <Loader2 size={18} className="sm:w-5 sm:h-5 animate-spin" />
+                          <span>{checkPaymentMessage || 'Проверяем...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={18} className="sm:w-5 sm:h-5" />
+                          <span>Проверить статус оплаты</span>
+                        </>
+                      )}
+                    </button>
+                    
+                    {/* Сообщение об ошибке проверки */}
+                    {checkPaymentMessage && !checkingPayment && checkPaymentMessage.includes('Ошибка') || checkPaymentMessage.includes('недоступен') || checkPaymentMessage.includes('не прошел') ? (
+                      <div className="p-3 bg-red-900/20 border border-red-800/50 rounded-lg">
+                        <p className="text-red-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center">
+                          {checkPaymentMessage}
+                        </p>
+                      </div>
+                    ) : checkPaymentMessage && !checkingPayment ? (
+                      <div className="p-3 bg-green-900/20 border border-green-800/50 rounded-lg">
+                        <p className="text-green-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center">
+                          {checkPaymentMessage}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
               
               <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs mt-2">
                 После успешной оплаты подписка будет активирована автоматически
+                {orderId && onCheckPaymentStatus && ' или нажмите кнопку "Проверить статус оплаты"'}
               </p>
             </div>
           )}
