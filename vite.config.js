@@ -146,6 +146,10 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
+    optimizeDeps: {
+      include: ['react', 'react-dom'],
+      force: true, // Принудительная переоптимизация для исправления проблем с несколькими копиями React
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
