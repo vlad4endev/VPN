@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useUsers } from './useUsers.js'
 import { useServers } from './useServers.js'
 import { useTariffs } from './useTariffs.js'
@@ -28,9 +28,11 @@ export function useAdmin({
   setTariffs,
   setError,
   setSuccess,
+  adminTab = 'users', // Принимаем из пропсов, если передано
+  setAdminTab = () => {}, // Принимаем из пропсов, если передано
 }) {
-  // Состояние активной вкладки
-  const [adminTab, setAdminTab] = useState('users')
+  // Состояние активной вкладки - теперь принимается из пропсов
+  // const [adminTab, setAdminTab] = useState('users') // Убрано для исправления ошибки
 
   // Хуки для различных частей Admin панели
   const settingsHook = useSettings(currentUser, setError, setSuccess)

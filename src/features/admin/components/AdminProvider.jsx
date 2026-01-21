@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AdminProvider as AdminContextProvider } from '../context/AdminContext.jsx'
 import { useAdmin } from '../hooks/useAdmin.js'
 import { ensureFunction } from '../utils/safeExecute.js'
@@ -20,7 +21,11 @@ import { ensureFunction } from '../utils/safeExecute.js'
  * @param {Function} props.setSuccess - Функция установки успеха
  */
 export const AdminProviderWrapper = ({ children, ...adminProps }) => {
-  const adminHandlers = useAdmin(adminProps)
+  // Состояние активной вкладки - перемещено из useAdmin для исправления ошибки Invalid hook call
+  const [adminTab, setAdminTab] = useState('users')
+  
+  // Передаем adminTab и setAdminTab в useAdmin, но не используем их из результата
+  const adminHandlers = useAdmin({ ...adminProps, adminTab, setAdminTab })
   
   // ВАЖНО: Проверяем, что adminHandlers существует
   if (!adminHandlers) {
