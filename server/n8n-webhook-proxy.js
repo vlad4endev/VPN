@@ -2054,7 +2054,8 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
     
     // Генерируем subId для ссылки на подписку (если его еще нет)
     let subId = userData.subId
-    if (!subId || subId.trim() === '') {
+    // Проверяем, что subId существует, является строкой и не пустой
+    if (!subId || typeof subId !== 'string' || subId.trim() === '') {
       // Генерируем subId из userId (первые 8 символов) + случайное число
       const userIdShort = userId.substring(0, 8)
       const randomNum = Math.floor(Math.random() * 10000)
@@ -2062,7 +2063,9 @@ async function activateSubscriptionAfterPayment(userId, orderId, resultOrderId) 
       userUpdateData.subId = subId
       console.log('🔄 n8n-webhook-proxy: subId сгенерирован для ссылки на подписку', {
         userId,
-        subId
+        subId,
+        previousSubId: userData.subId,
+        previousSubIdType: typeof userData.subId
       })
     }
     
