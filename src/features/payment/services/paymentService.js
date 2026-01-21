@@ -168,6 +168,43 @@ class PaymentService {
         })
       }
 
+      // Детальная проверка обязательных полей с информативным сообщением
+      const requiredFields = ['paymentUrl']
+      const optionalFields = ['orderId', 'amount', 'status']
+      
+      logger.info('Payment', 'Проверка обязательных полей в ответе', {
+        paymentDataKeys: paymentData ? Object.keys(paymentData) : [],
+        hasPaymentUrl: !!paymentData?.paymentUrl,
+        hasOrderId: !!paymentData?.orderId,
+        hasAmount: !!paymentData?.amount,
+        hasStatus: !!paymentData?.status,
+        paymentUrlType: typeof paymentData?.paymentUrl,
+        paymentUrlValue: paymentData?.paymentUrl ? String(paymentData.paymentUrl).substring(0, 100) : null
+      })
+
+      // Проверяем наличие обязательных полей
+      const missingFields = requiredFields.filter(field => {
+        const value = paymentData?.[field]
+        return !value || (typeof value === 'string' && value.trim() === '')
+      })
+
+      if (missingFields.length > 0) {
+        logger.error('Payment', 'Неполный ответ от сервера: отсутствуют обязательные поля', {
+          missingFields,
+          receivedFields: paymentData ? Object.keys(paymentData) : [],
+          paymentData: paymentData,
+          originalData: data,
+          allKeys: paymentData ? Object.keys(paymentData) : [],
+          paymentUrlCheck: {
+            exists: !!paymentData?.paymentUrl,
+            type: typeof paymentData?.paymentUrl,
+            value: paymentData?.paymentUrl,
+            isEmpty: paymentData?.paymentUrl === '' || paymentData?.paymentUrl === null || paymentData?.paymentUrl === undefined
+          }
+        })
+        throw new Error(`Неполный ответ от сервера. Отсутствуют обязательные поля: ${missingFields.join(', ')}. Полученные поля: ${paymentData ? Object.keys(paymentData).join(', ') : 'нет данных'}`)
+      }
+
       // Извлекаем orderId из paymentUrl, если он не передан в ответе
       if (!paymentData.orderId && paymentData.paymentUrl) {
         try {
@@ -188,17 +225,6 @@ class PaymentService {
         }
       }
 
-      if (!paymentData.paymentUrl) {
-        logger.error('Payment', 'Неполные данные от сервера: отсутствует paymentUrl', {
-          receivedData: paymentData,
-          originalData: data,
-          hasPaymentUrl: !!paymentData?.paymentUrl,
-          hasOrderId: !!paymentData?.orderId,
-          allKeys: paymentData ? Object.keys(paymentData) : []
-        })
-        throw new Error('Неполные данные от сервера: отсутствует paymentUrl')
-      }
-
       // Если orderId все еще отсутствует, генерируем его из timestamp
       if (!paymentData.orderId) {
         paymentData.orderId = `order_${Date.now()}`
@@ -209,15 +235,16 @@ class PaymentService {
 
       logger.info('Payment', 'Ссылка на оплату успешно сгенерирована', {
         userId,
-        orderId: data.orderId,
-        hasPaymentUrl: !!data.paymentUrl,
+        orderId: paymentData.orderId,
+        hasPaymentUrl: !!paymentData.paymentUrl,
+        amount: paymentData.amount
       })
 
       return {
         success: true,
         paymentUrl: paymentData.paymentUrl,
         orderId: paymentData.orderId,
-        amount: paymentData.amount || paymentData.amount,
+        amount: paymentData.amount || amount,
       }
     } catch (error) {
       logger.error('Payment', 'Ошибка генерации ссылки на оплату', { userId, amount, tariffId }, error)
