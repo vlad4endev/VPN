@@ -21,10 +21,11 @@ import { ensureFunction } from '../utils/safeExecute.js'
  * @param {Function} props.setSuccess - Функция установки успеха
  */
 export const AdminProviderWrapper = ({ children, ...adminProps }) => {
-  // Состояние активной вкладки - перемещено из useAdmin для исправления ошибки Invalid hook call
+  // Состояние активной вкладки - используем простую инициализацию
   const [adminTab, setAdminTab] = useState('users')
   
-  // Передаем adminTab и setAdminTab в useAdmin, но не используем их из результата
+  // Передаем adminTab и setAdminTab в useAdmin
+  // ВАЖНО: Хуки должны вызываться безусловно и на верхнем уровне
   const adminHandlers = useAdmin({ ...adminProps, adminTab, setAdminTab })
   
   // ВАЖНО: Проверяем, что adminHandlers существует
