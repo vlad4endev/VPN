@@ -7,8 +7,9 @@ import TariffSelectionModal from './TariffSelectionModal.jsx'
 import SubscriptionSuccessModal from './SubscriptionSuccessModal.jsx'
 import PaymentProcessingModal from './PaymentProcessingModal.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
+import { useSubscriptionStatus } from '../../../shared/hooks/useSubscriptionStatus.js'
 import logger from '../../../shared/utils/logger.js'
-// import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
+import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 
@@ -63,19 +64,34 @@ const Dashboard = ({
   const paymentCheckTimeoutRef = useRef(null)
   const paymentCheckAttemptsRef = useRef(0)
 
+  // Получаем статус подписки (subscription.status - единственный источник правды)
+  const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
+  
   // Проверяем наличие активной подписки
   // Показываем подписку если:
   // 1. Есть UUID и tariffId И (подписка активна ИЛИ тестовый период ИЛИ неоплаченная но не прошло 5 дней)
+  // ВАЖНО: Используем subscription.status вместо paymentStatus
   const hasSubscription = currentUser?.uuid && currentUser?.tariffId && (
-    (currentUser?.expiresAt && new Date(currentUser.expiresAt).getTime() > Date.now()) ||
-    (currentUser?.paymentStatus === 'test_period' && currentUser?.testPeriodEndDate && new Date(currentUser.testPeriodEndDate).getTime() > Date.now()) ||
-    (currentUser?.paymentStatus === 'unpaid' && (() => {
-      if (!currentUser.unpaidStartDate) return true // Если нет даты начала неоплаты, показываем
-      const daysUnpaid = (Date.now() - new Date(currentUser.unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000)
-      return daysUnpaid < 5 // Показываем если не прошло 5 дней
+    subscriptionStatus === 'active' ||
+    subscriptionStatus === 'test_period' ||
+    subscriptionStatus === 'activating' ||
+    (subscriptionStatus === 'expired' && (() => {
+      // Для обратной совместимости: проверяем unpaidStartDate если subscription не загружена
+      if (!subscription && currentUser?.unpaidStartDate) {
+        const daysUnpaid = (Date.now() - new Date(currentUser.unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000)
+        return daysUnpaid < 5 // Показываем если не прошло 5 дней
+      }
+      return false
     })())
   )
-  const userStatus = getUserStatus(currentUser)
+  
+  // Используем статус из subscription (единственный источник правды)
+  const userStatus = {
+    status: subscriptionStatus,
+    label: subscriptionLabel,
+    color: subscriptionColor
+  }
+  
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
   
   // Состояние для оставшегося времени подписки (обновляется каждую минуту)
@@ -104,133 +120,7 @@ const Dashboard = ({
   }, [currentUser?.expiresAt])
 
   // Используем хук для проверки подписок и отправки уведомлений
-  // Временно отключено из-за проблемы с контекстом React
-  // useSubscriptionNotifications(currentUser)
-  
-  // Временная реализация логики уведомлений прямо в компоненте
-  const lastNotificationTimeRef = useRef(null)
-  useEffect(() => {
-    if (!currentUser || !currentUser.id) {
-      return
-    }
-
-    const notificationInstance = notificationService.getInstance()
-    if (!notificationInstance.hasPermission()) {
-      return
-    }
-
-    const checkSubscriptionAndNotify = async () => {
-      try {
-        const now = Date.now()
-        const oneDayMs = 24 * 60 * 60 * 1000
-        const twelveHoursMs = 12 * 60 * 60 * 1000
-
-        let expiryTime = null
-        if (currentUser.expiresAt && currentUser.expiresAt > 0) {
-          expiryTime = typeof currentUser.expiresAt === 'number' 
-            ? currentUser.expiresAt 
-            : new Date(currentUser.expiresAt).getTime()
-        }
-
-        if (!expiryTime && currentUser.testPeriodEndDate) {
-          expiryTime = typeof currentUser.testPeriodEndDate === 'number'
-            ? currentUser.testPeriodEndDate
-            : new Date(currentUser.testPeriodEndDate).getTime()
-        }
-
-        if (!expiryTime || expiryTime <= 0) {
-          return
-        }
-
-        const tariffName = currentUser.tariffName || 'Ваша подписка'
-        const timeUntilExpiry = expiryTime - now
-        const daysUntilExpiry = Math.floor(timeUntilExpiry / oneDayMs)
-        
-        const currentHour = new Date(now).getHours()
-        const isMorning = currentHour >= 6 && currentHour < 12
-        const isEvening = currentHour >= 18 && currentHour < 24
-
-        const shouldNotifyByTime = (isMorning || isEvening)
-        const shouldNotifyByExpiry = timeUntilExpiry <= 7 * oneDayMs || timeUntilExpiry <= 0
-        
-        if (!shouldNotifyByTime || !shouldNotifyByExpiry) {
-          return
-        }
-
-        const lastNotificationTime = lastNotificationTimeRef.current
-        const shouldNotify = !lastNotificationTime || (now - lastNotificationTime) > twelveHoursMs
-
-        if (!shouldNotify) {
-          return
-        }
-
-        if (timeUntilExpiry <= 0) {
-          await notificationInstance.notifySubscriptionExpired(tariffName)
-          lastNotificationTimeRef.current = now
-        } else if (daysUntilExpiry === 0) {
-          await notificationInstance.notifySubscriptionExpiringToday(tariffName)
-          lastNotificationTimeRef.current = now
-        } else if (daysUntilExpiry <= 7) {
-          await notificationInstance.notifySubscriptionExpiringSoon(tariffName, expiryTime)
-          lastNotificationTimeRef.current = now
-        }
-      } catch (error) {
-        logger.error('Dashboard', 'Ошибка при проверке подписки и отправке уведомлений', {
-          userId: currentUser?.id
-        }, error)
-      }
-    }
-
-    const getNextCheckTime = () => {
-      const now = new Date()
-      const currentHour = now.getHours()
-      let nextCheck = new Date(now)
-      
-      if (currentHour < 6) {
-        nextCheck.setHours(6, 0, 0, 0)
-      } else if (currentHour < 12) {
-        nextCheck.setHours(18, 0, 0, 0)
-      } else if (currentHour < 18) {
-        nextCheck.setHours(18, 0, 0, 0)
-      } else {
-        nextCheck.setDate(nextCheck.getDate() + 1)
-        nextCheck.setHours(6, 0, 0, 0)
-      }
-      
-      return nextCheck.getTime() - now.getTime()
-    }
-
-    const currentHour = new Date().getHours()
-    if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
-      checkSubscriptionAndNotify()
-    }
-
-    const scheduleNextCheck = () => {
-      const delay = getNextCheckTime()
-      setTimeout(() => {
-        checkSubscriptionAndNotify()
-        scheduleNextCheck()
-      }, delay)
-    }
-    
-    scheduleNextCheck()
-
-    const hourlyCheck = setInterval(() => {
-      const currentHour = new Date().getHours()
-      if ((currentHour >= 6 && currentHour < 12) || (currentHour >= 18 && currentHour < 24)) {
-        checkSubscriptionAndNotify()
-      }
-    }, 60 * 60 * 1000)
-
-    return () => {
-      clearInterval(hourlyCheck)
-    }
-  }, [
-    currentUser?.id,
-    currentUser?.expiresAt,
-    currentUser?.testPeriodEndDate,
-    currentUser?.tariffName
-  ])
+  useSubscriptionNotifications(currentUser)
 
   // Обработчик события от уведомлений для открытия окна оплаты
   useEffect(() => {
@@ -614,16 +504,14 @@ const Dashboard = ({
                 setSubscriptionSuccess(null)
 
                 // Обновляем страницу, чтобы загрузить обновленные данные пользователя
-                // Увеличиваем задержку, чтобы убедиться, что данные сохранились в Firestore и клиент создан в 3x-ui
+                // Увеличиваем задержку, чтобы убедиться, что данные сохранились в Firestore
                 logger.info('Dashboard', 'Ожидание перед перезагрузкой страницы для применения изменений', {
-                  orderId: paymentOrderId,
-                  hasVpnLink: !!subscriptionResult?.vpnLink,
-                  hasUuid: !!subscriptionResult?.uuid
+                  orderId: paymentOrderId
                 })
                 setTimeout(() => {
                   logger.info('Dashboard', 'Перезагрузка страницы после успешной оплаты')
                   window.location.reload()
-                }, 5000) // Увеличиваем до 5 секунд для надежного сохранения данных и создания клиента в 3x-ui
+                }, 1500) // Увеличиваем до 1.5 секунды для надежного сохранения данных
               } catch (error) {
                 logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
                   orderId: paymentOrderId
@@ -1713,8 +1601,15 @@ const Dashboard = ({
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
-      <Sidebar currentUser={currentUser} view={view} onSetView={onSetView} onLogout={onLogout} />
-      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:p-8 pt-14 sm:pt-16 lg:pt-6 lg:pt-8 lg:overflow-y-auto">
+      <Sidebar
+        currentUser={currentUser}
+        view={view}
+        onSetView={onSetView}
+        onLogout={onLogout}
+        dashboardTab={dashboardTab}
+        onSetDashboardTab={onSetDashboardTab}
+      />
+      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:p-8 pt-14 sm:pt-16 lg:pt-6 lg:pt-8 pb-24 lg:pb-8 overflow-y-auto">
         <div className="mb-4 sm:mb-5 md:mb-6">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-white mb-1.5 sm:mb-2">Личный кабинет</h1>
           <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">Управление подпиской, профилем и платежами</p>
@@ -1742,51 +1637,9 @@ const Dashboard = ({
             </p>
           </div>
         </div>
-        
-        {/* Вкладки - Mobile First с горизонтальной прокруткой */}
-        <div className="flex gap-2 sm:gap-4 mb-4 sm:mb-5 md:mb-6 border-b border-slate-800 overflow-x-auto scrollbar-hide -mx-1 sm:mx-0">
-          <button
-            onClick={() => onSetDashboardTab('subscription')}
-            className={`min-h-[44px] flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 md:px-6 py-3 sm:py-3.5 md:py-4 font-semibold transition-all whitespace-nowrap flex-shrink-0 min-w-fit touch-manipulation ${
-              dashboardTab === 'subscription'
-                ? 'text-blue-400 border-b-2 border-blue-400'
-                : 'text-slate-400 hover:text-slate-300 active:text-slate-200'
-            }`}
-            aria-label="Подписка"
-            aria-selected={dashboardTab === 'subscription'}
-          >
-            <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-            <span className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Подписка</span>
-          </button>
-          <button
-            onClick={() => onSetDashboardTab('profile')}
-            className={`min-h-[44px] flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 md:px-6 py-3 sm:py-3.5 md:py-4 font-semibold transition-all whitespace-nowrap flex-shrink-0 min-w-fit touch-manipulation ${
-              dashboardTab === 'profile'
-                ? 'text-blue-400 border-b-2 border-blue-400'
-                : 'text-slate-400 hover:text-slate-300 active:text-slate-200'
-            }`}
-            aria-label="Профиль"
-            aria-selected={dashboardTab === 'profile'}
-          >
-            <User className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-            <span className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Профиль</span>
-          </button>
-          <button
-            onClick={() => onSetDashboardTab('payments')}
-            className={`min-h-[44px] flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 md:px-6 py-3 sm:py-3.5 md:py-4 font-semibold transition-all whitespace-nowrap flex-shrink-0 min-w-fit touch-manipulation ${
-              dashboardTab === 'payments'
-                ? 'text-blue-400 border-b-2 border-blue-400'
-                : 'text-slate-400 hover:text-slate-300 active:text-slate-200'
-            }`}
-            aria-label="История платежей"
-            aria-selected={dashboardTab === 'payments'}
-          >
-            <History className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-            <span className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">История платежей</span>
-          </button>
-        </div>
 
-        {/* Контент вкладок */}
+        {/* Контент разделов (навигация — в боковом меню / нижней панели на мобильных) */}
+        <div key={dashboardTab} className="dashboard-tab-enter">
         {dashboardTab === 'subscription' && (
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
             {hasSubscription ? (
@@ -2362,6 +2215,7 @@ const Dashboard = ({
             )}
           </div>
         )}
+        </div>
 
         {showKeyModal && currentUser && (
           <KeyModal

@@ -143,21 +143,20 @@ const AdminPanel = ({
     onSetEditingUser(prev => prev ? { ...prev, expiresAt: value } : null)
   }, [onSetEditingUser])
 
-  const tabs = [
-    { id: 'users', label: 'Пользователи', icon: Users },
-    { id: 'settings', label: 'Настройки', icon: Server },
-    { id: 'tariffs', label: 'Тарифы и цены', icon: DollarSign },
-    { id: 'payments', label: 'Платежи', icon: CreditCard },
-    { id: 'n8n', label: 'n8n', icon: Link2 },
-  ]
-
   // Состояние для модального окна мониторинга
   const [showMonitoring, setShowMonitoring] = useState(false)
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
-      <Sidebar currentUser={currentUser} view="admin" onSetView={onSetView} onLogout={onHandleLogout} />
-      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 lg:overflow-y-auto">
+      <Sidebar
+        currentUser={currentUser}
+        view="admin"
+        onSetView={onSetView}
+        onLogout={onHandleLogout}
+        adminTab={adminTab}
+        onSetAdminTab={onSetAdminTab}
+      />
+      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-24 lg:pb-6 overflow-y-auto">
         <div className="w-full max-w-[90rem] mx-auto">
           {/* Шапка - Mobile First компактная */}
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 mb-3 sm:mb-4 border border-slate-800">
@@ -192,30 +191,7 @@ const AdminPanel = ({
             </div>
           </div>
 
-        {/* Табы - Mobile First: компактные с горизонтальной прокруткой */}
-        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 mb-3 sm:mb-4 overflow-hidden">
-          <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide">
-            {tabs.map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => onSetAdminTab(tab.id)}
-                  className={`min-h-[40px] sm:min-h-[44px] flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 md:px-4 lg:px-6 py-2 sm:py-2.5 md:py-3 font-medium transition-all whitespace-nowrap flex-shrink-0 touch-manipulation ${
-                    adminTab === tab.id
-                      ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800/50'
-                      : 'text-slate-400 hover:text-slate-200 active:text-slate-200 hover:bg-slate-800/30 active:bg-slate-800/50'
-                  }`}
-                  aria-label={tab.label}
-                  aria-selected={adminTab === tab.id}
-                >
-                  <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{tab.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        {/* Навигация по разделам — в боковом меню (десктоп) и в нижней панели (мобильные), дубли в контенте убраны */}
 
         {/* Контент табов */}
         {adminTab === 'users' && (

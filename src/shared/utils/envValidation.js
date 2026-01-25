@@ -4,7 +4,7 @@
  */
 
 const requiredEnvVars = {
-  // Firebase
+  // Firebase (эти переменные безопасны для использования в браузере)
   VITE_FIREBASE_API_KEY: 'Firebase API Key',
   VITE_FIREBASE_AUTH_DOMAIN: 'Firebase Auth Domain',
   VITE_FIREBASE_PROJECT_ID: 'Firebase Project ID',
@@ -12,10 +12,9 @@ const requiredEnvVars = {
   VITE_FIREBASE_MESSAGING_SENDER_ID: 'Firebase Messaging Sender ID',
   VITE_FIREBASE_APP_ID: 'Firebase App ID',
   
-  // 3x-ui
-  VITE_XUI_USERNAME: '3x-ui Username',
-  VITE_XUI_PASSWORD: '3x-ui Password',
-  VITE_XUI_INBOUND_ID: '3x-ui Inbound ID',
+  // ВАЖНО: VITE_XUI_* переменные УДАЛЕНЫ из фронтенда!
+  // Все операции с 3x-ui должны выполняться через backend API
+  // Секреты (пароли, ключи) НЕ должны быть в фронтенде
 }
 
 /**
@@ -36,11 +35,6 @@ export function validateEnvVars() {
   }
 
   // Дополнительные проверки
-  const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
-  if (inboundId && isNaN(Number(inboundId))) {
-    errors.push('VITE_XUI_INBOUND_ID должен быть числом')
-  }
-
   const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN
   if (authDomain && !authDomain.includes('.')) {
     errors.push('VITE_FIREBASE_AUTH_DOMAIN должен быть валидным доменом')

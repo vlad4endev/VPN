@@ -1482,25 +1482,18 @@ export const dashboardService = {
 
     // Создаем клиента в 3x-ui через Backend Proxy
     // Backend выполнит транзакцию: Firestore (status: creating) → 3x-ui → Firestore (finalize)
-    // ВАЖНО: Этот вызов выполняется для тестового периода, оплаченной подписки (paymentMode: 'paid') или если оплата не требуется
-    logger.info('Dashboard', '🚀 Начинаю создание/обновление клиента в 3x-ui', {
+    // ВАЖНО: Этот вызов выполняется только для тестового периода или если оплата не требуется
+    logger.info('Dashboard', '🚀 Начинаю создание клиента в 3x-ui', {
       testPeriod: testPeriod,
       paymentMode: paymentMode,
       expiryTime: expiryTimeForBackend,
-      hasExistingUuid: !!user.uuid,
-      clientId: clientId,
-      isNewSubscription: isNewSubscription
     })
     
     let result
-    let xuiClientCreated = false
     try {
       logger.info('Dashboard', '📞 Вызов xuiService.addClient...', {
         baseURL: '/api/vpn',
-        endpoint: '/add-client',
-        clientId: clientId,
-        email: user.email,
-        inboundId: finalInboundId
+        endpoint: '/add-client'
       })
       
       // Загружаем webhook URL из Firestore и передаем в запрос
@@ -1511,13 +1504,11 @@ export const dashboardService = {
       }
       
       result = await xuiService.addClient(addClientData)
-      xuiClientCreated = true
       
-      logger.info('Dashboard', '✅ Клиент успешно создан/обновлен в 3x-ui через Proxy', {
+      logger.info('Dashboard', '✅ Клиент успешно создан в 3x-ui через Proxy', {
         hasResult: !!result,
         vpnUuid: result?.vpnUuid || clientId,
         sessionUpdated: result?.sessionUpdated || false,
-        success: result?.success,
         responseKeys: result ? Object.keys(result) : []
       })
       
@@ -1525,10 +1516,9 @@ export const dashboardService = {
         logger.warn('Dashboard', '⚠️ Ответ от Proxy получен, но без UUID или success', {
           result: result
         })
-        // Не бросаем ошибку, продолжаем создание подписки в Firestore
       }
     } catch (error) {
-      logger.error('Dashboard', '❌ ОШИБКА: Не удалось создать/обновить клиента в 3x-ui', {
+      logger.error('Dashboard', '❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось создать клиента в 3x-ui', {
         errorMessage: error.message,
         errorType: error.constructor.name,
         errorResponse: error.response?.data,
@@ -1549,42 +1539,28 @@ export const dashboardService = {
       
       // Проверяем, является ли это ошибкой недоступности backend proxy
       if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED') || error.message?.includes('connect')) {
-        logger.error('Dashboard', 'Backend Proxy недоступен', {
-          error: error.message,
-          hint: 'Убедитесь, что backend proxy сервер запущен на http://localhost:3001'
-        })
-        // НЕ бросаем ошибку - продолжаем создание подписки в Firestore
-        // Клиент может быть создан позже через webhook или вручную
-      } else {
-        // Для других ошибок тоже не бросаем - продолжаем создание подписки
-        logger.warn('Dashboard', 'Продолжаем создание подписки в Firestore, несмотря на ошибку 3x-ui', {
-          error: error.message
-        })
+        const detailedError = new Error(
+          `Backend Proxy недоступен (порт 3001). ` +
+          `Убедитесь, что backend proxy сервер запущен на http://localhost:3001\n\n` +
+          `Детали ошибки: ${error.message}`
+        )
+        logger.error('Dashboard', 'Backend Proxy недоступен', null, detailedError)
+        throw detailedError
       }
       
-      // НЕ бросаем ошибку - продолжаем создание подписки в Firestore
-      // Клиент в 3x-ui может быть создан позже через webhook или синхронизацию
+      throw error
     }
     
-    if (xuiClientCreated && result) {
-      logger.info('Dashboard', '✅ Клиент успешно создан/обновлен в 3x-ui через Proxy', { 
-        email: user.email, 
-        uuid: result.vpnUuid || clientId,
-        sessionUpdated: result.sessionUpdated || false,
-        inboundId: finalInboundId,
-        expiryTime: expiryTimeForBackend,
-        expiryTimeSeconds: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0,
-        testPeriod: testPeriod,
-        paymentMode: paymentMode
-      })
-    } else {
-      logger.warn('Dashboard', '⚠️ Клиент не был создан в 3x-ui, но продолжаем создание подписки в Firestore', {
-        email: user.email,
-        clientId: clientId,
-        xuiClientCreated: xuiClientCreated,
-        hasResult: !!result
-      })
-    }
+    logger.info('Dashboard', '✅ Клиент успешно создан в 3x-ui через Proxy', { 
+      email: user.email, 
+      uuid: result.vpnUuid || clientId,
+      sessionUpdated: result.sessionUpdated || false,
+      inboundId: finalInboundId,
+      expiryTime: expiryTimeForBackend,
+      expiryTimeSeconds: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0,
+      testPeriod: testPeriod,
+      paymentMode: paymentMode
+    })
 
       // Если сессия была обновлена на бэкенде, обновляем её в Firestore (в settings.servers)
       if (result.sessionUpdated && result.sessionCookie && result.serverId) {
@@ -1713,27 +1689,10 @@ export const dashboardService = {
     if (paymentStatus === 'paid') {
       updateData.unpaidStartDate = null
     }
-    // Обновляем UUID только если его не было или если клиент был создан в 3x-ui
-    if (!user.uuid || user.uuid.trim() === '' || (xuiClientCreated && result?.vpnUuid)) {
-      updateData.uuid = result?.vpnUuid || finalClientId
-      logger.info('Dashboard', 'UUID обновлен в Firestore', {
-        oldUuid: user.uuid,
-        newUuid: updateData.uuid,
-        from3xui: xuiClientCreated && result?.vpnUuid
-      })
+    // Обновляем UUID только если его не было
+    if (!user.uuid || user.uuid.trim() === '') {
+      updateData.uuid = finalClientId
     }
-    
-    // Добавляем пометку о статусе создания клиента в 3x-ui
-    if (!xuiClientCreated) {
-      updateData.xuiClientStatus = 'pending' // Клиент будет создан позже
-      logger.warn('Dashboard', 'Подписка создана в Firestore, но клиент в 3x-ui не создан', {
-        userId: user.id,
-        hint: 'Клиент может быть создан позже через webhook или синхронизацию'
-      })
-    } else {
-      updateData.xuiClientStatus = 'created'
-    }
-    
     await updateDoc(userDoc, updateData)
     logger.info('Dashboard', 'Подписка привязана к пользователю', { 
       userId: user.id, 
