@@ -21,7 +21,9 @@ const SubscriptionSuccessModal = ({
   requiresPayment = false,
   message = null,
   user = null, // Добавляем user для формирования правильной ссылки
-  onCheckPaymentStatus = null // Функция для ручной проверки статуса оплаты
+  onCheckPaymentStatus = null, // Функция для ручной проверки статуса оплаты
+  awaitingPaymentResult = false, // Автопроверка в процессе — показываем «Ожидает платежа»
+  paymentPollAttempt = 0 // Номер попытки автопроверки (1–20)
 }) => {
   const [copied, setCopied] = useState(false)
   const [subscriptionLink, setSubscriptionLink] = useState(vpnLink || null)
@@ -234,8 +236,13 @@ const SubscriptionSuccessModal = ({
     return colorMap[platformInfo.color] || 'text-slate-400'
   }
 
+  // Не закрывать по клику на overlay при уже оформленной подписке (есть ссылка) — только по кнопке «Закрыть»
+  const handleOverlayClick = () => {
+    if (requiresPayment) onClose()
+  }
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-0 sm:p-2 md:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={handleOverlayClick}>
       <div
         className="bg-slate-900 border border-slate-800 w-full sm:max-w-[90vw] md:max-w-2xl rounded-none sm:rounded-xl md:rounded-2xl shadow-2xl min-h-full sm:min-h-0 sm:my-4 sm:max-h-[90vh] sm:overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -251,16 +258,22 @@ const SubscriptionSuccessModal = ({
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.25rem)] sm:text-xl font-bold text-white">
-                {requiresPayment ? 'Требуется оплата' : 'Подписка успешно оформлена!'}
+                {requiresPayment && awaitingPaymentResult
+                  ? 'Ожидает платежа'
+                  : requiresPayment
+                    ? 'Требуется оплата'
+                    : 'Подписка успешно оформлена!'}
               </h3>
               <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400 mt-0.5 sm:mt-1">
-                {message || (
-                  <>
-                    Тариф: <span className="text-white font-semibold">{tariffName}</span>
-                    {devices > 1 && ` • ${devices} устройств`}
-                    {periodMonths > 0 && ` • ${periodMonths} ${periodMonths === 1 ? 'месяц' : periodMonths < 5 ? 'месяца' : 'месяцев'}`}
-                  </>
-                )}
+                {requiresPayment && awaitingPaymentResult
+                  ? `Проверяем оплату... (попытка ${paymentPollAttempt}/20)`
+                  : (message || (
+                      <>
+                        Тариф: <span className="text-white font-semibold">{tariffName}</span>
+                        {devices > 1 && ` • ${devices} устройств`}
+                        {periodMonths > 0 && ` • ${periodMonths} ${periodMonths === 1 ? 'месяц' : periodMonths < 5 ? 'месяца' : 'месяцев'}`}
+                      </>
+                    ))}
               </p>
             </div>
           </div>
@@ -278,9 +291,20 @@ const SubscriptionSuccessModal = ({
           {requiresPayment && paymentUrl && (
             <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-3">
               <div className="flex items-center gap-2 text-yellow-400 mb-2">
-                <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Оплата подписки</span>
+                {awaitingPaymentResult ? (
+                  <Loader2 size={18} className="sm:w-5 sm:h-5 flex-shrink-0 animate-spin" />
+                ) : (
+                  <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+                )}
+                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
+                  {awaitingPaymentResult ? 'Ожидание подтверждения оплаты' : 'Оплата подписки'}
+                </span>
               </div>
+              {awaitingPaymentResult && (
+                <p className="text-yellow-300/90 text-[clamp(0.7rem,0.65rem+0.25vw,0.8rem)] sm:text-sm">
+                  Проверяем статус... попытка {paymentPollAttempt}/20
+                </p>
+              )}
               
               <div className="space-y-2 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
                 {orderId && (

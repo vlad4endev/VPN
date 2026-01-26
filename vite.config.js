@@ -147,8 +147,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     optimizeDeps: {
-      include: ['react', 'react-dom'],
-      force: true, // Принудительная переоптимизация для исправления проблем с несколькими копиями React
+      include: ['react', 'react-dom', '@tanstack/react-query'],
+      // Убираем force: true — оставление может давать два экземпляра React при предбандлинге
+      force: false,
     },
     resolve: {
       alias: {
@@ -157,8 +158,10 @@ export default defineConfig(({ mode }) => {
         '@shared': path.resolve(__dirname, './src/shared'),
         '@lib': path.resolve(__dirname, './src/lib'),
         '@app': path.resolve(__dirname, './src/app'),
+        // Один экземпляр React на всё приложение — устраняет "Invalid hook call" в AdminProvider
+        react: path.resolve(__dirname, 'node_modules/react'),
+        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
       },
-      // Убеждаемся, что React разрешается правильно
       dedupe: ['react', 'react-dom'],
     },
     plugins: [

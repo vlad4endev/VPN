@@ -1,6 +1,6 @@
-import { initializeApp, getApp } from 'firebase/app'
+import { initializeApp, getApp, deleteApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore'
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { validateEnvVars, getEnvErrorMessage } from '../../shared/utils/envValidation.js'
 import logger from '../../shared/utils/logger.js'
@@ -94,7 +94,17 @@ try {
     }
     
     auth = getAuth(app)
-    db = getFirestore(app)
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+      })
+    } catch (e) {
+      if (e.code === 'failed-precondition') {
+        db = getFirestore(app)
+      } else {
+        throw e
+      }
+    }
     
     // Инициализация Firebase App Check для защиты от ботов и злоупотреблений
     // ВАЖНО: App Check работает только в production или с настроенным reCAPTCHA
@@ -131,33 +141,6 @@ try {
       // Не устанавливаем firebaseInitError, так как это не критично
     }
     
-    // Включаем офлайн-персистентность для кеширования данных
-    // ВАЖНО: Ошибка 'failed-precondition' - это нормальная ситуация при hot reload или нескольких вкладках
-    // Не логируем её как ошибку, так как persistence уже работает
-    try {
-      enableIndexedDbPersistence(db).catch((err) => {
-        // Игнорируем ошибку 'failed-precondition' - это нормально при hot reload или нескольких вкладках
-        if (err.code === 'failed-precondition') {
-          // Persistence уже включен - это нормально, не логируем как ошибку
-          // Просто молча игнорируем
-          return
-        } else if (err.code === 'unimplemented') {
-          logger.warn('Firebase', 'Офлайн-персистентность недоступна: браузер не поддерживает', null)
-        } else {
-          // Другие ошибки логируем на уровне debug, не error
-          logger.debug('Firebase', 'Ошибка включения офлайн-персистентности', null, err)
-        }
-      })
-    } catch (persistenceError) {
-      // Игнорируем синхронные ошибки persistence (не должны возникать, но на всякий случай)
-      if (persistenceError.code === 'failed-precondition') {
-        // Молча игнорируем - просто продолжаем выполнение
-      } else {
-        // Другие синхронные ошибки логируем на уровне debug
-        logger.debug('Firebase', 'Синхронная ошибка при включении persistence', null, persistenceError)
-      }
-    }
-    
     googleProvider = new GoogleAuthProvider()
     googleProvider.setCustomParameters({
       prompt: 'select_account'
@@ -166,6 +149,15 @@ try {
       projectId: firebaseConfig.projectId,
       authDomain: firebaseConfig.authDomain,
     })
+
+    // Safari: при выгрузке страницы отключаем Firestore до перезагрузки,
+    // чтобы не получать "Fetch API cannot load ... due to access control checks"
+    if (typeof window !== 'undefined' && app) {
+      const handleBeforeUnload = () => {
+        deleteApp(app).catch(() => {})
+      }
+      window.addEventListener('beforeunload', handleBeforeUnload)
+    }
   } else {
     const missing = []
     if (!firebaseConfig.apiKey) missing.push('apiKey')

@@ -7,7 +7,7 @@ import { Loader2, CreditCard, Wallet, AlertCircle, CheckCircle2 } from 'lucide-r
  */
 const PaymentProcessingModal = ({ 
   onClose,
-  message = 'Формируем подписку...',
+  message = 'Бухгалтер создает платежку',
   status = 'processing' // 'processing', 'waiting', 'checking', 'error', 'success'
 }) => {
   // Предотвращаем закрытие модального окна кликом вне его
@@ -111,7 +111,7 @@ const PaymentProcessingModal = ({
           
           {status === 'processing' && (
             <p className="text-slate-400 text-sm sm:text-base mt-4">
-              Пожалуйста, подождите, формируем ссылку на оплату...
+              Пожалуйста, подождите...
             </p>
           )}
           {status === 'waiting' && (

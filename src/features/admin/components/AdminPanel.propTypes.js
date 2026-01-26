@@ -106,7 +106,7 @@ export const AdminPanelPropTypes = {
   onHandleTariffTrafficGBChange: PropTypes.func.isRequired,
   onHandleTariffDurationDaysChange: PropTypes.func.isRequired,
   onHandleTariffActiveChange: PropTypes.func.isRequired,
-  onHandleTariffSubscriptionLinkChange: PropTypes.func.isRequired,
+  onHandleTariffSubscriptionLinkChange: PropTypes.func,
   
   // Функции onHandleSaveUserCard и onGenerateUUID больше не передаются через props
   // Они используются из контекста (AdminProviderWrapper) в компоненте UserCard

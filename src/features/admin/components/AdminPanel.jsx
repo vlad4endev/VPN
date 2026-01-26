@@ -67,7 +67,7 @@ const AdminPanel = ({
   onHandleTariffTrafficGBChange,
   onHandleTariffDurationDaysChange,
   onHandleTariffActiveChange,
-  onHandleTariffSubscriptionLinkChange,
+  onHandleTariffSubscriptionLinkChange = () => {},
   settings,
   onHandleAppLinkChange,
 }) => {
@@ -86,7 +86,7 @@ const AdminPanel = ({
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
       onHandleTariffNameChange, onHandleTariffPlanChange, onHandleTariffPriceChange,
       onHandleTariffDevicesChange, onHandleTariffTrafficGBChange, onHandleTariffDurationDaysChange,
-      onHandleTariffActiveChange, settings, onHandleAppLinkChange
+      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, settings, onHandleAppLinkChange
       // onHandleSaveUserCard и onGenerateUUID больше не передаются через пропсы - используются из контекста в UserCard
     }, 'prop', 'AdminPanel')
   }

@@ -74,6 +74,36 @@ export const dashboardService = {
   },
 
   /**
+   * Обновление статуса платежа по orderId (например, на «Успех» после подтверждения оплаты)
+   * @param {string} orderId - ID заказа
+   * @param {string} status - Новый статус ('completed' и т.д.)
+   * @returns {Promise<boolean>} true, если обновлено
+   */
+  async updatePaymentStatus(orderId, status = 'completed') {
+    if (!db || !orderId) return false
+    try {
+      const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+      const q = query(paymentsCollection, where('orderId', '==', orderId))
+      const snapshot = await getDocs(q)
+      if (snapshot.empty) {
+        logger.warn('Dashboard', 'Платеж для обновления статуса не найден', { orderId })
+        return false
+      }
+      const docRef = snapshot.docs[0].ref
+      const updateData = {
+        status,
+        ...(status === 'completed' ? { completedAt: new Date().toISOString() } : {}),
+      }
+      await updateDoc(docRef, updateData)
+      logger.info('Dashboard', 'Статус платежа обновлён на «Успех»', { orderId, status })
+      return true
+    } catch (err) {
+      logger.error('Dashboard', 'Ошибка обновления статуса платежа', { orderId }, err)
+      return false
+    }
+  },
+
+  /**
    * Обновление профиля пользователя
    * @param {string} userId - ID пользователя
    * @param {Object} profileData - Данные профиля (name, phone)
@@ -972,6 +1002,13 @@ export const dashboardService = {
         resultKeys: result.result && typeof result.result === 'object' ? Object.keys(result.result) : 'N/A',
         fullResult: JSON.stringify(result).substring(0, 2000)
       })
+
+      if (result.success && !result.payment && !result.result) {
+        logger.warn('Dashboard', 'Verify успешен, но нет ни payment, ни result — n8n мог вернуть пустой или неожиданный формат. Проверьте логи бэкенда (n8n-webhook-proxy).', {
+          orderId,
+          responseKeys: Object.keys(result || {})
+        })
+      }
 
       // Возвращаем результат от n8n
       // n8n уже искал запись в базе данных по orderId и вернул данные, если найдена

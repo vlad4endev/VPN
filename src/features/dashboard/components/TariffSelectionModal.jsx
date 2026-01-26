@@ -273,20 +273,27 @@ const TariffSelectionModal = ({
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
                   Количество устройств
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={selectedDevices}
-                  onChange={(e) => {
-                    const value = Math.max(1, Math.min(10, parseInt(e.target.value) || 1))
-                    setSelectedDevices(value)
-                    setConfirmed(false) // Сбрасываем подтверждение при изменении
-                    setPaymentMode(null)
-                  }}
-                  className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-800 border border-slate-700 rounded-lg text-white text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
-                  disabled={isLoading || confirmed}
-                />
+                <div className="grid grid-cols-5 gap-2">
+                  {[1, 2, 3, 4, 5].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDevices(num)
+                        setConfirmed(false)
+                        setPaymentMode(null)
+                      }}
+                      disabled={isLoading || confirmed}
+                      className={`min-h-[44px] px-2 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.875rem,0.8rem+0.25vw,1.125rem)] sm:text-lg ${
+                        selectedDevices === num
+                          ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                      } disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -504,20 +511,20 @@ const TariffSelectionModal = ({
                 <button
                   onClick={handlePayNow}
                   disabled={isLoading}
-                  className="btn-icon-only-mobile w-full min-h-[44px] px-4 py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
+                  className="w-full min-h-[44px] px-4 py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
                   aria-label="Оплатить сейчас"
                 >
-                  <Check size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span className="btn-text">Оплатить сейчас</span>
+                  <Check size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <span>Оплатить сейчас</span>
                 </button>
                 <button
                   onClick={handlePayLater}
                   disabled={isLoading}
-                  className="btn-icon-only-mobile w-full min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
+                  className="w-full min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
                   aria-label="Оплатить позже, тест 24 часа"
                 >
-                  <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span className="btn-text">Оплатить позже (тест 24 часа)</span>
+                  <Clock size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <span>Оплатить позже (тест 24 часа)</span>
                 </button>
                 <p className="text-slate-500 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center mt-2 break-words">
                   При выборе "Оплатить позже" вы получите доступ на 24 часа для тестирования
@@ -540,34 +547,34 @@ const TariffSelectionModal = ({
             </div>
           )}
 
-          {/* Кнопки действий - Mobile First */}
+          {/* Кнопки действий - Mobile First, подписи всегда видимы */}
           {!confirmed && (
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-3 sm:pt-4">
-              <button
-                onClick={handleCancel}
-                disabled={isLoading}
-                className="btn-icon-only-mobile min-h-[44px] flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center touch-manipulation"
-                aria-label="Отмена"
-              >
-                <span className="btn-text">Отмена</span>
-              </button>
               <button
                 onClick={handleConfirm}
                 disabled={
                   isLoading || 
                   (isSuper && selectedDevices < 1)
                 }
-                className="btn-icon-only-mobile min-h-[44px] flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
+                className="min-h-[44px] flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
                 aria-label="Подтвердить"
               >
                 {isLoading ? (
                   <>
-                    <Loader2 size={18} className="sm:w-5 sm:h-5 animate-spin flex-shrink-0" />
-                    <span className="btn-text">Оформление...</span>
+                    <Loader2 size={18} className="w-4 h-4 sm:w-5 sm:h-5 animate-spin flex-shrink-0" />
+                    <span>Оформление...</span>
                   </>
                 ) : (
-                  <span className="btn-text">Подтвердить</span>
+                  <span>Подтвердить</span>
                 )}
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={isLoading}
+                className="min-h-[44px] flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center touch-manipulation"
+                aria-label="Отмена"
+              >
+                <span>Отмена</span>
               </button>
             </div>
           )}

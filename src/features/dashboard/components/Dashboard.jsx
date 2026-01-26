@@ -30,6 +30,7 @@ const Dashboard = ({
   onHandleCreateSubscription,
   onHandleRenewSubscription,
   onHandleDeleteSubscription,
+  onRefreshUserAfterPayment,
   onHandleUpdateProfile,
   onHandleDeleteAccount,
   onProfileNameChange,
@@ -56,13 +57,22 @@ const Dashboard = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deletingSubscription, setDeletingSubscription] = useState(false)
   const [showPaymentProcessing, setShowPaymentProcessing] = useState(false)
-  const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('Формируем подписку...')
+  const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('Бухгалтер создает платежку')
   const [paymentProcessingStatus, setPaymentProcessingStatus] = useState('processing') // 'processing', 'waiting', 'checking', 'error'
+  const paymentProcessingMessageTimerRef = useRef(null)
   const [paymentWindowRef, setPaymentWindowRef] = useState(null)
   const [paymentOrderId, setPaymentOrderId] = useState(null)
   const paymentPollingIntervalRef = useRef(null)
   const paymentCheckTimeoutRef = useRef(null)
   const paymentCheckAttemptsRef = useRef(0)
+  const urlOrderIdProcessedRef = useRef(false)
+  const [awaitingPaymentResult, setAwaitingPaymentResult] = useState(false)
+  const [paymentPollAttempt, setPaymentPollAttempt] = useState(0)
+  const paymentAutoPollTimeoutRef = useRef(null)
+  const paymentAutoPollIntervalRef = useRef(null)
+  const handleManualPaymentCheckRef = useRef(() => {})
+  /** Защита от двойного создания: orderId, для которых подписка уже создаётся или создана (до следующего нового платежа). */
+  const subscriptionCreatedForOrderIdsRef = useRef(new Set())
 
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
@@ -170,6 +180,8 @@ const Dashboard = ({
   const tariffsRef = useRef(tariffs)
   const currentUserRef = useRef(currentUser)
   const subscriptionSuccessRef = useRef(subscriptionSuccess)
+  const onSetShowKeyModalRef = useRef(onSetShowKeyModal)
+  const onRefreshUserAfterPaymentRef = useRef(onRefreshUserAfterPayment)
 
   // Обновляем refs при изменении
   useEffect(() => {
@@ -177,7 +189,9 @@ const Dashboard = ({
     tariffsRef.current = tariffs
     currentUserRef.current = currentUser
     subscriptionSuccessRef.current = subscriptionSuccess
-  }, [onHandleCreateSubscription, tariffs, currentUser, subscriptionSuccess])
+    onSetShowKeyModalRef.current = onSetShowKeyModal
+    onRefreshUserAfterPaymentRef.current = onRefreshUserAfterPayment
+  }, [onHandleCreateSubscription, tariffs, currentUser, subscriptionSuccess, onSetShowKeyModal, onRefreshUserAfterPayment])
 
   // Проверка статуса платежа с задержками и повторными попытками
   useEffect(() => {
@@ -547,7 +561,7 @@ const Dashboard = ({
                 setPaymentOrderId(null)
                 setPaymentWindowRef(null)
                 setPaymentProcessingStatus('processing')
-                setPaymentProcessingMessage('Формируем подписку...')
+                setPaymentProcessingMessage('Бухгалтер создает платежку')
               }, 3000)
 
               return true // Платеж обработан (не прошел)
@@ -597,7 +611,7 @@ const Dashboard = ({
             setPaymentOrderId(null)
             setPaymentWindowRef(null)
             setPaymentProcessingStatus('processing')
-            setPaymentProcessingMessage('Формируем подписку...')
+            setPaymentProcessingMessage('Бухгалтер создает платежку')
             paymentCheckAttemptsRef.current = 0
           }, 3000)
           return
@@ -768,25 +782,38 @@ const Dashboard = ({
                 }
                 
                 if (tariff && onHandleCreateSubscriptionRef.current) {
-                  // Создаем подписку с данными из платежа (используем ref для стабильности)
-                  await onHandleCreateSubscriptionRef.current(
-                    tariff,
-                    payment.devices || 1,
-                    null,
-                    payment.periodMonths || 1,
-                    false,
-                    'pay_now',
-                    payment.discount || 0
-                  )
-                  
-                  logger.info('Dashboard', 'Подписка создана после проверки webhook', {
-                    orderId: paymentOrderId
-                  })
-                  
-                  // Перезагружаем страницу для обновления данных
-                  setTimeout(() => {
-                    window.location.reload()
-                  }, 1000)
+                  if (subscriptionCreatedForOrderIdsRef.current.has(paymentOrderId)) {
+                    logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (окно закрыто)', { orderId: paymentOrderId })
+                    return
+                  }
+                  subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
+                  try {
+                    const isFirstPaymentWebhook = !currentUserData?.uuid || !currentUserData?.tariffId
+                    await onHandleCreateSubscriptionRef.current(
+                      tariff,
+                      payment.devices || 1,
+                      null,
+                      payment.periodMonths || 1,
+                      false,
+                      'paid',
+                      payment.discount || 0
+                    )
+                    logger.info('Dashboard', 'Подписка создана после проверки webhook', {
+                      orderId: paymentOrderId,
+                      isFirstPayment: isFirstPaymentWebhook
+                    })
+                    if (isFirstPaymentWebhook && typeof onSetShowKeyModalRef.current === 'function') {
+                      await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                      setShowSuccessModal(false)
+                      setSubscriptionSuccess(null)
+                      onSetShowKeyModalRef.current(true)
+                    } else {
+                      setTimeout(() => { window.location.reload() }, 1000)
+                    }
+                  } catch (err) {
+                    subscriptionCreatedForOrderIdsRef.current.delete(paymentOrderId)
+                    throw err
+                  }
                   return
                 }
               } else {
@@ -972,9 +999,14 @@ const Dashboard = ({
       setShowTariffModal(false)
       
       // Показываем модальное окно обработки платежа
-      setPaymentProcessingMessage('Формируем подписку...')
+      if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+      setPaymentProcessingMessage('Бухгалтер создает платежку')
       setShowPaymentProcessing(true)
-      
+      paymentProcessingMessageTimerRef.current = setTimeout(() => {
+        setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+        paymentProcessingMessageTimerRef.current = null
+      }, 3000)
+
       logger.debug('Dashboard', 'Вызов onHandleCreateSubscription', {
         tariff: {
           id: subscriptionData.tariff.id,
@@ -1017,6 +1049,10 @@ const Dashboard = ({
       
       // Если результат содержит ссылку на оплату, открываем её в miniapp
       // Проверяем наличие paymentUrl, даже если requiresPayment не указан явно
+      if (paymentProcessingMessageTimerRef.current) {
+        clearTimeout(paymentProcessingMessageTimerRef.current)
+        paymentProcessingMessageTimerRef.current = null
+      }
       if (result && result.paymentUrl) {
         logger.info('Dashboard', 'Открываем ссылку на оплату в мини-окне', {
           paymentUrl: result.paymentUrl,
@@ -1050,6 +1086,8 @@ const Dashboard = ({
         
         setSubscriptionSuccess(subscriptionSuccessData)
         setShowSuccessModal(true)
+        // Закрываем модалку обработки, чтобы была видна модалка «требуется оплата» и автопроверка («Проверяем оплату…»)
+        setShowPaymentProcessing(false)
         
         logger.info('Dashboard', 'Модальное окно должно быть показано', {
           showSuccessModal: true,
@@ -1108,6 +1146,10 @@ const Dashboard = ({
       }
       
       // Закрываем модальное окно обработки платежа если нет ссылки на оплату
+      if (paymentProcessingMessageTimerRef.current) {
+        clearTimeout(paymentProcessingMessageTimerRef.current)
+        paymentProcessingMessageTimerRef.current = null
+      }
       setShowPaymentProcessing(false)
       
       // Если результат содержит данные подписки, показываем модальное окно успеха
@@ -1154,6 +1196,10 @@ const Dashboard = ({
       }
       
       // Закрываем модальное окно обработки платежа при ошибке
+      if (paymentProcessingMessageTimerRef.current) {
+        clearTimeout(paymentProcessingMessageTimerRef.current)
+        paymentProcessingMessageTimerRef.current = null
+      }
       setShowPaymentProcessing(false)
       
       // Модальное окно уже закрыто, но ошибка будет показана через setError в App.jsx
@@ -1191,7 +1237,9 @@ const Dashboard = ({
 
     try {
       logger.info('Dashboard', 'Ручная проверка статуса оплаты', { orderId })
-      
+      // В dev — дольше не перезагружаем, чтобы успеть скопировать логи
+      const reloadDelayMs = (typeof import.meta !== 'undefined' && import.meta.env?.DEV) ? 8000 : 2000
+
       const { dashboardService } = await import('../services/dashboardService.js')
       
       // Отправляем webhook для проверки платежа
@@ -1310,23 +1358,44 @@ const Dashboard = ({
                 devices: payment.devices,
                 periodMonths: payment.periodMonths
               })
-              
-              // Создаем подписку
-              await onHandleCreateSubscription(
-                tariff,
-                payment.devices,
-                null,
-                payment.periodMonths,
-                false,
-                'pay_now',
-                payment.discount
-              )
-              
-              logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n')
-              
-              setTimeout(() => {
-                window.location.reload()
-              }, 1000)
+              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
+                logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n массив)', { orderId })
+                return
+              }
+              subscriptionCreatedForOrderIdsRef.current.add(orderId)
+              try {
+                const isFirstPayment = !currentUser?.uuid || !currentUser?.tariffId
+                await onHandleCreateSubscription(
+                  tariff,
+                  payment.devices,
+                  null,
+                  payment.periodMonths,
+                  false,
+                  'paid',
+                  payment.discount
+                )
+                logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n')
+                await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
+                const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
+                const cleanUrl = window.location.origin + cleanPath
+                if (typeof window.history?.replaceState === 'function') {
+                  window.history.replaceState({}, '', cleanUrl)
+                }
+                await onRefreshUserAfterPayment?.().catch(() => {})
+                if (isFirstPayment && typeof onSetShowKeyModal === 'function') {
+                  setShowSuccessModal(false)
+                  setSubscriptionSuccess(null)
+                  onSetShowKeyModal(true)
+                } else {
+                  if (reloadDelayMs > 2000) {
+                    logger.info('Dashboard', 'Перезагрузка через 8 сек. В DevTools → Console → включите «Preserve log», чтобы логи не пропадали.')
+                  }
+                  setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
+                }
+              } catch (err) {
+                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+                throw err
+              }
               return
             } else {
               logger.warn('Dashboard', 'Статус платежа не ОПЛАЧЕНО', {
@@ -1423,23 +1492,41 @@ const Dashboard = ({
                 devices: payment.devices,
                 periodMonths: payment.periodMonths
               })
-              
-              // Создаем подписку
-              await onHandleCreateSubscription(
-                tariff,
-                payment.devices,
-                null,
-                payment.periodMonths,
-                false,
-                'pay_now',
-                payment.discount
-              )
-              
-              logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n (объект)')
-              
-              setTimeout(() => {
-                window.location.reload()
-              }, 1000)
+              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
+                logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n объект)', { orderId })
+                return
+              }
+              subscriptionCreatedForOrderIdsRef.current.add(orderId)
+              try {
+                const isFirstPaymentObj = !currentUser?.uuid || !currentUser?.tariffId
+                await onHandleCreateSubscription(
+                  tariff,
+                  payment.devices,
+                  null,
+                  payment.periodMonths,
+                  false,
+                  'paid',
+                  payment.discount
+                )
+                logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n (объект)')
+                await dashboardService.updatePaymentStatus(n8nPayment?.orderid || orderId, 'completed').catch(() => {})
+                const cleanPathObj = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
+                const cleanUrlObj = window.location.origin + cleanPathObj
+                if (typeof window.history?.replaceState === 'function') {
+                  window.history.replaceState({}, '', cleanUrlObj)
+                }
+                await onRefreshUserAfterPayment?.().catch(() => {})
+                if (isFirstPaymentObj && typeof onSetShowKeyModal === 'function') {
+                  setShowSuccessModal(false)
+                  setSubscriptionSuccess(null)
+                  onSetShowKeyModal(true)
+                } else {
+                  setTimeout(() => { window.location.replace(cleanUrlObj) }, reloadDelayMs)
+                }
+              } catch (err) {
+                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+                throw err
+              }
               return
             } else {
               logger.warn('Dashboard', 'Статус платежа в объекте n8n не ОПЛАЧЕНО', {
@@ -1534,23 +1621,44 @@ const Dashboard = ({
               throw new Error('Тариф не найден')
             }
 
-            // Создаем подписку с данными из платежа
-            await onHandleCreateSubscription(
-              tariff,
-              payment.devices || 1,
-              null, // natrockPort
-              payment.periodMonths || 1,
-              false, // testPeriod
-              'pay_now', // paymentMode
-              payment.discount || 0
-            )
-
-            logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
-            
-            // Обновляем страницу для отображения обновленных данных
-            setTimeout(() => {
-              window.location.reload()
-            }, 1000)
+            if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
+              logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (ручная проверка)', { orderId })
+              return
+            }
+            subscriptionCreatedForOrderIdsRef.current.add(orderId)
+            try {
+              const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
+              await onHandleCreateSubscription(
+                tariff,
+                payment.devices || 1,
+                null, // natrockPort
+                payment.periodMonths || 1,
+                false, // testPeriod
+                'paid', // paymentMode: оплата уже проверена, создаём подписку без нового платежа
+                payment.discount || 0
+              )
+              logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
+              await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
+              const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
+              const cleanUrl = window.location.origin + cleanPath
+              if (typeof window.history?.replaceState === 'function') {
+                window.history.replaceState({}, '', cleanUrl)
+              }
+              await onRefreshUserAfterPayment?.().catch(() => {})
+              if (isFirstPaymentManual && typeof onSetShowKeyModal === 'function') {
+                setShowSuccessModal(false)
+                setSubscriptionSuccess(null)
+                onSetShowKeyModal(true)
+              } else {
+                if (reloadDelayMs > 2000) {
+                  logger.info('Dashboard', 'Перезагрузка через 8 сек. В DevTools → Console → включите «Preserve log», чтобы логи не пропадали.')
+                }
+                setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
+              }
+            } catch (err) {
+              subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+              throw err
+            }
           } catch (error) {
             logger.error('Dashboard', 'Ошибка создания подписки после ручной проверки оплаты', {
               orderId
@@ -1599,6 +1707,151 @@ const Dashboard = ({
     }
   }
 
+  handleManualPaymentCheckRef.current = handleManualPaymentCheck
+
+  // Автопроверка платежа: через 3 с после показа модалки «требуется оплата» — 20 запросов раз в 4 с до статуса «Оплачено»
+  // В тестовом режиме и при paymentUrl без requiresPayment тоже запускаем (orderId обязателен)
+  useEffect(() => {
+    const hasOrderId = !!subscriptionSuccess?.orderId
+    const needsPayment = subscriptionSuccess?.requiresPayment === true || (!!subscriptionSuccess?.paymentUrl && hasOrderId)
+    const need = showSuccessModal && hasOrderId && needsPayment
+    if (!need) {
+      setAwaitingPaymentResult(false)
+      setPaymentPollAttempt(0)
+      if (paymentAutoPollTimeoutRef.current) {
+        clearTimeout(paymentAutoPollTimeoutRef.current)
+        paymentAutoPollTimeoutRef.current = null
+      }
+      if (paymentAutoPollIntervalRef.current) {
+        clearInterval(paymentAutoPollIntervalRef.current)
+        paymentAutoPollIntervalRef.current = null
+      }
+      return
+    }
+
+    const orderId = subscriptionSuccess.orderId
+    const INIT_DELAY_MS = 3000
+    const POLL_INTERVAL_MS = 4000
+    const MAX_ATTEMPTS = 20
+
+    paymentAutoPollTimeoutRef.current = setTimeout(() => {
+      setAwaitingPaymentResult(true)
+      let attempt = 0
+
+      const runCheck = async () => {
+        attempt += 1
+        setPaymentPollAttempt(attempt)
+        try {
+          const { dashboardService } = await import('../services/dashboardService.js')
+          const res = await dashboardService.verifyPayment(orderId)
+          if (!res?.success) return
+          const payStatus = res?.payment?.status
+          const payOk = payStatus === 'completed' || payStatus === 'paid'
+          const first = Array.isArray(res?.result) && res.result.length > 0 ? res.result[0] : res?.result && typeof res.result === 'object' ? res.result : null
+          const statuspay = (first?.statuspay ?? '').toString().toLowerCase().trim()
+          const n8nOk = statuspay === 'оплачено' || statuspay === 'оплачен' || statuspay === 'paid' || statuspay === 'completed' || statuspay === 'успешно'
+          const isPaid = payOk || n8nOk
+          if (isPaid) {
+            if (paymentAutoPollIntervalRef.current) {
+              clearInterval(paymentAutoPollIntervalRef.current)
+              paymentAutoPollIntervalRef.current = null
+            }
+            setAwaitingPaymentResult(false)
+            logger.info('Dashboard', 'Автопроверка: платёж оплачен, создаём подписку и закрываем окно', { orderId, attempt })
+            const fn = handleManualPaymentCheckRef.current
+            if (typeof fn === 'function') await Promise.resolve(fn(orderId)).catch(() => {})
+            return
+          }
+        } catch (_) {}
+        if (attempt >= MAX_ATTEMPTS) {
+          if (paymentAutoPollIntervalRef.current) {
+            clearInterval(paymentAutoPollIntervalRef.current)
+            paymentAutoPollIntervalRef.current = null
+          }
+          setAwaitingPaymentResult(false)
+          logger.info('Dashboard', 'Автопроверка: достигнут лимит попыток', { orderId, attempt: MAX_ATTEMPTS })
+        }
+      }
+
+      runCheck()
+      paymentAutoPollIntervalRef.current = setInterval(runCheck, POLL_INTERVAL_MS)
+    }, INIT_DELAY_MS)
+
+    return () => {
+      if (paymentAutoPollTimeoutRef.current) {
+        clearTimeout(paymentAutoPollTimeoutRef.current)
+        paymentAutoPollTimeoutRef.current = null
+      }
+      if (paymentAutoPollIntervalRef.current) {
+        clearInterval(paymentAutoPollIntervalRef.current)
+        paymentAutoPollIntervalRef.current = null
+      }
+    }
+  }, [showSuccessModal, subscriptionSuccess?.orderId, subscriptionSuccess?.requiresPayment, subscriptionSuccess?.paymentUrl])
+
+  // Восстановление сценария после редиректа с оплаты: при загрузке с ?orderId=... или ?label=... запускаем проверку с повторами
+  useEffect(() => {
+    if (!currentUser?.uid || urlOrderIdProcessedRef.current) return
+    const params = new URLSearchParams(window.location.search)
+    let orderIdFromUrl = params.get('orderId') || params.get('orderid') || params.get('label')
+    if (!orderIdFromUrl) return
+
+    // Игнорировать тестовые/плэйсхолдерные значения (напр. из конфига YooMoney/n8n)
+    const isTestOrderId = /^test_order_/i.test(String(orderIdFromUrl).trim()) || String(orderIdFromUrl).trim() === 'test_order_123'
+    if (isTestOrderId) {
+      logger.info('Dashboard', 'Игнорируем тестовый orderId в URL, не запускаем проверку', { orderIdFromUrl })
+      if (typeof window.history?.replaceState === 'function') {
+        const u = new URL(window.location.href)
+        u.searchParams.delete('orderId')
+        u.searchParams.delete('orderid')
+        u.searchParams.delete('label')
+        u.searchParams.delete('payment')
+        window.history.replaceState({}, '', u.toString())
+      }
+      urlOrderIdProcessedRef.current = true
+      return
+    }
+
+    urlOrderIdProcessedRef.current = true
+    if (typeof window.history?.replaceState === 'function') {
+      const u = new URL(window.location.href)
+      u.searchParams.delete('orderId')
+      u.searchParams.delete('orderid')
+      u.searchParams.delete('label')
+      u.searchParams.delete('payment')
+      window.history.replaceState({}, '', u.toString())
+    }
+
+    const maxAttempts = 4
+    const delayMs = 4000
+    let attempt = 0
+
+    const runCheck = () => {
+      attempt += 1
+      logger.info('Dashboard', 'Обнаружен orderId в URL после редиректа с оплаты, запуск проверки', {
+        orderId: orderIdFromUrl,
+        attempt,
+        maxAttempts
+      })
+      handleManualPaymentCheck(orderIdFromUrl)
+        .then(() => {})
+        .catch((err) => {
+          if (attempt < maxAttempts) {
+            logger.info('Dashboard', 'Повтор проверки платежа через ' + delayMs / 1000 + ' с', {
+              orderId: orderIdFromUrl,
+              nextAttempt: attempt + 1
+            })
+            setTimeout(runCheck, delayMs)
+          } else {
+            logger.warn('Dashboard', 'Проверка платежа по orderId из URL не удалась после ' + maxAttempts + ' попыток', {
+              orderId: orderIdFromUrl
+            }, err)
+          }
+        })
+    }
+    runCheck()
+  }, [currentUser?.uid])
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
       <Sidebar
@@ -1644,19 +1897,8 @@ const Dashboard = ({
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
             {hasSubscription ? (
               <div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
+                <div className="mb-3 sm:mb-4">
                   <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">Текущая подписка</h2>
-                  {currentUser?.uuid && onHandleDeleteSubscription && (
-                    <button
-                      onClick={() => setShowDeleteConfirm(true)}
-                      disabled={deletingSubscription || creatingSubscription}
-                      className="btn-icon-only-mobile min-h-[44px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-red-600/90 hover:bg-red-700 active:bg-red-800 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation"
-                      aria-label="Отменить подписку"
-                    >
-                      <Trash2 className="w-4 h-4 flex-shrink-0" />
-                      <span className="btn-text">{deletingSubscription ? 'Отмена...' : 'Отменить подписку'}</span>
-                    </button>
-                  )}
                 </div>
                 <div className="space-y-3">
                   {/* Основная карточка подписки - компактный дизайн */}
@@ -1796,10 +2038,16 @@ const Dashboard = ({
                               {onHandleRenewSubscription && (
                                 <button
                                   onClick={async () => {
-                                    setPaymentProcessingMessage('Формируем подписку...')
+                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+                                    setPaymentProcessingMessage('Бухгалтер создает платежку')
                                     setShowPaymentProcessing(true)
+                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
+                                      setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+                                      paymentProcessingMessageTimerRef.current = null
+                                    }, 3000)
                                     try {
                                       const result = await onHandleRenewSubscription()
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                                       setShowPaymentProcessing(false)
                                       if (result && result.paymentUrl && result.requiresPayment) {
                                         const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
@@ -1809,6 +2057,7 @@ const Dashboard = ({
                                         setShowSuccessModal(true)
                                       }
                                     } catch (error) {
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                                       setShowPaymentProcessing(false)
                                     }
                                   }}
@@ -1851,10 +2100,16 @@ const Dashboard = ({
                               {!isExpired && (
                                 <button
                                   onClick={async () => {
-                                    setPaymentProcessingMessage('Формируем подписку...')
+                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+                                    setPaymentProcessingMessage('Бухгалтер создает платежку')
                                     setShowPaymentProcessing(true)
+                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
+                                      setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+                                      paymentProcessingMessageTimerRef.current = null
+                                    }, 3000)
                                     try {
                                       const result = await onHandleRenewSubscription()
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                                       setShowPaymentProcessing(false)
                                       if (result && result.paymentUrl && result.requiresPayment) {
                                         const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
@@ -1869,6 +2124,7 @@ const Dashboard = ({
                                         setShowSuccessModal(true)
                                       }
                                     } catch (error) {
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                                       setShowPaymentProcessing(false)
                                     }
                                   }}
@@ -1892,7 +2148,7 @@ const Dashboard = ({
                       {currentUser.uuid ? (
                         <button
                           onClick={() => onSetShowKeyModal(true)}
-                          className="btn-icon-only-mobile min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
+                          className="btn-icon-only-mobile btn-label-adaptive min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
                           aria-label="Конфигурация"
                         >
                           <Globe className="w-4 h-4 flex-shrink-0" />
@@ -1901,7 +2157,7 @@ const Dashboard = ({
                       ) : (
                         <button
                           onClick={onGetKey}
-                          className="btn-icon-only-mobile min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
+                          className="btn-icon-only-mobile btn-label-adaptive min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
                           aria-label="Получить ключ"
                         >
                           <Shield className="w-4 h-4 flex-shrink-0" />
@@ -1915,10 +2171,16 @@ const Dashboard = ({
                       <div className="mt-3">
                         <button
                           onClick={async () => {
-                            setPaymentProcessingMessage('Формируем подписку...')
+                            if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+                            setPaymentProcessingMessage('Бухгалтер создает платежку')
                             setShowPaymentProcessing(true)
+                            paymentProcessingMessageTimerRef.current = setTimeout(() => {
+                              setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+                              paymentProcessingMessageTimerRef.current = null
+                            }, 3000)
                             try {
                               const result = await onHandleRenewSubscription()
+                              if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                               setShowPaymentProcessing(false)
                               if (result && result.paymentUrl && result.requiresPayment) {
                                 const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
@@ -1928,6 +2190,7 @@ const Dashboard = ({
                                 setShowSuccessModal(true)
                               }
                             } catch (error) {
+                              if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
                               setShowPaymentProcessing(false)
                             }
                           }}
@@ -1937,6 +2200,21 @@ const Dashboard = ({
                         >
                           <Calendar className="w-4 h-4 flex-shrink-0" />
                           <span>{creatingSubscription || showPaymentProcessing ? 'Продление...' : 'Продлить подписку'}</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Кнопка отмены подписки — внизу, приглушённая и компактная */}
+                    {currentUser?.uuid && onHandleDeleteSubscription && (
+                      <div className="mt-4 pt-3 border-t border-slate-700/50 flex justify-center">
+                        <button
+                          onClick={() => setShowDeleteConfirm(true)}
+                          disabled={deletingSubscription || creatingSubscription}
+                          className="text-xs text-slate-500 hover:text-red-400/90 border border-slate-600/70 hover:border-red-900/60 rounded px-2.5 py-1.5 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                          aria-label="Отменить подписку"
+                        >
+                          <Trash2 className="w-3 h-3 flex-shrink-0" />
+                          <span>{deletingSubscription ? 'Отмена...' : 'Отменить подписку'}</span>
                         </button>
                       </div>
                     )}
@@ -2169,7 +2447,7 @@ const Dashboard = ({
                                 ? 'bg-green-900/30 text-green-400' 
                                 : 'bg-slate-700 text-slate-400'
                             }`}>
-                              {payment.status === 'completed' ? 'Оплачено' : payment.status}
+                              {payment.status === 'completed' ? 'Успех' : payment.status}
                             </span>
                           </div>
                         </div>
@@ -2202,7 +2480,7 @@ const Dashboard = ({
                                   ? 'bg-green-900/30 text-green-400' 
                                   : 'bg-slate-800 text-slate-400'
                               }`}>
-                                {payment.status === 'completed' ? 'Оплачено' : payment.status}
+                                {payment.status === 'completed' ? 'Успех' : payment.status}
                               </span>
                             </td>
                           </tr>
@@ -2255,7 +2533,7 @@ const Dashboard = ({
                 setPaymentOrderId(null)
                 setPaymentWindowRef(null)
                 setPaymentProcessingStatus('processing')
-                setPaymentProcessingMessage('Формируем подписку...')
+                setPaymentProcessingMessage('Бухгалтер создает платежку')
               }
             }}
           />
@@ -2283,6 +2561,8 @@ const Dashboard = ({
             requiresPayment={subscriptionSuccess.requiresPayment || false}
             message={subscriptionSuccess.message || null}
             onCheckPaymentStatus={handleManualPaymentCheck}
+            awaitingPaymentResult={awaitingPaymentResult}
+            paymentPollAttempt={paymentPollAttempt}
           />
         )}
 

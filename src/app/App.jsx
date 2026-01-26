@@ -10,7 +10,7 @@ import {
   onAuthStateChanged,
   updateProfile
 } from 'firebase/auth'
-import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, enableIndexedDbPersistence, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2 } from 'lucide-react'
 import axios from 'axios'
 // bcrypt больше не нужен - используем Firebase Auth
@@ -23,6 +23,7 @@ import LoginForm from '../features/auth/components/LoginForm.jsx'
 import Dashboard from '../features/dashboard/components/Dashboard.jsx'
 import AdminPanel from '../features/admin/components/AdminPanel.jsx'
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
+import { useAdmin } from '../features/admin/hooks/useAdmin.js'
 import TransactionManager from '../features/vpn/services/TransactionManager.js'
 import { formatDate } from '../shared/utils/formatDate.js'
 import { formatTraffic } from '../shared/utils/formatTraffic.js'
@@ -116,32 +117,15 @@ try {
     }
     
     auth = getAuth(app)
-    db = getFirestore(app)
-    
-    // Включаем офлайн-персистентность для кеширования данных
-    // ВАЖНО: Ошибка 'failed-precondition' - это нормальная ситуация при hot reload или нескольких вкладках
-    // Не логируем её как ошибку, так как persistence уже работает
     try {
-    enableIndexedDbPersistence(db).catch((err) => {
-        // Игнорируем ошибку 'failed-precondition' - это нормально при hot reload или нескольких вкладках
-      if (err.code === 'failed-precondition') {
-          // Persistence уже включен - это нормально, не логируем как ошибку
-          // Просто молча игнорируем
-          return
-      } else if (err.code === 'unimplemented') {
-        logger.warn('Firebase', 'Офлайн-персистентность недоступна: браузер не поддерживает', null)
-      } else {
-          // Другие ошибки логируем на уровне debug, не error
-          logger.debug('Firebase', 'Ошибка включения офлайн-персистентности', null, err)
-        }
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
       })
-    } catch (persistenceError) {
-      // Игнорируем синхронные ошибки persistence (не должны возникать, но на всякий случай)
-      if (persistenceError.code === 'failed-precondition') {
-        // Молча игнорируем - просто продолжаем выполнение
+    } catch (e) {
+      if (e.code === 'failed-precondition') {
+        db = getFirestore(app)
       } else {
-        // Другие синхронные ошибки логируем на уровне debug
-        logger.debug('Firebase', 'Синхронная ошибка при включении persistence', null, persistenceError)
+        throw e
       }
     }
     
@@ -574,20 +558,31 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
   </aside>
 )
 
+/** Вызов useAdmin в корневом бандле, чтобы избежать «Invalid hook call» из-за двух копий React в админ-чанке.
+ *  adminTab/setAdminTab должны приходить из родителя, чтобы контекст и UI (AdminPanel) использовали одно и то же состояние. */
+function AdminViewWithContext({ children, adminTab, setAdminTab, ...adminProps }) {
+  const handlers = useAdmin({ ...adminProps, adminTab, setAdminTab })
+  return (
+    <AdminProviderWrapper injectHandlers={handlers} adminTab={adminTab} setAdminTab={setAdminTab}>
+      {children}
+    </AdminProviderWrapper>
+  )
+}
+
 export default function VPNServiceApp() {
-  // Инициализация view из localStorage (если есть сохраненный view)
+  // Инициализация view: при первом заходе всегда страница приветствия, иначе — сохранённый view
   const getInitialView = () => {
     try {
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUser = localStorage.getItem('vpn_current_user')
-      // Если есть сохраненный пользователь и view, используем их
+      // Если есть сохранённый пользователь и view (кабинет/админка), восстанавливаем их
       if (savedView && savedUser && savedView !== 'login' && savedView !== 'register' && savedView !== 'landing') {
         return savedView
       }
     } catch (err) {
       logger.debug('App', 'Ошибка чтения view из localStorage', null, err)
     }
-    return 'login'
+    return 'landing'
   }
 
   // UI состояния
@@ -925,6 +920,7 @@ export default function VPNServiceApp() {
               ...userData,
               email: firebaseUser.email || userData.email,
               photoURL: firebaseUser.photoURL || userData.photoURL || null,
+              name: firebaseUser.displayName || userData.name || '',
               role: effectiveRole,
             }
             setCurrentUser(currentUserData)
@@ -955,86 +951,125 @@ export default function VPNServiceApp() {
               setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
             }
           } else {
-            // Данные не найдены - проверяем кеш localStorage
-            try {
-              const savedUserStr = localStorage.getItem('vpn_current_user')
-              if (savedUserStr) {
-                const savedUser = JSON.parse(savedUserStr)
-                if (savedUser.id === firebaseUser.uid) {
-                  logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
-                  setCurrentUser(savedUser)
-                  
-                  // Запрашиваем разрешение на уведомления для существующих пользователей (с задержкой)
-                  setTimeout(async () => {
-                    try {
-                      const notificationService = (await import('../shared/services/notificationService.js')).default
-                      const notificationInstance = notificationService.getInstance()
-                      // Запрашиваем только если разрешения еще нет
-                      if (!notificationInstance.hasPermission()) {
-                        await notificationInstance.requestPermission()
-                        logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для пользователя из кеша')
+            // Данные не найдены — для Google создаём документ (fallback на случай гонки с popup)
+            if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
+              // Пользователь вошёл через Google, но документ не создан. Создаём документ и входим.
+              try {
+                logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback после Google)', { uid: firebaseUser.uid, email: firebaseUser.email })
+                const generatedUUID = ThreeXUI.generateUUID()
+                const generatedSubId = await generateUniqueSubId(db, appId)
+                const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+                const newUserData = {
+                  email: firebaseUser.email || '',
+                  name: firebaseUser.displayName || '',
+                  phone: '',
+                  role: 'user',
+                  plan: 'free',
+                  uuid: generatedUUID,
+                  subId: generatedSubId,
+                  expiresAt: null,
+                  tariffName: '',
+                  tariffId: '',
+                  photoURL: firebaseUser.photoURL || null,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                }
+                await setDoc(userDocRef, newUserData)
+                let effectiveRole = 'user'
+                const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
+                if (isAdminEmail(normalizedEmail)) {
+                  try {
+                    await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
+                    effectiveRole = 'admin'
+                  } catch (roleErr) {
+                    logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
+                  }
+                }
+                const currentUserData = {
+                  id: firebaseUser.uid,
+                  ...newUserData,
+                  email: firebaseUser.email || '',
+                  photoURL: firebaseUser.photoURL || null,
+                  name: firebaseUser.displayName || '',
+                  role: effectiveRole,
+                }
+                setCurrentUser(currentUserData)
+                setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+                logger.info('Auth', 'Вход через Google восстановлен в onAuthStateChanged', { uid: firebaseUser.uid, role: effectiveRole })
+              } catch (fallbackErr) {
+                logger.error('Auth', 'Ошибка fallback-создания пользователя после Google', { uid: firebaseUser.uid }, fallbackErr)
+                setCurrentUser(null)
+              }
+            } else {
+              try {
+                const savedUserStr = localStorage.getItem('vpn_current_user')
+                if (savedUserStr) {
+                  const savedUser = JSON.parse(savedUserStr)
+                  if (savedUser.id === firebaseUser.uid) {
+                    logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
+                    setCurrentUser(savedUser)
+                    setTimeout(async () => {
+                      try {
+                        const notificationService = (await import('../shared/services/notificationService.js')).default
+                        const notificationInstance = notificationService.getInstance()
+                        if (!notificationInstance.hasPermission()) {
+                          await notificationInstance.requestPermission()
+                          logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для пользователя из кеша')
+                        }
+                      } catch (notificationError) {
+                        logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
                       }
-                    } catch (notificationError) {
-                      logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
+                    }, 2000)
+                    const savedView = localStorage.getItem('vpn_current_view')
+                    if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'landing') {
+                      setView(savedView)
+                    } else {
+                      setView(savedUser.role === 'admin' ? 'admin' : 'dashboard')
                     }
-                  }, 2000)
-                  
-                  // Устанавливаем view по роли
-                  const savedView = localStorage.getItem('vpn_current_view')
-                  if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'landing') {
-                    setView(savedView)
                   } else {
-                    setView(savedUser.role === 'admin' ? 'admin' : 'dashboard')
+                    logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
+                    setCurrentUser(null)
                   }
                 } else {
                   logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
                   setCurrentUser(null)
                 }
-          } else {
-            logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
-            // Если данных нет - возможно пользователь только что зарегистрировался
-            // Данные будут созданы при регистрации, здесь просто очищаем currentUser
-            setCurrentUser(null)
+              } catch (localErr) {
+                logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
+                setCurrentUser(null)
               }
-            } catch (localErr) {
-              logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
-              setCurrentUser(null)
             }
           }
         } catch (err) {
-          // Обработка ошибок загрузки данных
           const isOffline = err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')
-          
           if (isOffline) {
-            logger.warn('Firebase', 'Офлайн-режим Firebase, используем кеш', { uid: firebaseUser.uid })
-            // Пытаемся загрузить из localStorage
-            try {
-              const savedUserStr = localStorage.getItem('vpn_current_user')
-              if (savedUserStr) {
-                const savedUser = JSON.parse(savedUserStr)
-                if (savedUser.id === firebaseUser.uid) {
-                  logger.info('Firebase', 'Данные загружены из кеша (офлайн-режим)', { uid: firebaseUser.uid, email: savedUser.email })
-                  setCurrentUser(savedUser)
+              logger.warn('Firebase', 'Офлайн-режим Firebase, используем кеш', { uid: firebaseUser.uid })
+              try {
+                const savedUserStr = localStorage.getItem('vpn_current_user')
+                if (savedUserStr) {
+                  const savedUser = JSON.parse(savedUserStr)
+                  if (savedUser.id === firebaseUser.uid) {
+                    logger.info('Firebase', 'Данные загружены из кеша (офлайн-режим)', { uid: firebaseUser.uid, email: savedUser.email })
+                    setCurrentUser(savedUser)
+                  } else {
+                    setCurrentUser(null)
+                  }
                 } else {
                   setCurrentUser(null)
-        }
-      } else {
+                }
+              } catch (localErr) {
+                logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
                 setCurrentUser(null)
               }
-            } catch (localErr) {
-              logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
+            } else {
+              logger.error('Firebase', 'Ошибка загрузки данных пользователя', { uid: firebaseUser.uid }, err)
               setCurrentUser(null)
             }
-          } else {
-          logger.error('Firebase', 'Ошибка загрузки данных пользователя', { uid: firebaseUser.uid }, err)
-          setCurrentUser(null)
-          }
         }
       } else {
         // Пользователь не авторизован
         setCurrentUser(null)
         logger.info('Firebase', 'Пользователь не авторизован')
-        // Если пользователь не авторизован, показываем форму входа
         setView('login')
       }
       
@@ -1506,53 +1541,28 @@ export default function VPNServiceApp() {
     }
   }, [auth, db, generateUniqueSubId])
 
-  // Обработка входа через Google
+  // Вход через Google: используем redirect вместо popup — обходит COOP и блокировку всплывающих окон
   const handleGoogleSignIn = useCallback(async () => {
     if (!auth || !db || !googleProvider) {
       setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
       return
     }
-
-    // Предотвращаем множественные одновременные запросы
     if (googleSignInLoading) {
       logger.warn('Auth', 'Попытка входа через Google, когда уже выполняется вход')
       return
     }
-
     setError('')
     setSuccess('')
     setGoogleSignInLoading(true)
-
     try {
-      logger.info('Auth', 'Попытка входа через Google')
-      
-      // Вход через Google
+      logger.info('Auth', 'Открытие окна входа через Google')
       const result = await signInWithPopup(auth, googleProvider)
       const firebaseUser = result.user
-      
-      // ВАЖНО: Все данные пользователя привязываются к firebaseUser.uid
-      // Это уникальный идентификатор, который остается постоянным для одного аккаунта Google
-      // При каждом входе через Google с тем же аккаунтом будет тот же uid
-      // Все данные (UUID, подписка, настройки) сохраняются в Firestore по этому uid
-      
-      // Проверяем, есть ли данные пользователя в Firestore по uid
       let userData = await loadUserData(firebaseUser.uid)
-      
-      // Если данных нет - создаем нового пользователя
       if (!userData) {
-        logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { 
-          uid: firebaseUser.uid, 
-          email: firebaseUser.email 
-        })
-        
-        // Генерируем UUID для нового пользователя
+        logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { uid: firebaseUser.uid, email: firebaseUser.email })
         const generatedUUID = ThreeXUI.generateUUID()
-        logger.info('Auth', 'UUID сгенерирован для нового пользователя (Google)', { email: firebaseUser.email, uuid: generatedUUID })
-        
-        // Генерируем уникальный subId для нового пользователя
         const generatedSubId = await generateUniqueSubId(db, appId)
-        logger.info('Auth', 'Уникальный subId сгенерирован для нового пользователя (Google)', { email: firebaseUser.email, subId: generatedSubId })
-        
         const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
         const newUserData = {
           email: firebaseUser.email || '',
@@ -1560,8 +1570,8 @@ export default function VPNServiceApp() {
           phone: '',
           role: 'user',
           plan: 'free',
-          uuid: generatedUUID, // UUID генерируется сразу при регистрации
-          subId: generatedSubId, // Уникальный subId для 3x-ui
+          uuid: generatedUUID,
+          subId: generatedSubId,
           expiresAt: null,
           tariffName: '',
           tariffId: '',
@@ -1569,89 +1579,57 @@ export default function VPNServiceApp() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }
-        
         await setDoc(userDocRef, newUserData)
         userData = { id: firebaseUser.uid, ...newUserData }
-        logger.info('Firestore', 'Данные пользователя созданы в Firestore', { 
-          uid: firebaseUser.uid, 
-          email: firebaseUser.email,
-          message: 'Все последующие данные (UUID, подписка, настройки) будут привязаны к этому uid'
-        })
       } else {
-        // Пользователь уже существует - проверяем наличие subId и генерируем, если его нет
         if (!userData.subId) {
-          logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный', {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email
-          })
           const generatedSubId = await generateUniqueSubId(db, appId)
           const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-          await updateDoc(userDocRef, {
-            subId: generatedSubId,
-            updatedAt: new Date().toISOString(),
-          })
-          userData.subId = generatedSubId
-          logger.info('Auth', 'subId добавлен существующему пользователю', { uid: firebaseUser.uid, subId: generatedSubId })
+          await updateDoc(userDocRef, { subId: generatedSubId, updatedAt: new Date().toISOString() })
+          userData = { ...userData, subId: generatedSubId }
         }
-        
-        // Пользователь уже существует - загружаем все его данные (UUID, подписка, настройки)
-        logger.info('Auth', 'Пользователь найден в Firestore, загружены все данные', { 
-          uid: firebaseUser.uid, 
-          email: firebaseUser.email,
-          hasUuid: !!userData.uuid,
-          hasSubId: !!userData.subId,
-          hasTariff: !!userData.tariffId,
-          tariffName: userData.tariffName
-        })
-        
-        // Обновляем photoURL если изменился
         if (firebaseUser.photoURL && userData.photoURL !== firebaseUser.photoURL) {
           const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-          await updateDoc(userDocRef, {
-            photoURL: firebaseUser.photoURL,
-            updatedAt: new Date().toISOString(),
-          })
-          userData.photoURL = firebaseUser.photoURL
+          await updateDoc(userDocRef, { photoURL: firebaseUser.photoURL, updatedAt: new Date().toISOString() })
+          userData = { ...userData, photoURL: firebaseUser.photoURL }
         }
       }
-
-      // Объединяем данные Firebase Auth и Firestore
+      let effectiveRole = userData.role || 'user'
+      const normalizedEmail = (firebaseUser.email || userData.email || '').trim().toLowerCase()
+      if (isAdminEmail(normalizedEmail) && effectiveRole !== 'admin') {
+        try {
+          const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+          await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
+          effectiveRole = 'admin'
+          logger.info('Auth', 'Пользователю выданы права администратора по email', { email: normalizedEmail })
+        } catch (roleErr) {
+          logger.error('Auth', 'Не удалось обновить роль до admin', { email: normalizedEmail }, roleErr)
+        }
+      }
       const currentUserData = {
         ...userData,
         email: firebaseUser.email || userData.email,
         photoURL: firebaseUser.photoURL || userData.photoURL || null,
         name: firebaseUser.displayName || userData.name || '',
+        role: effectiveRole,
       }
-      
       setCurrentUser(currentUserData)
-      logger.info('Auth', 'Успешный вход через Google', { email: firebaseUser.email, uid: firebaseUser.uid, role: userData.role })
       setSuccess('Вход выполнен успешно')
-      setView(userData.role === 'admin' ? 'admin' : 'dashboard')
+      setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+      logger.info('Auth', 'Успешный вход через Google (popup)', { email: firebaseUser.email, uid: firebaseUser.uid, role: effectiveRole })
     } catch (err) {
       logger.error('Auth', 'Ошибка входа через Google', null, err)
-      
-      // Обработка ошибок Firebase Auth
-      // auth/cancelled-popup-request и auth/popup-closed-by-user - это не ошибки, пользователь просто отменил вход
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        // Не показываем ошибку, пользователь просто отменил вход
-        logger.info('Auth', 'Вход через Google отменен пользователем')
-        return
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        let errorMessage = 'Ошибка входа через Google. Попробуйте ещё раз.'
+        if (err?.code === 'auth/network-request-failed') {
+          errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
+        } else if (err?.code === 'auth/operation-not-allowed') {
+          errorMessage = 'Вход через Google не включен. Обратитесь к администратору.'
+        } else if (err?.message) {
+          errorMessage = 'Ошибка входа через Google: ' + err.message
+        }
+        setError(errorMessage)
       }
-      
-      let errorMessage = 'Ошибка входа через Google. Попробуйте еще раз.'
-      if (err.code === 'auth/popup-blocked') {
-        errorMessage = 'Всплывающее окно заблокировано. Разрешите всплывающие окна и попробуйте еще раз.'
-      } else if (err.code === 'auth/network-request-failed') {
-        errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
-      } else if (err.code === 'auth/account-exists-with-different-credential') {
-        errorMessage = 'Аккаунт с таким email уже существует. Используйте другой способ входа.'
-      } else if (err.code === 'auth/operation-not-allowed') {
-        errorMessage = 'Вход через Google не включен. Обратитесь к администратору.'
-      } else if (err.message) {
-        errorMessage = 'Ошибка входа через Google: ' + err.message
-      }
-      
-      setError(errorMessage)
     } finally {
       setGoogleSignInLoading(false)
     }
@@ -2267,8 +2245,22 @@ export default function VPNServiceApp() {
       return
     }
 
-    return await handleCreateSubscription(tariff)
-  }, [currentUser?.id, tariffs, handleCreateSubscription])
+    const devices = currentUser.devices ?? tariff?.devices ?? 1
+    const periodMonths = currentUser.periodMonths ?? 1
+    const discount = currentUser.discount ?? 0
+    return await handleCreateSubscription(tariff, devices, currentUser.natrockPort ?? null, periodMonths, false, 'pay_now', discount)
+  }, [currentUser?.id, currentUser?.devices, currentUser?.periodMonths, currentUser?.natrockPort, currentUser?.discount, tariffs, handleCreateSubscription])
+
+  // Обновление данных пользователя после успешной оплаты (чтобы статус подписки обновился без перезагрузки)
+  const onRefreshUserAfterPayment = useCallback(async () => {
+    if (!currentUser?.id) return
+    try {
+      const userData = await loadUserData(currentUser.id)
+      if (userData) setCurrentUser(userData)
+    } catch (e) {
+      logger.warn('App', 'Не удалось обновить пользователя после оплаты', null, e)
+    }
+  }, [currentUser?.id, loadUserData, setCurrentUser])
 
   // Удаление/отмена подписки
   const handleDeleteSubscription = useCallback(async () => {
@@ -3850,6 +3842,17 @@ export default function VPNServiceApp() {
   // Если пользователь в админ-панели
   // ВАЖНО: Двойная проверка доступа - защита от несанкционированного доступа
   if (view === 'admin') {
+    // Не монтируем админку до завершения проверки auth (после redirect и т.п.) — иначе useAdmin/контекст могут получить неготовые зависимости
+    if (authChecking) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4" />
+            <p className="text-slate-400">Загрузка...</p>
+          </div>
+        </div>
+      )
+    }
     // Если пользователь не админ - перенаправляем в личный кабинет
     if (!currentUser || currentUser.role !== 'admin') {
       logger.warn('Auth', 'Попытка доступа к админ-панели без прав администратора', { 
@@ -3862,7 +3865,7 @@ export default function VPNServiceApp() {
     }
     
     return (
-      <AdminProviderWrapper
+      <AdminViewWithContext
         currentUser={currentUser}
         users={users}
         setUsers={setUsers}
@@ -3871,6 +3874,8 @@ export default function VPNServiceApp() {
         setTariffs={setTariffs}
         setError={setError}
         setSuccess={setSuccess}
+        adminTab={adminTab}
+        setAdminTab={setAdminTab}
       >
         <AdminPanel
           currentUser={currentUser}
@@ -3928,7 +3933,7 @@ export default function VPNServiceApp() {
           settings={settings}
           onHandleAppLinkChange={handleAppLinkChange}
         />
-      </AdminProviderWrapper>
+      </AdminViewWithContext>
     )
   }
 
@@ -3956,6 +3961,7 @@ export default function VPNServiceApp() {
         onHandleCreateSubscription={handleCreateSubscription}
         onHandleRenewSubscription={handleRenewSubscription}
         onHandleDeleteSubscription={handleDeleteSubscription}
+        onRefreshUserAfterPayment={onRefreshUserAfterPayment}
         onHandleUpdateProfile={handleUpdateProfile}
         onHandleDeleteAccount={handleDeleteAccount}
         onProfileNameChange={handleProfileNameChange}
