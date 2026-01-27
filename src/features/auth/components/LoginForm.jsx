@@ -166,7 +166,9 @@ const LoginForm = ({
         </button>
         </div>
       </div>
-      <Footer />
+      <div className="max-sm:hidden">
+        <Footer />
+      </div>
     </div>
   )
 }

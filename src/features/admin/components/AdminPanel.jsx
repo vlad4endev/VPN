@@ -979,7 +979,9 @@ const AdminPanel = ({
           </div>
         )}
         </div>
-        <Footer />
+        <div className="max-sm:hidden">
+          <Footer />
+        </div>
       </div>
       {showLogger && <LoggerPanel onClose={() => onSetShowLogger(false)} />}
       {showMonitoring && (

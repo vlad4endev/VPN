@@ -3880,7 +3880,9 @@ export default function VPNServiceApp() {
           <div className="w-full max-w-[90rem] mx-auto">
             <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
           </div>
-          <Footer />
+          <div className="max-sm:hidden">
+            <Footer />
+          </div>
         </div>
       </div>
     )
