@@ -1429,27 +1429,32 @@ export const dashboardService = {
       })
     }
 
+    // Тестовый период для лимита трафика: явно при testPeriod или при pay_later (оплата позже = тест)
+    const isTestPeriodForTraffic = Boolean(testPeriod || paymentMode === 'pay_later')
+    const TEST_PERIOD_TRAFFIC_BYTES = 3 * 1024 * 1024 * 1024 // 3 GB в байтах
+
     // Формируем категоризированные данные для n8n с маркировкой операции
     const operationData = {
       // Маркировка операции для разделения потоков в n8n
       operation: 'add_client',
       category: isNewSubscription ? 'new_subscription' : 'update_subscription',
       timestamp: new Date().toISOString(),
-      
+      testPeriod: !!testPeriod, // явный флаг для n8n/прокси, чтобы всегда применять 3 GB при тесте
+
       // Базовые данные для всех операций
       userId: user.id,
       userUuid: clientId, // UUID профиля - самое главное!
       userName: user.name || user.email?.split('@')[0] || 'User',
       userEmail: user.email,
-      
+
       // Данные для 3x-ui
       email: user.name || user.email, // Имя пользователя из профиля
       inboundId: parseInt(finalInboundId), // Используем inboundId из настроек сервера
       // ВАЖНО: 3x-ui принимает трафик в БАЙТАХ, а не в ГБ
-      // Для тестовой подписки: 3 GB = 3 * 1024 * 1024 * 1024 байт
+      // Для тестовой подписки (pay_later / testPeriod): всегда 3 GB в байтах
       // Для оплаченной подписки: трафик из тарифа в байтах
-      totalGB: testPeriod 
-        ? 3 * 1024 * 1024 * 1024 // 3 GB в байтах для тестового периода
+      totalGB: isTestPeriodForTraffic
+        ? TEST_PERIOD_TRAFFIC_BYTES
         : (tariff.trafficGB > 0 ? tariff.trafficGB * 1024 * 1024 * 1024 : 0), // Конвертируем ГБ в байты
       expiryTime: expiryTimeForBackend, // В миллисекундах, backend конвертирует в секунды для 3x-ui
       limitIp: finalDevices, // Используем определенное количество устройств
@@ -1497,9 +1502,8 @@ export const dashboardService = {
       inboundId: finalInboundId,
       expiryTime: expiryTimeForBackend,
       expiryTimeDate: expiryTime > 0 ? new Date(expiryTime).toISOString() : 'без ограничений',
-      // Для тестовой подписки: 3 GB трафика и 24 часа
-      // Для оплаченной подписки: трафик из тарифа
-      totalGB: testPeriod ? 3 : (tariff.trafficGB > 0 ? tariff.trafficGB : 0),
+      isTestPeriodForTraffic,
+      totalGBLog: isTestPeriodForTraffic ? 3 : (tariff.trafficGB > 0 ? tariff.trafficGB : 0),
       limitIp: finalDevices,
       isNewSubscription,
       subscriptionDetails: operationData.subscriptionDetails

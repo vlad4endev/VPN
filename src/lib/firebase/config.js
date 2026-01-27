@@ -1,5 +1,5 @@
 import { initializeApp, getApp, deleteApp } from 'firebase/app'
-import { getAuth, GoogleAuthProvider } from 'firebase/auth'
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { validateEnvVars, getEnvErrorMessage } from '../../shared/utils/envValidation.js'
@@ -94,6 +94,10 @@ try {
     }
     
     auth = getAuth(app)
+    // Явно включаем сохранение сессии в браузере (один аккаунт на браузер, сессия переживает перезагрузку)
+    setPersistence(auth, browserLocalPersistence).catch((err) => {
+      logger.warn('Firebase', 'Не удалось установить persistence (сессия может не сохраняться)', null, err)
+    })
     try {
       db = initializeFirestore(app, {
         localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })

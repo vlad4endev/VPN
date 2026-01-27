@@ -8,7 +8,9 @@ import {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2 } from 'lucide-react'
@@ -117,6 +119,10 @@ try {
     }
     
     auth = getAuth(app)
+    // Явно включаем сохранение сессии в браузере — один аккаунт на браузер, сессия переживает перезагрузку
+    setPersistence(auth, browserLocalPersistence).catch((err) => {
+      logger.warn('Firebase', 'Не удалось установить persistence (сессия может не сохраняться)', null, err)
+    })
     try {
       db = initializeFirestore(app, {
         localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
@@ -1264,6 +1270,15 @@ export default function VPNServiceApp() {
       setAuthMode('register')
     }
   }, [view]) // Только view, чтобы избежать лишних перерендеров
+
+  // Один аккаунт на браузер: если пользователь уже авторизован (Firebase), не даём открывать логин/регистрацию/лендинг
+  useEffect(() => {
+    if (firebaseUser && (view === 'login' || view === 'register' || view === 'landing')) {
+      const nextView = currentUser?.role === 'admin' ? 'admin' : 'dashboard'
+      setView(nextView)
+      logger.debug('App', 'Уже авторизован — редирект с экрана входа', { view, nextView })
+    }
+  }, [firebaseUser, view, currentUser?.role, setView])
 
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
