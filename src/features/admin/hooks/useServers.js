@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { doc, setDoc } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
 import axios from 'axios'
 import logger from '../../../shared/utils/logger.js'
 
@@ -125,7 +126,7 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       setSettings(updatedSettings)
       
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true })
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
       
       newServerIdRef.current = null
       setEditingServer(null)
@@ -176,7 +177,7 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       setSettings(updatedSettings)
       
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true })
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
       
       setSuccess('Сервер удален')
       setTimeout(() => setSuccess(''), 2000)

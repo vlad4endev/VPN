@@ -9,6 +9,7 @@ import LandingPage from './shared/components/LandingPage.jsx'
 const LoginForm = lazy(() => import('./features/auth/components/LoginForm.jsx'))
 const Dashboard = lazy(() => import('./features/dashboard/components/Dashboard.jsx'))
 const AdminPanel = lazy(() => import('./features/admin/components/AdminPanel.jsx'))
+const FinancesDashboard = lazy(() => import('./features/admin/components/FinancesDashboard.jsx'))
 import { AdminProviderWrapper } from './features/admin/components/AdminProvider.jsx'
 import { APP_ID } from './shared/constants/app.js'
 import { formatTraffic } from './shared/utils/formatTraffic.js'
@@ -22,6 +23,8 @@ import Sidebar from './shared/components/Sidebar.jsx'
 import { formatDate } from './shared/utils/formatDate.js'
 import { copyToClipboard } from './shared/utils/copyToClipboard.js'
 import logger from './shared/utils/logger.js'
+import { canAccessAdmin, canAccessFinances } from './shared/constants/admin.js'
+import { stripUndefinedForFirestore } from './shared/utils/firestoreSafe.js'
 
 // Firebase инициализация вынесена в src/lib/firebase/config.js
 // Используется через хук useFirebase из src/shared/hooks/useFirebase.js
@@ -188,10 +191,11 @@ export default function VPNServiceApp() {
     }
   }, [view, authHandlers])
 
-  // Загрузка данных при открытии админ-панели
+  // Загрузка данных при открытии админ-панели или раздела «Финансы»
   const adminPanelLoadedRef = useRef(false)
+  const financesLoadedRef = useRef(false)
   useEffect(() => {
-    if (view === 'admin' && currentUser?.role === 'admin') {
+    if (view === 'admin' && canAccessAdmin(currentUser?.role)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
         adminHandlers.loadUsers()
@@ -199,10 +203,22 @@ export default function VPNServiceApp() {
         adminHandlers.loadTariffs()
         adminPanelLoadedRef.current = true
       }
-      } else {
+      financesLoadedRef.current = false
+    } else if (view === 'finances' && canAccessFinances(currentUser?.role)) {
+      if (!financesLoadedRef.current) {
+        logger.info('Admin', 'Загрузка данных для раздела Финансы', { userId: currentUser.id })
+        adminHandlers.loadUsers()
+        financesLoadedRef.current = true
+      }
+      if (tariffs.length === 0) {
+        loadTariffs()
+      }
       adminPanelLoadedRef.current = false
+    } else {
+      adminPanelLoadedRef.current = false
+      financesLoadedRef.current = false
     }
-  }, [view, currentUser?.role, currentUser?.id, adminHandlers])
+  }, [view, currentUser?.role, currentUser?.id, adminHandlers, loadTariffs, tariffs.length])
 
   // Обработчик копирования
   const handleCopy = useCallback(async (text) => {
@@ -483,12 +499,12 @@ export default function VPNServiceApp() {
       // Путь к настройкам: artifacts/skyputh/public/settings (4 сегмента - четное число)
       // ВАЖНО: Это глобальный документ, изменения применяются ко всем пользователям
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, {
+      await setDoc(settingsDoc, stripUndefinedForFirestore({
         ...settings,
         servers: servers, // Сохраняем серверы вместе с настройками
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id, // Сохраняем ID админа, который внес изменения
-      })
+      }))
       logger.info('Admin', 'Глобальные настройки успешно сохранены', { 
         adminId: currentUser.id,
         message: 'Настройки применены ко всем пользователям системы'
@@ -739,7 +755,7 @@ export default function VPNServiceApp() {
       })
       
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
       
       logger.info('Admin', 'Сервер успешно сохранен в Firestore', { 
         adminId: currentUser.id,
@@ -815,7 +831,7 @@ export default function VPNServiceApp() {
       })
       
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
       
       logger.info('Admin', 'Сервер успешно удален из Firestore', { 
         adminId: currentUser.id,
@@ -1244,7 +1260,7 @@ export default function VPNServiceApp() {
               import('firebase/firestore').then(({ doc, setDoc }) => {
                 const settingsDoc = doc(db, `artifacts/${APP_ID}/public/data/settings_v4`, currentUser.id)
                 
-                setDoc(settingsDoc, updatedSettings, { merge: true }).then(() => {
+                setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }).then(() => {
                   logger.info('Admin', '✅ Данные сервера сохранены в Firestore (с cookies)', {
                     serverId: server.id,
                     serverName: server.name,
@@ -1697,11 +1713,34 @@ export default function VPNServiceApp() {
     )
   }
 
-  // Если пользователь в админ-панели
-  // ВАЖНО: Двойная проверка доступа - защита от несанкционированного доступа
+  // Раздел «Финансы» — для ролей Админ и Бухгалтер
+  if (view === 'finances') {
+    if (!currentUser || !canAccessFinances(currentUser.role)) {
+      setView('dashboard')
+      return null
+    }
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
+        <Sidebar
+          currentUser={currentUser}
+          view="finances"
+          onSetView={setView}
+          onLogout={authHandlers.handleLogout}
+        />
+        <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-24 lg:pb-6 overflow-y-auto">
+          <div className="w-full max-w-[90rem] mx-auto">
+            <Suspense fallback={<div className="flex items-center justify-center min-h-[320px]"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div></div>}>
+              <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
+            </Suspense>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Если пользователь в админ-панели (доступ только у роли admin)
   if (view === 'admin') {
-    // Если пользователь не админ - перенаправляем в личный кабинет
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser || !canAccessAdmin(currentUser.role)) {
       logger.warn('Auth', 'Попытка доступа к админ-панели без прав администратора', { 
         userId: currentUser?.id, 
         role: currentUser?.role 

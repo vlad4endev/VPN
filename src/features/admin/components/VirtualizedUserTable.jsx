@@ -3,6 +3,7 @@ import { useMemo, useState, useEffect } from 'react'
 import React from 'react'
 import { Edit2, Trash2, Copy, CheckCircle2, XCircle, AlertCircle, Save, X, User, Mail, Calendar } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
+import { USER_ROLE_OPTIONS, getRoleLabel, getRoleBadgeClass } from '../../../shared/constants/admin.js'
 
 /**
  * Виртуализированная таблица пользователей
@@ -153,19 +154,18 @@ const VirtualizedUserTable = ({
               <p className="text-slate-500 text-[9px] uppercase tracking-wide mb-0.5">Роль</p>
               {isEditing ? (
                 <select
-                  value={data.editingUser.role || 'user'}
+                  value={data.editingUser.role === 'бухгалтер' ? 'accountant' : (data.editingUser.role || 'user')}
                   onChange={data.handleUserRoleChange}
                   className="w-full px-1.5 py-1 bg-slate-900 border border-slate-700 rounded text-slate-200 text-[11px]"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <option value="user">Пользователь</option>
-                  <option value="admin">Админ</option>
+                  {USER_ROLE_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
               ) : (
-                <p className={`text-[11px] font-medium inline-block px-1.5 py-0.5 rounded break-words ${
-                  user.role === 'admin' ? 'bg-purple-900/30 text-purple-300' : 'bg-slate-700 text-slate-300'
-                }`}>
-                  {user.role === 'admin' ? 'Админ' : 'Пользователь'}
+                <p className={`text-[11px] font-medium inline-block px-1.5 py-0.5 rounded break-words ${getRoleBadgeClass(user.role)}`}>
+                  {getRoleLabel(user.role)}
                 </p>
               )}
             </div>
@@ -283,19 +283,18 @@ const VirtualizedUserTable = ({
           <div>
             {isEditing ? (
               <select
-                value={data.editingUser.role || 'user'}
+                value={data.editingUser.role === 'бухгалтер' ? 'accountant' : (data.editingUser.role || 'user')}
                 onChange={data.handleUserRoleChange}
                 className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 onClick={(e) => e.stopPropagation()}
               >
-                <option value="user">Пользователь</option>
-                <option value="admin">Админ</option>
+                {USER_ROLE_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
               </select>
             ) : (
-              <span className={`px-2.5 py-1 rounded-lg text-xs font-medium inline-block ${
-                user.role === 'admin' ? 'bg-purple-900/30 text-purple-300' : 'bg-slate-700 text-slate-300'
-              }`}>
-                {user.role === 'admin' ? 'Админ' : 'Пользователь'}
+              <span className={`px-2.5 py-1 rounded-lg text-xs font-medium inline-block ${getRoleBadgeClass(user.role)}`}>
+                {getRoleLabel(user.role)}
               </span>
             )}
           </div>

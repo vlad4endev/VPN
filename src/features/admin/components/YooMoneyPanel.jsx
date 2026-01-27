@@ -14,6 +14,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
 import logger from '../../../shared/utils/logger.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import { adminService } from '../services/adminService.js'
@@ -153,7 +154,7 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
         updatedAt: new Date().toISOString(),
       }
 
-      await setDoc(settingsDoc, updatedSettings, { merge: true })
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
 
       logger.info('Admin', 'Настройки YooMoney сохранены в Firestore', { 
         hasWallet: !!wallet.trim(),
@@ -219,9 +220,9 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
     }
   }, [])
 
-  // Очистка всех платежей со статусом 'pending'
+  // Очистка всех платежей со статусом 'pending' и 'test' (тестовые)
   const handleClearAllPendingPayments = useCallback(async () => {
-    if (!window.confirm('Вы уверены, что хотите удалить все незавершенные платежи (со статусом pending) для всех пользователей? Это действие нельзя отменить.')) {
+    if (!window.confirm('Удалить все незавершённые и тестовые платежи (статусы pending и test) для всех пользователей? Действие нельзя отменить.')) {
       return
     }
 
@@ -230,14 +231,14 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
     setSuccess(null)
 
     try {
-      logger.info('Admin', 'Начало очистки всех платежей со статусом pending')
+      logger.info('Admin', 'Начало очистки платежей со статусом pending и test')
       const result = await adminService.clearAllPendingPayments()
       
-      logger.info('Admin', 'Очистка всех платежей со статусом pending завершена', result)
-      setSuccess(`Удалено ${result.deleted} платежей со статусом pending`)
+      logger.info('Admin', 'Очистка платежей pending и test завершена', result)
+      setSuccess(result.message || `Удалено ${result.deleted} платежей (pending и тестовые)`)
       setTimeout(() => setSuccess(null), 5000)
     } catch (err) {
-      logger.error('Admin', 'Ошибка очистки всех платежей со статусом pending', null, err)
+      logger.error('Admin', 'Ошибка очистки платежей pending и test', null, err)
       setError('Ошибка при удалении платежей: ' + (err.message || 'Неизвестная ошибка'))
     } finally {
       setClearingPayments(false)
@@ -378,8 +379,8 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
             onClick={handleClearAllPendingPayments}
             disabled={clearingPayments}
             className="px-4 sm:px-6 py-2 sm:py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2 min-h-[44px] touch-manipulation"
-            title="Удалить все незавершенные платежи со статусом pending для всех пользователей"
-          >
+            title="Удалить все незавершённые и тестовые платежи (pending и test) для всех пользователей"
+            >
             {clearingPayments ? (
               <>
                 <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
@@ -388,7 +389,7 @@ const YooMoneyPanel = ({ onSaveSettings }) => {
             ) : (
               <>
                 <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                Очистить все pending платежи
+                Очистить pending и тестовые платежи
               </>
             )}
           </button>

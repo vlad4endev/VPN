@@ -24,15 +24,18 @@ import LoggerPanel from '../shared/components/LoggerPanel.jsx'
 import LoginForm from '../features/auth/components/LoginForm.jsx'
 import Dashboard from '../features/dashboard/components/Dashboard.jsx'
 import AdminPanel from '../features/admin/components/AdminPanel.jsx'
+import FinancesDashboard from '../features/admin/components/FinancesDashboard.jsx'
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
+import SidebarNav from '../shared/components/Sidebar.jsx'
 import { useAdmin } from '../features/admin/hooks/useAdmin.js'
 import TransactionManager from '../features/vpn/services/TransactionManager.js'
 import { formatDate } from '../shared/utils/formatDate.js'
 import { formatTraffic } from '../shared/utils/formatTraffic.js'
 import { validateEmail } from '../features/auth/utils/validateEmail.js'
 import { validatePassword } from '../features/auth/utils/validatePassword.js'
-import { isAdminEmail } from '../shared/constants/admin.js'
+import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/constants/admin.js'
 import { APP_ID } from '../shared/constants/app.js'
+import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -704,11 +707,10 @@ export default function VPNServiceApp() {
   }, [view])
 
   // Загрузка пользователей из Firestore
-  // ВАЖНО: Доступна только для администраторов, загружает ВСЕХ пользователей (глобальные данные)
+  // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
   const loadUsers = useCallback(async () => {
-    // Проверка прав доступа - только админы могут загружать список всех пользователей
-    if (!currentUser || currentUser.role !== 'admin') {
-      logger.warn('Firestore', 'Попытка загрузки пользователей без прав администратора')
+    if (!currentUser || !canAccessFinances(currentUser.role)) {
+      logger.warn('Firestore', 'Загрузка пользователей доступна только админу и бухгалтеру')
       return
     }
 
@@ -1230,7 +1232,7 @@ export default function VPNServiceApp() {
           servers: [],
           updatedAt: new Date().toISOString(),
         }
-        await setDoc(settingsDoc, defaultSettings)
+        await setDoc(settingsDoc, stripUndefinedForFirestore(defaultSettings))
         setSettings(defaultSettings)
         setServers([])
       }
@@ -2538,28 +2540,35 @@ export default function VPNServiceApp() {
     }
   }, [db])
 
-  // Загрузка данных при открытии админ-панели
+  // Загрузка данных при открытии админ-панели или раздела «Финансы»
   // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере
-  // Это предотвращает потерю локальных изменений серверов при перезагрузке из Firestore
   const adminPanelLoadedRef = useRef(false)
+  const financesLoadedRef = useRef(false)
   useEffect(() => {
-    // Двойная проверка: view === 'admin' И role === 'admin'
-    if (view === 'admin' && currentUser?.role === 'admin') {
-      // Загружаем данные только один раз при открытии админ-панели
-      // Не перезагружаем при каждом изменении зависимостей, чтобы не потерять локальные изменения
-      // Особенно важно для серверов, которые могут быть изменены локально (тесты, редактирование)
+    if (view === 'admin' && canAccessAdmin(currentUser?.role)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
-        loadUsers() // Загружаем всех пользователей (только для админа)
-        loadSettings() // Загружаем глобальные настройки (с объединением локальных серверов)
-        loadTariffs() // Загружаем глобальные тарифы
+        loadUsers()
+        loadSettings()
+        loadTariffs()
         adminPanelLoadedRef.current = true
       }
-    } else {
-      // Сбрасываем флаг при выходе из админ-панели
+      financesLoadedRef.current = false
+    } else if (view === 'finances' && canAccessFinances(currentUser?.role)) {
+      if (!financesLoadedRef.current) {
+        logger.info('Admin', 'Загрузка данных для раздела Финансы', { userId: currentUser.id })
+        loadUsers()
+        financesLoadedRef.current = true
+      }
+      if (tariffs.length === 0) {
+        loadTariffs()
+      }
       adminPanelLoadedRef.current = false
+    } else {
+      adminPanelLoadedRef.current = false
+      financesLoadedRef.current = false
     }
-  }, [view, currentUser?.role, currentUser?.id, loadUsers, loadSettings, loadTariffs])
+  }, [view, currentUser?.role, currentUser?.id, loadUsers, loadSettings, loadTariffs, tariffs.length])
 
   // Мемоизированные обработчики для настроек
   /*
@@ -2642,12 +2651,12 @@ export default function VPNServiceApp() {
       // Путь к настройкам: artifacts/skyputh/public/settings (4 сегмента - четное число)
       // ВАЖНО: Это глобальный документ, изменения применяются ко всем пользователям
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
-      await setDoc(settingsDoc, {
+      await setDoc(settingsDoc, stripUndefinedForFirestore({
         ...settings,
         servers: servers, // Сохраняем серверы вместе с настройками
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id, // Сохраняем ID админа, который внес изменения
-      })
+      }))
       logger.info('Admin', 'Глобальные настройки успешно сохранены', { 
         adminId: currentUser.id,
         message: 'Настройки применены ко всем пользователям системы'
@@ -2898,7 +2907,7 @@ export default function VPNServiceApp() {
       })
       
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
       
       logger.info('Admin', 'Сервер успешно сохранен в Firestore', { 
         adminId: currentUser.id,
@@ -2974,7 +2983,7 @@ export default function VPNServiceApp() {
       })
       
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
-      await setDoc(settingsDoc, updatedSettings, { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
       
       logger.info('Admin', 'Сервер успешно удален из Firestore', { 
         adminId: currentUser.id,
@@ -3398,7 +3407,7 @@ export default function VPNServiceApp() {
                 const appId = import.meta.env.VITE_FIREBASE_APP_ID || 'default'
                 const settingsDoc = doc(db, `artifacts/${appId}/public/data/settings_v4`, currentUser.id)
                 
-                setDoc(settingsDoc, updatedSettings, { merge: true }).then(() => {
+                setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }).then(() => {
                   logger.info('Admin', '✅ Данные сервера сохранены в Firestore (с cookies)', {
                     serverId: server.id,
                     serverName: server.name,
@@ -3854,6 +3863,29 @@ export default function VPNServiceApp() {
     )
   }
 
+  // Раздел «Финансы» — для ролей Админ и Бухгалтер
+  if (view === 'finances') {
+    if (!currentUser || !canAccessFinances(currentUser.role)) {
+      setView('dashboard')
+      return null
+    }
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
+        <SidebarNav
+          currentUser={currentUser}
+          view="finances"
+          onSetView={setView}
+          onLogout={handleLogout}
+        />
+        <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-24 lg:pb-6 overflow-y-auto">
+          <div className="w-full max-w-[90rem] mx-auto">
+            <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Если пользователь в админ-панели
   // ВАЖНО: Двойная проверка доступа - защита от несанкционированного доступа
   if (view === 'admin') {
@@ -3868,8 +3900,8 @@ export default function VPNServiceApp() {
         </div>
       )
     }
-    // Если пользователь не админ - перенаправляем в личный кабинет
-    if (!currentUser || currentUser.role !== 'admin') {
+    // Доступ к админ-панели только у роли admin
+    if (!currentUser || !canAccessAdmin(currentUser.role)) {
       logger.warn('Auth', 'Попытка доступа к админ-панели без прав администратора', { 
         userId: currentUser?.id, 
         role: currentUser?.role 

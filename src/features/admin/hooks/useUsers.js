@@ -7,6 +7,7 @@ import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
 import { handleFirestoreError, logError, withErrorHandling } from '../utils/errorHandler.js'
+import { canAccessFinances } from '../../../shared/constants/admin.js'
 
 /**
  * Улучшенный custom hook для управления пользователями (только для админа)
@@ -70,9 +71,9 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
 
   // Загрузка всех пользователей с улучшенной обработкой ошибок
   const loadUsers = useCallback(async () => {
-    // Проверка прав доступа - только админы могут загружать список всех пользователей
-    if (!currentUser || currentUser.role !== 'admin') {
-      logger.warn('Admin', 'Попытка загрузки пользователей без прав администратора')
+    // Админ и бухгалтер (доступ к финансам) могут загружать список для раздела «Финансы»; для админ-панели — только админ
+    if (!currentUser || !canAccessFinances(currentUser.role)) {
+      logger.warn('Admin', 'Попытка загрузки пользователей без прав', { role: currentUser?.role })
       return
     }
 
@@ -247,6 +248,10 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
 
       // Валидация обновлений
       const updatedUser = { ...user, ...updates }
+      // Не сбрасываем uuid при частичном обновлении (например, только роли): если в updates нет своего uuid — оставляем из user
+      if ((updates.uuid === undefined || updates.uuid === '') && user.uuid) {
+        updatedUser.uuid = user.uuid
+      }
       const validation = validateUser(updatedUser)
       if (!validation.isValid) {
         setError(validation.errors.join(', '))
@@ -256,7 +261,7 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       // Нормализация данных
       const normalizedUpdates = normalizeUser(updatedUser)
       
-      await adminService.updateUser(userId, normalizedUpdates, normalizedUpdates, settings)
+      await adminService.updateUser(userId, normalizedUpdates, user, settings)
       
       // Оптимистичное обновление локального состояния
       setUsers(prev => prev.map(u => u.id === userId ? normalizedUpdates : u))
@@ -307,8 +312,10 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
         throw error
       }
 
+      // Мержим с текущим user из state, чтобы не сбрасывать uuid и другие поля при частичном обновлении (например, только роли)
+      const toSave = { ...user, ...updatedUser }
       // Нормализация данных перед сохранением
-      const normalizedUser = normalizeUser(updatedUser)
+      const normalizedUser = normalizeUser(toSave)
       
       // Логируем subId отдельно для отладки
       const oldSubId = user.subId || (user.subid ? (Array.isArray(user.subid) ? user.subid[0] : user.subid) : '')

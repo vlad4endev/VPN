@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
 import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2 } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
+import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
 import { UserCardPropTypes } from './UserCard.propTypes.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
@@ -845,16 +846,22 @@ const UserCard = ({
                 <select
                   id={`user-card-role-${user.id}`}
                   name="role"
-                  value={editingUser.role || 'user'}
+                  value={editingUser.role === 'бухгалтер' ? 'accountant' : (editingUser.role || 'user')}
                   onChange={handleRoleChange}
                   className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="user">Пользователь</option>
-                  <option value="admin">Админ</option>
+                  {USER_ROLE_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
-                {editingUser.role === 'admin' && (
+                {canAccessAdmin(editingUser.role) && (
                   <p className="text-blue-400 text-xs mt-1">
-                    Пользователь получит доступ к админ-панели
+                    Доступ к админ-панели и финансам
+                  </p>
+                )}
+                {(editingUser.role === 'accountant' || editingUser.role === 'бухгалтер') && !canAccessAdmin(editingUser.role) && (
+                  <p className="text-emerald-400 text-xs mt-1">
+                    Доступ только к разделу «Финансы»
                   </p>
                 )}
               </div>

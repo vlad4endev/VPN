@@ -1,6 +1,7 @@
 import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
 
@@ -61,6 +62,11 @@ export const adminService = {
       const updateData = {
         ...updates,
         updatedAt: new Date().toISOString(),
+      }
+      // Не сбрасываем uuid при частичном обновлении (например, смена роли): если в updates uuid пустой, оставляем из текущего user
+      const hasUuid = updateData.uuid != null && String(updateData.uuid).trim() !== ''
+      if (!hasUuid && user && user.uuid && String(user.uuid).trim() !== '') {
+        updateData.uuid = String(user.uuid).trim()
       }
       
       // Автоматическое обновление paymentStatus при изменении expiresAt
@@ -349,12 +355,12 @@ export const adminService = {
     try {
       logger.info('Admin', 'Сохранение глобальных настроек системы', { adminId })
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      await setDoc(settingsDoc, {
+      await setDoc(settingsDoc, stripUndefinedForFirestore({
         ...settings,
         servers: servers,
         updatedAt: new Date().toISOString(),
         updatedBy: adminId,
-      })
+      }))
       logger.info('Admin', 'Глобальные настройки успешно сохранены', { adminId })
     } catch (err) {
       logger.error('Admin', 'Ошибка сохранения настроек', { adminId }, err)
@@ -434,6 +440,72 @@ export const adminService = {
       logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
       throw err
     }
+  },
+
+  /**
+   * Загрузка всех платежей (для админ-аналитики финансов)
+   * @returns {Promise<Array>} Список всех платежей, отсортированных по дате (новые первые)
+   */
+  async loadAllPayments() {
+    if (!db) {
+      throw new Error('База данных недоступна')
+    }
+
+    try {
+      logger.info('Admin', 'Загрузка всех платежей для аналитики')
+      const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+      const snapshot = await getDocs(paymentsCollection)
+      const list = []
+
+      snapshot.forEach((docSnapshot) => {
+        list.push({
+          id: docSnapshot.id,
+          ...docSnapshot.data(),
+        })
+      })
+
+      list.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        return dateB - dateA
+      })
+
+      logger.info('Admin', 'Платежи для аналитики загружены', { count: list.length })
+      return list
+    } catch (err) {
+      logger.error('Admin', 'Ошибка загрузки платежей для аналитики', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Очистка всей истории платежей: удаляются только документы из коллекции payments.
+   * Включает платежи любых пользователей (в т.ч. админов и бухгалтеров). Роли и данные
+   * пользователей (users_v4) не изменяются. Обнуляет статистику по платежам. Необратимо.
+   * @returns {Promise<number>} Количество удалённых документов
+   */
+  async deleteAllPayments() {
+    if (!db) {
+      throw new Error('База данных недоступна')
+    }
+
+    // Только коллекция payments — пользователи и роли не трогаем
+    const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+    const snapshot = await getDocs(paymentsCollection)
+    let deleted = 0
+    const batchSize = 500
+    const ids = snapshot.docs.map((d) => d.id)
+
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const chunk = ids.slice(i, i + batchSize)
+      await Promise.all(
+        chunk.map((id) => deleteDoc(doc(paymentsCollection, id)))
+      )
+      deleted += chunk.length
+    }
+
+    logger.info('Admin', 'Удалены все платежи', { count: deleted })
+    return deleted
   },
 
   /**
@@ -535,7 +607,8 @@ export const adminService = {
   },
 
   /**
-   * Удаление всех платежей со статусом 'pending' для всех пользователей
+   * Удаление всех платежей со статусом 'pending' и 'test' для всех пользователей
+   * Два отдельных запроса — иначе тестовые могли не попадать в выборку
    * @returns {Promise<Object>} Результат удаления (количество удаленных платежей)
    */
   async clearAllPendingPayments() {
@@ -543,39 +616,44 @@ export const adminService = {
       throw new Error('База данных недоступна')
     }
 
+    const path = `artifacts/${APP_ID}/public/data/payments`
+    const paymentsCollection = collection(db, path)
+
     try {
-      logger.info('Admin', 'Очистка всех платежей со статусом pending для всех пользователей')
-      
-      const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
-      const pendingQuery = query(
-        paymentsCollection,
-        where('status', '==', 'pending')
-      )
-      const pendingSnapshot = await getDocs(pendingQuery)
-      
-      if (pendingSnapshot.empty) {
-        logger.info('Admin', 'Платежи со статусом pending не найдены')
-        return { deleted: 0, message: 'Не найдено платежей со статусом pending' }
+      logger.info('Admin', 'Очистка всех платежей со статусом pending и test для всех пользователей')
+
+      const [pendingSnap, testSnap] = await Promise.all([
+        getDocs(query(paymentsCollection, where('status', '==', 'pending'))),
+        getDocs(query(paymentsCollection, where('status', '==', 'test')))
+      ])
+
+      const idsToDelete = new Set()
+      pendingSnap.forEach((d) => idsToDelete.add(d.id))
+      testSnap.forEach((d) => idsToDelete.add(d.id))
+
+      if (idsToDelete.size === 0) {
+        logger.info('Admin', 'Платежи со статусом pending или test не найдены')
+        return { deleted: 0, message: 'Не найдено платежей со статусом pending или test' }
       }
-      
-      const deletePromises = []
-      pendingSnapshot.forEach((docSnapshot) => {
-        deletePromises.push(deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/payments`, docSnapshot.id)))
-      })
-      
+
+      const deletePromises = Array.from(idsToDelete).map((id) =>
+        deleteDoc(doc(db, path, id))
+      )
       await Promise.all(deletePromises)
-      
+
       const deletedCount = deletePromises.length
-      logger.info('Admin', 'Все платежи со статусом pending удалены', { 
-        deletedCount 
+      logger.info('Admin', 'Платежи со статусом pending и test удалены', {
+        deletedCount,
+        pending: pendingSnap.size,
+        test: testSnap.size
       })
-      
-      return { 
-        deleted: deletedCount, 
-        message: `Удалено ${deletedCount} платежей со статусом pending` 
+
+      return {
+        deleted: deletedCount,
+        message: `Удалено ${deletedCount} платежей (pending и тестовые)`
       }
     } catch (err) {
-      logger.error('Admin', 'Ошибка удаления всех платежей со статусом pending', null, err)
+      logger.error('Admin', 'Ошибка удаления платежей со статусом pending и test', null, err)
       throw err
     }
   },

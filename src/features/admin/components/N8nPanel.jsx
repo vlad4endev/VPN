@@ -14,6 +14,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
 import logger from '../../../shared/utils/logger.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
 
@@ -146,7 +147,7 @@ const N8nPanel = ({ onSaveSettings }) => {
         updatedAt: new Date().toISOString(),
       }
 
-      await setDoc(settingsDoc, updatedSettings, { merge: true })
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
 
       logger.info('Admin', 'Webhook URL сохранен в Firestore', { 
         webhookUrl: webhookUrl.trim(),

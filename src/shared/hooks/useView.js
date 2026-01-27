@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import logger from '../utils/logger.js'
+import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 
 /**
  * Custom hook для управления view (страницами приложения)
@@ -15,7 +16,7 @@ export function useView({ currentUser, onViewChange } = {}) {
   const [view, setViewState] = useState(() => {
     try {
       const savedView = localStorage.getItem('vpn_current_view')
-      if (savedView && ['dashboard', 'admin', 'login', 'register'].includes(savedView)) {
+      if (savedView && ['dashboard', 'admin', 'finances', 'login', 'register'].includes(savedView)) {
         logger.debug('useView', 'Восстановлен view из localStorage', { view: savedView })
         return savedView
       }
@@ -64,12 +65,15 @@ export function useView({ currentUser, onViewChange } = {}) {
     }
 
     // Если админ пытается зайти в dashboard, перенаправляем в admin
-    if (currentUser.role === 'admin' && view === 'dashboard') {
+    if (canAccessAdmin(currentUser.role) && view === 'dashboard') {
       correctView = 'admin'
     }
 
-    // Если обычный пользователь пытается зайти в admin, перенаправляем в dashboard
-    if (currentUser.role !== 'admin' && view === 'admin') {
+    // Доступ в admin — только у роли admin; в finances — у admin и бухгалтера
+    if (view === 'admin' && !canAccessAdmin(currentUser.role)) {
+      correctView = 'dashboard'
+    }
+    if (view === 'finances' && !canAccessFinances(currentUser.role)) {
       correctView = 'dashboard'
     }
 

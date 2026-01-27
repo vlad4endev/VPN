@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3 } from 'lucide-react'
+import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
 
 const navItemClass = (active) =>
   `w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-all duration-200 touch-manipulation ${
     active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-300 hover:bg-slate-800 active:bg-slate-700'
+  }`
+
+const navSubItemClass = (active) =>
+  `w-full min-h-[40px] flex items-center gap-2 sm:gap-3 pl-6 sm:pl-7 pr-3 sm:pr-4 py-2 sm:py-2.5 rounded-lg transition-all duration-200 touch-manipulation text-[0.9em] ${
+    active ? 'bg-blue-600/90 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 active:bg-slate-700'
   }`
 
 const DASHBOARD_NAV_ITEMS = [
@@ -68,7 +74,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
     <div className="mb-4 sm:mb-6 md:mb-8">
       <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYPATH VPN</h1>
       <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
-        {view === 'admin' ? 'Админ-панель' : 'Личный кабинет'}
+        {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
       </p>
     </div>
   )
@@ -97,10 +103,10 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
     </div>
   )
 
-  /** На мобильных при нижней панели — только переключатель раздела (Кабинет/Админ) и Выйти, без подразделов */
+  /** На мобильных при нижней панели — только переключатель раздела (Кабинет/Админ/Финансы) и Выйти, без подразделов */
   const compactNav = (
     <nav className="flex-1 space-y-1.5 sm:space-y-2 overflow-y-auto min-h-0">
-      {currentUser?.role === 'admin' && (
+      {canAccessAdmin(currentUser?.role) && (
         <button
           onClick={() => handleNavClick('admin')}
           className={navItemClass(view === 'admin')}
@@ -109,6 +115,17 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         >
           <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Админ-панель</span>
+        </button>
+      )}
+      {canAccessFinances(currentUser?.role) && (
+        <button
+          onClick={() => handleNavClick('finances')}
+          className={navItemClass(view === 'finances')}
+          aria-label="Финансы"
+          aria-selected={view === 'finances'}
+        >
+          <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
         </button>
       )}
       <button
@@ -125,46 +142,52 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
   const fullNav = (
     <nav className="flex-1 space-y-1.5 sm:space-y-2 overflow-y-auto min-h-0">
-      {currentUser?.role === 'admin' && (
+      {/* Админ-панель и её подразделы — только для роли admin */}
+      {canAccessAdmin(currentUser?.role) && (
+        <div className="space-y-1 sm:space-y-1.5">
+          <button
+            onClick={() => handleNavClick('admin')}
+            className={navItemClass(view === 'admin')}
+            aria-label="Админ-панель"
+            aria-selected={view === 'admin'}
+          >
+            <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+            <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Админ-панель</span>
+          </button>
+          {hasAdminTabs && (
+            <div className="space-y-0.5 sm:space-y-1">
+              {ADMIN_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => handleAdminTab(id)}
+                  className={navSubItemClass(adminTab === id)}
+                  aria-label={label}
+                  aria-selected={adminTab === id}
+                >
+                  <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                  <span className="font-medium">{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Финансы — для ролей Админ и Бухгалтер */}
+      {canAccessFinances(currentUser?.role) && (
         <button
-          onClick={() => handleNavClick('admin')}
-          className={navItemClass(view === 'admin')}
-          aria-label="Админ-панель"
-          aria-selected={view === 'admin'}
+          onClick={() => handleNavClick('finances')}
+          className={navItemClass(view === 'finances')}
+          aria-label="Финансы"
+          aria-selected={view === 'finances'}
         >
-          <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Админ-панель</span>
+          <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
         </button>
       )}
 
-      {hasDashboardTabs && DASHBOARD_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-        <button
-          key={id}
-          onClick={() => handleDashboardTab(id)}
-          className={navItemClass(dashboardTab === id)}
-          aria-label={label}
-          aria-selected={dashboardTab === id}
-        >
-          <Icon size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{label}</span>
-        </button>
-      ))}
-
-      {hasAdminTabs && ADMIN_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-        <button
-          key={id}
-          onClick={() => handleAdminTab(id)}
-          className={navItemClass(adminTab === id)}
-          aria-label={label}
-          aria-selected={adminTab === id}
-        >
-          <Icon size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{label}</span>
-        </button>
-      ))}
-
-      {/* Личный кабинет: показываем всегда, когда нет подразделов кабинета — и отдельно для админа в админке, чтобы мог перейти обратно */}
-      {(!hasDashboardTabs && !hasAdminTabs) || (currentUser?.role === 'admin' && hasAdminTabs) ? (
+      {/* Личный кабинет и его подразделы — одной группой, подразделы сразу под пунктом */}
+      <div className="space-y-1 sm:space-y-1.5">
         <button
           onClick={() => handleNavClick('dashboard')}
           className={navItemClass(view === 'dashboard')}
@@ -174,7 +197,23 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
         </button>
-      ) : null}
+        {hasDashboardTabs && (
+          <div className="space-y-0.5 sm:space-y-1">
+            {DASHBOARD_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => handleDashboardTab(id)}
+                className={navSubItemClass(dashboardTab === id)}
+                aria-label={label}
+                aria-selected={dashboardTab === id}
+              >
+                <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                <span className="font-medium">{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </nav>
   )
 
