@@ -4,6 +4,7 @@ import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy,
 import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
+import Footer from '../../../shared/components/Footer.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import VirtualizedUserTable from './VirtualizedUserTable.jsx'
 import UserCard from './UserCard.jsx'
@@ -978,6 +979,7 @@ const AdminPanel = ({
           </div>
         )}
         </div>
+        <Footer />
       </div>
       {showLogger && <LoggerPanel onClose={() => onSetShowLogger(false)} />}
       {showMonitoring && (

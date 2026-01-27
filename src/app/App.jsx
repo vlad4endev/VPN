@@ -27,6 +27,7 @@ import AdminPanel from '../features/admin/components/AdminPanel.jsx'
 import FinancesDashboard from '../features/admin/components/FinancesDashboard.jsx'
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
 import SidebarNav from '../shared/components/Sidebar.jsx'
+import Footer from '../shared/components/Footer.jsx'
 import { useAdmin } from '../features/admin/hooks/useAdmin.js'
 import TransactionManager from '../features/vpn/services/TransactionManager.js'
 import { formatDate } from '../shared/utils/formatDate.js'
@@ -381,9 +382,7 @@ const LandingPage = ({ onSetView }) => (
         </div>
       </div>
 
-      <footer className="py-12 border-t border-slate-900 text-center">
-        <p className="text-slate-500 font-black text-xs uppercase tracking-[0.5em]">SKYPATH VPN © 2026</p>
-      </footer>
+      <Footer />
     </div>
   )
 
@@ -3881,6 +3880,7 @@ export default function VPNServiceApp() {
           <div className="w-full max-w-[90rem] mx-auto">
             <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
           </div>
+          <Footer />
         </div>
       </div>
     )

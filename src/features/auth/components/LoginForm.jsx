@@ -1,3 +1,5 @@
+import Footer from '../../../shared/components/Footer.jsx'
+
 const LoginForm = ({ 
   authMode, 
   loginData, 
@@ -16,8 +18,9 @@ const LoginForm = ({
 }) => {
   
   return (
-  <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 sm:p-6 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
-    <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-[3rem] p-10 shadow-2xl backdrop-blur-xl">
+    <div className="min-h-screen bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-[3rem] p-10 shadow-2xl backdrop-blur-xl">
       <div className="text-center mb-10">
         <h2 className="text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? 'Вход' : 'Регистрация'}</h2>
         <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYPATH VPN System</p>
@@ -161,7 +164,9 @@ const LoginForm = ({
         >
           Вернуться на главную
         </button>
+        </div>
       </div>
+      <Footer />
     </div>
   )
 }

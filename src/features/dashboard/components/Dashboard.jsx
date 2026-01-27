@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2 } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
+import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import TariffSelectionModal from './TariffSelectionModal.jsx'
@@ -2622,6 +2623,7 @@ const Dashboard = ({
             </div>
           </div>
         )}
+        <Footer />
       </div>
       {showLogger && <LoggerPanel onClose={() => onSetShowLogger(false)} />}
     </div>

@@ -1,4 +1,5 @@
 import { Shield, Globe, Check, Zap, Smartphone, Users, X, Server } from 'lucide-react'
+import Footer from './Footer.jsx'
 
 /**
  * Компонент главной страницы (Landing Page)
@@ -134,9 +135,7 @@ export default function LandingPage({ onSetView }) {
         </div>
       </div>
 
-      <footer className="py-12 border-t border-slate-900 text-center">
-        <p className="text-slate-500 font-black text-xs uppercase tracking-[0.5em]">SKYPATH VPN © 2026</p>
-      </footer>
+      <Footer />
     </div>
   )
 }
