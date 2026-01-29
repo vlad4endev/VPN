@@ -12,8 +12,19 @@ import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
  * @returns {Object} Объект с view и функцией setView
  */
 export function useView({ currentUser, onViewChange } = {}) {
-  // Восстанавливаем view из localStorage при инициализации
+  // Приоритет: hash из URL (с SEO-лендинга /app/#login, /app/#register) → localStorage → landing
   const [view, setViewState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash?.toLowerCase()
+      if (hash === '#login') {
+        logger.debug('useView', 'Начальный view из URL hash', { view: 'login' })
+        return 'login'
+      }
+      if (hash === '#register') {
+        logger.debug('useView', 'Начальный view из URL hash', { view: 'register' })
+        return 'register'
+      }
+    }
     try {
       const savedView = localStorage.getItem('vpn_current_view')
       if (savedView && ['dashboard', 'admin', 'finances', 'login', 'register'].includes(savedView)) {

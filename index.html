@@ -4,11 +4,257 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SKYPATH VPN</title>
+    <title>SKYPATH VPN — защищённый VPN с VLESS и обходом белых списков в России</title>
+    <meta name="description" content="SKYPATH VPN: суперзащищённый протокол VLESS, обход белых списков в России. Тарифы от 150 ₽/мес. Сервера в США, Нидерландах, Швейцарии. Регистрация за минуту." />
+    <meta name="keywords" content="VPN Россия, VLESS, обход блокировок, белые списки, VPN для России, анонимность, защищённый VPN, DPI обход" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://skypath.fun/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://skypath.fun/" />
+    <meta property="og:title" content="SKYPATH VPN — защищённый VPN с VLESS и обходом белых списков" />
+    <meta property="og:description" content="Суперзащищённый протокол VLESS и обход белых списков в России. Тарифы от 150 ₽/мес. Сервера в США, Нидерландах, Швейцарии." />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:site_name" content="SKYPATH VPN" />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Structured Data для поисковиков и ИИ (Google, Yandex, AI-краулеры) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://skypath.fun/#organization",
+          "name": "SKYPATH VPN",
+          "url": "https://skypath.fun",
+          "logo": "https://skypath.fun/vite.svg",
+          "description": "Защищённый VPN-сервис с протоколом VLESS и обходом белых списков в России.",
+          "sameAs": ["https://t.me/+M3Wd-rkrqytmMTg6"]
+        },
+        {
+          "@type": "WebSite",
+          "name": "SKYPATH VPN",
+          "url": "https://skypath.fun",
+          "description": "VPN с VLESS и обходом белых списков. Тарифы от 150 ₽/мес.",
+          "inLanguage": "ru",
+          "publisher": { "@id": "https://skypath.fun/#organization" }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Что такое SKYPATH VPN?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "SKYPATH VPN — это VPN-сервис для России с протоколом VLESS и технологией обхода белых списков. Даёт стабильный доступ в интернет без блокировок, с серверами в США, Нидерландах, Швейцарии, Германии и России."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Сколько стоит SKYPATH VPN?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Тариф Super — 150 ₽ в месяц (1 устройство, обход белого списка, VLESS). Тариф MULTI — 250 ₽ в месяц (5 устройств, высокая скорость). Оплата помесячно, без скрытых платежей."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Как подключиться к SKYPATH VPN?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Нажмите «Начать работу» на сайте, зарегистрируйтесь, выберите тариф и оплатите. После оплаты в личном кабинете получите ключ и инструкцию для подключения на телефон или компьютер."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Что такое обход белых списков?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Обход белых списков — технология, позволяющая VPN стабильно работать в регионах с ограничениями (в том числе в России), когда провайдер блокирует или фильтрует трафик. SKYPATH использует её в тарифе Super."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "В каких странах есть сервера SKYPATH VPN?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Сервера расположены в США, Нидерландах, Швейцарии, Германии и России для минимальной задержки и высокой скорости."
+              }
+            }
+          ]
+        },
+        {
+          "@type": "Product",
+          "name": "SKYPATH VPN Super",
+          "description": "VPN с обходом белого списка, протокол VLESS, 1 устройство.",
+          "brand": { "@type": "Brand", "name": "SKYPATH VPN" },
+          "offers": {
+            "@type": "Offer",
+            "price": "150",
+            "priceCurrency": "RUB",
+            "priceValidUntil": "2026-12-31",
+            "availability": "https://schema.org/InStock"
+          }
+        },
+        {
+          "@type": "Product",
+          "name": "SKYPATH VPN MULTI",
+          "description": "VPN для 5 устройств, высокая скорость трафика.",
+          "brand": { "@type": "Brand", "name": "SKYPATH VPN" },
+          "offers": {
+            "@type": "Offer",
+            "price": "250",
+            "priceCurrency": "RUB",
+            "priceValidUntil": "2026-12-31",
+            "availability": "https://schema.org/InStock"
+          }
+        }
+      ]
+    }
+    </script>
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/app/main.jsx"></script>
+  <body class="min-h-screen bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
+    <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50">Перейти к основному содержимому</a>
+    <header class="relative pt-20 pb-16 px-4 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950" style="background-size: cover; background-position: center;" role="banner">
+      <div class="max-w-7xl mx-auto text-center">
+        <p class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-bold mb-8">⚡ Новый стандарт анонимности</p>
+        <h1 class="text-5xl lg:text-7xl font-black text-white mb-6 tracking-tighter italic">
+          <span class="text-blue-600">SKYPATH</span> VPN
+        </h1>
+        <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+          Суперзащищенный протокол <strong class="text-white">VLESS</strong> и <strong class="text-white">обход белых списков в России</strong> для полной свободы в сети.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <a href="/app/#register" class="w-full sm:w-64 bg-blue-600 hover:bg-blue-500 py-5 rounded-3xl font-black text-white text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-95 text-center">Начать работу</a>
+          <a href="/app/#login" class="w-full sm:w-64 bg-slate-900 hover:bg-slate-800 py-5 rounded-3xl font-black text-white text-xl border border-slate-800 transition-all active:scale-95 text-center">Войти в кабинет</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+
+    <section class="max-w-7xl mx-auto px-6 py-20 grid grid-cols-1 md:grid-cols-3 gap-8" aria-label="Преимущества">
+      <div class="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] hover:border-blue-500/40 transition-all">
+        <div class="bg-blue-500/10 w-14 h-14 rounded-2xl flex items-center justify-center text-blue-500 mb-6">🛡</div>
+        <h2 class="text-xl font-black text-white mb-3 uppercase tracking-tight">Суперзащищенный VLESS</h2>
+        <p class="text-slate-500 font-medium">Самый современный протокол передачи данных, который невозможно обнаружить современными средствами DPI.</p>
+      </div>
+      <div class="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] hover:border-blue-500/40 transition-all">
+        <div class="bg-blue-500/10 w-14 h-14 rounded-2xl flex items-center justify-center text-blue-500 mb-6">✓</div>
+        <h2 class="text-xl font-black text-white mb-3 uppercase tracking-tight">Обход белых списков</h2>
+        <p class="text-slate-500 font-medium">Специальная технология обхода белых списков в России, разработанная для стабильной работы в любых регионах.</p>
+      </div>
+      <div class="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] hover:border-blue-500/40 transition-all">
+        <div class="bg-blue-500/10 w-14 h-14 rounded-2xl flex items-center justify-center text-blue-500 mb-6">🌐</div>
+        <h2 class="text-xl font-black text-white mb-3 uppercase tracking-tight">Локации</h2>
+        <p class="text-slate-500 font-medium">Сервера в США, Нидерландах, Швейцарии, Германии и России для минимального пинга.</p>
+      </div>
+    </section>
+
+    <section class="max-w-7xl mx-auto px-6 py-20" aria-labelledby="about-heading">
+      <h2 id="about-heading" class="text-3xl font-black text-white mb-6 italic">О сервисе SKYPATH VPN</h2>
+      <p class="text-slate-400 text-lg max-w-3xl mb-4 leading-relaxed">
+        <strong class="text-white">SKYPATH VPN</strong> — это VPN для России с протоколом <strong class="text-white">VLESS</strong>, который сложно обнаружить средствами DPI. Сервис поддерживает <strong class="text-white">обход белых списков</strong>: подключение остаётся стабильным в регионах с ограничениями. Подойдёт для работы, учёбы и свободного доступа в интернет без блокировок.
+      </p>
+      <p class="text-slate-500 max-w-3xl leading-relaxed">
+        Регистрация занимает минуту, оплата — картой или другими способами. После оплаты вы получаете ключ и инструкцию для подключения на телефон (iOS, Android) или компьютер (Windows, macOS, Linux). Поддержка — в Telegram.
+      </p>
+    </section>
+
+    <section class="max-w-7xl mx-auto px-6 py-20" aria-label="Тарифы">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Выберите свой тариф</h2>
+        <p class="text-slate-500 font-bold uppercase tracking-widest text-sm">Прозрачные цены без скрытых платежей</p>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div class="relative bg-slate-900 border border-slate-800 p-10 rounded-[3rem] shadow-2xl transition-transform hover:scale-[1.02]">
+          <div class="absolute top-8 right-8 bg-blue-600 text-[10px] font-black px-3 py-1 rounded-full uppercase text-white tracking-widest shadow-lg">ХИТ</div>
+          <h3 class="text-3xl font-black text-white mb-2 italic">Super</h3>
+          <div class="flex items-baseline gap-1 mb-8">
+            <span class="text-5xl font-black text-blue-500">150</span>
+            <span class="text-xl font-bold text-slate-500 italic">₽/мес</span>
+          </div>
+          <ul class="space-y-4 mb-10 text-slate-300 font-bold">
+            <li>1 Устройство</li>
+            <li>Обход белого списка</li>
+            <li>Протокол VLESS</li>
+          </ul>
+          <a href="/app/#register" class="block w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-2xl font-black text-white transition-all shadow-xl shadow-blue-600/20 active:scale-95 text-center">Выбрать Super</a>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 p-10 rounded-[3rem] shadow-2xl transition-transform hover:scale-[1.02]">
+          <h3 class="text-3xl font-black text-white mb-2 italic">MULTI</h3>
+          <div class="flex items-baseline gap-1 mb-8">
+            <span class="text-5xl font-black text-blue-500">250</span>
+            <span class="text-xl font-bold text-slate-500 italic">₽/мес</span>
+          </div>
+          <ul class="space-y-4 mb-10 text-slate-300 font-bold">
+            <li>5 Устройств</li>
+            <li>Высокая скорость трафика</li>
+            <li class="text-slate-400">Без обхода белого списка</li>
+          </ul>
+          <a href="/app/#register" class="block w-full bg-slate-800 hover:bg-slate-700 py-5 rounded-2xl font-black text-white transition-all shadow-xl active:scale-95 text-center">Выбрать MULTI</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-slate-900/30 py-20 px-6 border-y border-slate-900" aria-label="Локации">
+      <div class="max-w-7xl mx-auto">
+        <div class="flex flex-col lg:flex-row items-center justify-between gap-12">
+          <div class="lg:w-1/2">
+            <h2 class="text-4xl font-black text-white mb-6 leading-none italic">Глобальное покрытие серверов</h2>
+            <p class="text-slate-400 text-lg mb-8 font-medium">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
+            <ul class="grid grid-cols-2 sm:grid-cols-3 gap-4 list-none p-0 m-0">
+              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">США</li>
+              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Нидерланды</li>
+              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Швейцария</li>
+              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Германия</li>
+              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Россия</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="max-w-3xl mx-auto px-6 py-20" aria-labelledby="faq-heading" itemscope itemtype="https://schema.org/FAQPage">
+      <h2 id="faq-heading" class="text-3xl font-black text-white mb-10 italic">Частые вопросы</h2>
+      <dl class="space-y-8">
+        <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-lg font-bold text-white mb-2" itemprop="name">Что такое SKYPATH VPN?</dt>
+          <dd class="text-slate-400 leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">SKYPATH VPN — это VPN-сервис для России с протоколом VLESS и технологией обхода белых списков. Даёт стабильный доступ в интернет без блокировок, с серверами в США, Нидерландах, Швейцарии, Германии и России.</span></dd>
+        </div>
+        <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-lg font-bold text-white mb-2" itemprop="name">Сколько стоит SKYPATH VPN?</dt>
+          <dd class="text-slate-400 leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Тариф Super — 150 ₽ в месяц (1 устройство, обход белого списка, VLESS). Тариф MULTI — 250 ₽ в месяц (5 устройств, высокая скорость). Оплата помесячно, без скрытых платежей.</span></dd>
+        </div>
+        <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-lg font-bold text-white mb-2" itemprop="name">Как подключиться к SKYPATH VPN?</dt>
+          <dd class="text-slate-400 leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Нажмите «Начать работу» на сайте, зарегистрируйтесь, выберите тариф и оплатите. После оплаты в личном кабинете получите ключ и инструкцию для подключения на телефон или компьютер.</span></dd>
+        </div>
+        <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-lg font-bold text-white mb-2" itemprop="name">Что такое обход белых списков?</dt>
+          <dd class="text-slate-400 leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Обход белых списков — технология, позволяющая VPN стабильно работать в регионах с ограничениями (в том числе в России), когда провайдер блокирует или фильтрует трафик. SKYPATH использует её в тарифе Super.</span></dd>
+        </div>
+        <div itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-lg font-bold text-white mb-2" itemprop="name">В каких странах есть сервера SKYPATH VPN?</dt>
+          <dd class="text-slate-400 leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Сервера расположены в США, Нидерландах, Швейцарии, Германии и России для минимальной задержки и высокой скорости.</span></dd>
+        </div>
+      </dl>
+    </section>
+    </main>
+
+    <footer class="mt-auto border-t border-slate-800 bg-slate-950/50">
+      <div class="max-w-[90rem] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div class="flex flex-col items-center gap-4 sm:gap-5 text-center">
+          <p class="text-slate-500 font-bold text-sm tracking-wide">SKYPATH VPN | 2026</p>
+          <nav class="flex flex-wrap items-center justify-center gap-x-4 sm:gap-x-6 gap-y-2" aria-label="Подвал">
+            <a href="https://t.me/+M3Wd-rkrqytmMTg6" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-blue-400 transition-colors text-sm">SKYPATH VPN | Лучший в России</a>
+            <a href="#" class="text-slate-400 hover:text-blue-400 transition-colors text-sm">База знаний</a>
+            <a href="#" class="text-slate-400 hover:text-blue-400 transition-colors text-sm">Политика конфиденциальности</a>
+            <a href="#" class="text-slate-400 hover:text-blue-400 transition-colors text-sm">Обработка персональных данных</a>
+          </nav>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>
-

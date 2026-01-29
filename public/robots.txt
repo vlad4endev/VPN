@@ -1,0 +1,81 @@
+# robots.txt — индексация только Google и ИИ-краулеров
+# Остальные поисковики (Yandex, Bing и др.) не индексируют сайт.
+
+# Google
+User-agent: Googlebot
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+User-agent: Googlebot-Image
+Allow: /
+Disallow: /api/
+
+# Google Extended (Bard / Gemini, ИИ-поиск)
+User-agent: Google-Extended
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# OpenAI (ChatGPT, поиск в ИИ)
+User-agent: GPTBot
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+User-agent: ChatGPT-User
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# Anthropic (Claude)
+User-agent: Claude-Web
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+User-agent: Anthropic-AI
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# Perplexity
+User-agent: PerplexityBot
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# Cohere
+User-agent: Cohere-AI
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# Meta (Meta AI)
+User-agent: Meta-ExternalAgent
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# ByteDance (ИИ-поиск)
+User-agent: Bytespider
+Allow: /
+Allow: /app/
+Disallow: /api/
+Disallow: /api
+
+# Все остальные боты (Yandex, Bing, DuckDuckGo и др.) — запрет
+User-agent: *
+Disallow: /
+
+# Карта сайта (для Google и ИИ)
+Sitemap: https://skypath.fun/sitemap.xml
