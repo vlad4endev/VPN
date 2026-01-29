@@ -1,17 +1,17 @@
 [Unit]
-Description=Skypath Flow Frontend Server (legacy name: skyputh-vpn-frontend)
-After=network.target skyputh-vpn-backend.service
-Requires=skyputh-vpn-backend.service
+Description=Skypath Flow Backend Proxy Server
+After=network.target
 
 [Service]
 Type=simple
 # ЗАМЕНИТЕ /path/to/VPN на реальный путь к проекту
-WorkingDirectory=/path/to/VPN
-# Используем serve для статических файлов (npm install -g serve)
-ExecStart=/usr/bin/serve -s dist -l 5173
+WorkingDirectory=/path/to/VPN/server
+ExecStart=/usr/bin/node proxy-server.js
 Restart=always
 RestartSec=10
 Environment="NODE_ENV=production"
+# ЗАМЕНИТЕ /path/to/VPN на реальный путь к проекту
+EnvironmentFile=/path/to/VPN/.env
 
 # Безопасность: запуск от непривилегированного пользователя
 User=%i

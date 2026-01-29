@@ -37,7 +37,7 @@ git pull origin main
 npm run build
 
 # Если используете Nginx, скопируйте новую сборку
-sudo cp -r dist/* /var/www/skyputh-vpn/  # замените на реальный путь
+sudo cp -r dist/* /var/www/skypath-flow/  # замените на реальный путь
 
 # Очистите кэш Nginx (если используется)
 sudo systemctl reload nginx

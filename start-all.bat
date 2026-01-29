@@ -1,6 +1,6 @@
 @echo off
 REM ========================================
-REM 🚀 Скрипт запуска SkyPuth VPN на Windows
+REM 🚀 Скрипт запуска Skypath Flow на Windows
 REM ========================================
 REM 
 REM Использование:
@@ -10,7 +10,7 @@ REM
 setlocal enabledelayedexpansion
 
 echo.
-echo 🚀 Запуск SkyPuth VPN
+echo 🚀 Запуск Skypath Flow
 echo.
 
 REM Проверка Node.js
@@ -90,7 +90,7 @@ REM Запуск Backend Proxy в фоне
 echo.
 echo 🚀 Запуск Backend Proxy сервера...
 cd server
-start "SkyPuth VPN Backend" /MIN cmd /c "npm start > ..\backend.log 2>&1"
+start "Skypath Flow Backend" /MIN cmd /c "npm start > ..\backend.log 2>&1"
 cd ..
 timeout /t 5 /nobreak >nul
 

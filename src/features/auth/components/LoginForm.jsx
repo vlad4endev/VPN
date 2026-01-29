@@ -1,29 +1,51 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import Footer from '../../../shared/components/Footer.jsx'
+import PrivacyPolicyModal from '../../../shared/components/PrivacyPolicyModal.jsx'
 
-const LoginForm = ({ 
-  authMode, 
-  loginData, 
-  error, 
-  success, 
-  onEmailChange, 
-  onPasswordChange, 
+const LoginForm = ({
+  authMode,
+  loginData,
+  error,
+  success,
+  onEmailChange,
+  onPasswordChange,
   onNameChange,
-  onAuthModeLogin, 
-  onAuthModeRegister, 
-  onLogin, 
+  onAuthModeLogin,
+  onAuthModeRegister,
+  onLogin,
   onRegister,
   onGoogleSignIn,
   googleSignInLoading,
   onSetView
 }) => {
-  
+  const [consentChecked, setConsentChecked] = useState(false)
+  const [consentError, setConsentError] = useState('')
+  const [consentExpanded, setConsentExpanded] = useState(false)
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false)
+
+  const handleSubmit = (e) => {
+    if (authMode === 'login') {
+      onLogin(e)
+      return
+    }
+    // Регистрация: проверяем согласие на обработку персональных данных
+    if (!consentChecked) {
+      e.preventDefault()
+      setConsentError('Пожалуйста, подтвердите согласие на обработку персональных данных.')
+      return
+    }
+    setConsentError('')
+    onRegister(e)
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-[3rem] p-10 shadow-2xl backdrop-blur-xl">
       <div className="text-center mb-10">
         <h2 className="text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? 'Вход' : 'Регистрация'}</h2>
-        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYPATH VPN System</p>
+        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYPATH FLOW System</p>
         </div>
 
         {error && (
@@ -61,16 +83,7 @@ const LoginForm = ({
           </button>
         </div>
 
-        <form onSubmit={(e) => {
-          console.log('📝 Форма отправлена', { authMode, event: e })
-          if (authMode === 'login') {
-            console.log('📝 Вызываем handleLogin')
-            onLogin(e)
-          } else {
-            console.log('📝 Вызываем handleRegister')
-            onRegister(e)
-          }
-        }}>
+        <form onSubmit={handleSubmit}>
         <div className="space-y-5">
           <div className="space-y-2">
             <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-5 uppercase tracking-widest">Email</label>
@@ -120,6 +133,86 @@ const LoginForm = ({
             />
           </div>
 
+          {authMode === 'register' && (
+            <div className="rounded-2xl bg-slate-950/50 border border-slate-800 text-left overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setConsentExpanded((prev) => !prev)}
+                className="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-slate-800/50 transition-colors min-h-[44px] touch-manipulation"
+                aria-expanded={consentExpanded}
+                aria-controls="consent-content"
+                id="consent-toggle"
+              >
+                <span className="text-slate-200 font-semibold text-sm">Согласие на обработку персональных данных</span>
+                {consentExpanded ? (
+                  <ChevronUp className="w-5 h-5 flex-shrink-0 text-slate-400" aria-hidden />
+                ) : (
+                  <ChevronDown className="w-5 h-5 flex-shrink-0 text-slate-400" aria-hidden />
+                )}
+              </button>
+              <div
+                id="consent-content"
+                role="region"
+                aria-labelledby="consent-toggle"
+                className={`grid transition-[grid-template-rows] duration-200 ease-out ${consentExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <div className="space-y-3 p-4 pt-0 border-t border-slate-800">
+                    <p className="text-slate-400 text-[13px] leading-relaxed">
+                      Я, пользователь, даю своё добровольное согласие <strong className="text-slate-300">SKYPATH FLOW</strong> на обработку моих персональных данных, включая:
+                    </p>
+                    <ul className="list-disc list-inside text-slate-500 text-[13px] space-y-0.5 ml-1">
+                      <li>контактную информацию (e-mail, телефон);</li>
+                      <li>платежные данные;</li>
+                      <li>техническую информацию об устройстве и соединении;</li>
+                      <li>обращения в службу поддержки.</li>
+                    </ul>
+                    <p className="text-slate-400 text-[13px] leading-relaxed mt-2">Цели обработки данных:</p>
+                    <ul className="list-disc list-inside text-slate-500 text-[13px] space-y-0.5 ml-1">
+                      <li>предоставление услуг VPN;</li>
+                      <li>обработка платежей и подписок;</li>
+                      <li>поддержка пользователей и решение вопросов;</li>
+                      <li>анализ и улучшение работы сервиса;</li>
+                      <li>соблюдение законодательства и предотвращение мошенничества.</li>
+                    </ul>
+                    <p className="text-slate-400 text-[13px] leading-relaxed mt-2">
+                      Я подтверждаю, что ознакомлен с{' '}
+                      <button
+                        type="button"
+                        onClick={() => setShowPrivacyModal(true)}
+                        className="text-blue-400 hover:text-blue-300 underline focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded"
+                      >
+                        Политикой конфиденциальности SKYPATH FLOW
+                      </button>
+                      {' '}и согласен с условиями обработки моих персональных данных.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {consentError && (
+                <p id="consent-error" className="px-4 pb-2 text-red-400 text-sm font-medium" role="alert">
+                  {consentError}
+                </p>
+              )}
+              <label className="flex items-start gap-3 p-4 pt-2 cursor-pointer group border-t border-slate-800">
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => {
+                    setConsentChecked(e.target.checked)
+                    setConsentError('')
+                  }}
+                  className="mt-1 w-4 h-4 rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500/50 focus:ring-2"
+                  required={authMode === 'register'}
+                  aria-describedby={consentError ? 'consent-error' : undefined}
+                />
+                <span className="text-slate-300 text-sm group-hover:text-slate-200">
+                  Я согласен на обработку моих персональных данных
+                </span>
+              </label>
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-3xl font-black text-white text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-95"
@@ -154,24 +247,20 @@ const LoginForm = ({
           {googleSignInLoading ? 'Вход...' : 'Войти через Google'}
         </button>
       </div>
-        <button 
-          onClick={() => {
-            if (onSetView) {
-              onSetView('landing')
-            }
-          }} 
-          className="w-full mt-8 text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline"
+        <a 
+          href="/" 
+          className="block w-full mt-8 text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline text-center"
         >
           Вернуться на главную
-        </button>
+        </a>
         </div>
       </div>
       <div className="max-sm:hidden">
         <Footer />
       </div>
+      <PrivacyPolicyModal isOpen={showPrivacyModal} onClose={() => setShowPrivacyModal(false)} />
     </div>
   )
 }
 
 export default LoginForm
-

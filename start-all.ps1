@@ -1,5 +1,5 @@
 # ========================================
-# 🚀 Скрипт запуска SkyPuth VPN на Windows
+# 🚀 Скрипт запуска Skypath Flow на Windows
 # ========================================
 #
 # Использование:
@@ -46,7 +46,7 @@ function Cleanup {
 # Установка обработчика сигналов
 $null = Register-EngineEvent PowerShell.Exiting -Action { Cleanup }
 
-Write-Info "🚀 Запуск SkyPuth VPN"
+Write-Info "🚀 Запуск Skypath Flow"
 Write-Host ""
 
 # Проверка Node.js

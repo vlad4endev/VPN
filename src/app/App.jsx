@@ -13,7 +13,7 @@ import {
   browserLocalPersistence
 } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
-import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2 } from 'lucide-react'
+import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
 import axios from 'axios'
 // bcrypt больше не нужен - используем Firebase Auth
 import ThreeXUI from '../features/vpn/services/ThreeXUI.js' // Используется только для утилит (generateUUID, generateSubId)
@@ -255,8 +255,8 @@ const ConfigErrorScreen = ({ configError }) => (
   </div>
 )
 
-// Компонент Landing Page (вынесен наружу для предотвращения пересоздания)
-const LandingPage = ({ onSetView }) => (
+// Компонент Landing Page (вынесен наружу для предотвращения пересоздания). Отзывы — одобренные из админки (API).
+const LandingPage = ({ onSetView, reviews = [] }) => (
   <div className="min-h-screen bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
     {/* Hero Section */}
     <div className="relative pt-20 pb-16 px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950">
@@ -265,7 +265,7 @@ const LandingPage = ({ onSetView }) => (
           <Zap size={14} /> Новый стандарт анонимности
           </div>
         <h1 className="text-5xl lg:text-7xl font-black text-white mb-6 tracking-tighter italic">
-          <span className="text-blue-600">SKYPATH</span> VPN
+          <span className="text-blue-600">SKYPATH</span> FLOW
         </h1>
         <p className="text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
           Суперзащищенный протокол <span className="text-white font-bold">VLESS</span> и <span className="text-white font-bold">обход белых списков в России</span> для полной свободы в сети.
@@ -280,6 +280,83 @@ const LandingPage = ({ onSetView }) => (
         </div>
       </div>
     </div>
+
+    {/* О сервисе SKYPATH FLOW */}
+    <section id="about" className="relative py-24 px-4 sm:px-6 lg:px-8 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-blue-950/10 to-slate-950" aria-hidden="true" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full bg-blue-600/5 blur-[120px] pointer-events-none" aria-hidden="true" />
+      <div className="relative max-w-7xl mx-auto">
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-bold mb-6">
+            <Sparkles size={14} /> О сервисе
+          </div>
+          <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tighter italic">
+            <span className="text-blue-500">SKYPATH</span> FLOW
+          </h2>
+          <p className="text-slate-400 text-lg sm:text-xl max-w-2xl mx-auto font-medium leading-relaxed">
+            Надёжный VPN для свободы в интернете. Мы обеспечиваем приватность, обход ограничений и стабильную работу по всей России и СНГ.
+          </p>
+        </div>
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-start mb-20">
+          <div>
+            <h3 className="text-2xl font-black text-white mb-6 uppercase tracking-tight">Наша миссия</h3>
+            <p className="text-slate-400 text-lg leading-relaxed mb-6">
+              SKYPATH FLOW создан для тех, кто ценит анонимность и беспрепятственный доступ к контенту. Мы используем передовые протоколы и технологии обхода блокировок, чтобы вы могли пользоваться интернетом без ограничений — дома, в поездках и на работе.
+            </p>
+            <p className="text-slate-500 font-medium leading-relaxed">
+              Сервис оптимизирован для работы в России: специальная настройка обхода белых списков, поддержка популярных устройств и приложений, а также оперативная техподдержка на русском языке.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {[
+              { icon: ShieldCheck, title: 'Без логов', desc: 'Не храним историю подключений и трафика' },
+              { icon: Lock, title: 'Шифрование', desc: 'VLESS + TLS для защиты данных' },
+              { icon: Gauge, title: 'Высокая скорость', desc: 'Серверы с оптимизированным каналом' },
+              { icon: MessageCircle, title: 'Поддержка 24/7', desc: 'Помощь в Telegram в любое время' },
+            ].map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl hover:border-blue-500/30 transition-colors group">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 group-hover:scale-105 transition-transform">
+                    <Icon size={20} />
+                  </div>
+                  <span className="font-black text-white text-sm uppercase tracking-tight">{title}</span>
+                </div>
+                <p className="text-slate-500 text-sm font-medium leading-snug">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="border-t border-slate-800/80 pt-16">
+          <h3 className="text-xl font-black text-white mb-8 text-center uppercase tracking-tight">Почему выбирают нас</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              { icon: Zap, label: 'Современный VLESS', detail: 'Протокол, устойчивый к DPI и блокировкам' },
+              { icon: Globe, label: 'Обход белых списков', detail: 'Стабильная работа в РФ и СНГ' },
+              { icon: FileCheck, label: 'Прозрачные тарифы', detail: 'Без скрытых списаний и комиссий' },
+              { icon: Server, label: 'Несколько локаций', detail: 'США, Европа, Россия — низкий пинг' },
+            ].map(({ icon: Icon, label, detail }) => (
+              <div key={label} className="flex gap-4 items-start p-5 rounded-2xl bg-slate-900/40 border border-slate-800/60 hover:border-blue-500/20 transition-colors">
+                <div className="shrink-0 w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">
+                  <Icon size={24} />
+                </div>
+                <div>
+                  <p className="font-black text-white mb-1">{label}</p>
+                  <p className="text-slate-500 text-sm font-medium">{detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-12 text-center">
+            <button
+              onClick={() => onSetView('register')}
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 font-black text-white text-lg transition-all shadow-lg shadow-blue-600/25 hover:shadow-blue-500/30 active:scale-[0.98]"
+            >
+              <Zap size={20} /> Выбрать тариф и начать
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     {/* Features */}
     <div className="max-w-7xl mx-auto px-6 py-20 grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -359,26 +436,49 @@ const LandingPage = ({ onSetView }) => (
 
       {/* Locations */}
       <div className="bg-slate-900/30 py-20 px-6 border-y border-slate-900">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col lg:flex-row items-center justify-between gap-12">
-            <div className="lg:w-1/2">
-              <h2 className="text-4xl font-black text-white mb-6 leading-none italic">Глобальное покрытие серверов</h2>
-              <p className="text-slate-400 text-lg mb-8 font-medium">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {['США', 'Нидерланды', 'Швейцария', 'Германия', 'Россия'].map((city) => (
-                  <div key={city} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-3 font-bold text-white">
-                    <Globe size={18} className="text-blue-600" /> {city}
-                  </div>
-                ))}
+        <div className="max-w-7xl mx-auto text-center">
+          <h2 className="text-4xl font-black text-white mb-4 leading-none italic">Глобальное покрытие серверов</h2>
+          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-12 font-medium leading-relaxed">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 max-w-4xl mx-auto">
+            {['США', 'Нидерланды', 'Швейцария', 'Германия', 'Россия'].map((city) => (
+              <div key={city} className={`flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors ${city === 'Россия' ? 'col-span-2 sm:col-span-1' : ''}`}>
+                {city}
               </div>
-            </div>
-            <div className="lg:w-1/2 flex justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-blue-600 blur-[100px] opacity-20 animate-pulse" />
-                <Server size={320} className="text-slate-800 relative z-10" />
-              </div>
-            </div>
+            ))}
           </div>
+        </div>
+      </div>
+
+      {/* Оценки и Отзывы */}
+      <div className="max-w-7xl mx-auto px-6 py-20">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Оценки и Отзывы</h2>
+          <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Что говорят наши пользователи</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {reviews.length > 0 ? (
+            reviews.map((review) => (
+              <article key={review.id} className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col hover:border-blue-500/40 transition-all">
+                <div className="flex items-center gap-1 mb-4">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star key={star} size={20} className={star <= review.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
+                  ))}
+                </div>
+                <Quote size={24} className="text-blue-500/50 mb-3" />
+                <p className="text-slate-300 font-medium mb-6 flex-1 leading-relaxed">{review.text}</p>
+                <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                  <span className="font-bold text-white">{review.author}</span>
+                  {review.date && (
+                    <span className="text-slate-500 text-sm font-medium">
+                      {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</div>
+          )}
         </div>
       </div>
 
@@ -544,7 +644,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
       <div className="bg-blue-600 p-2.5 rounded-2xl">
         <Shield className="text-white" size={24} />
       </div>
-      <span className="text-2xl font-black tracking-tighter text-white italic">SKYPATH VPN</span>
+      <span className="text-2xl font-black tracking-tighter text-white italic">SKYPATH FLOW</span>
     </div>
     <nav className="space-y-2 flex-1">
       <button 
@@ -553,7 +653,13 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
       >
         <Activity size={20} /> <span>{currentUser.role === 'admin' ? 'Управление' : 'Кабинет'}</span>
       </button>
-      <button onClick={() => onSetView('landing')} className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-bold text-slate-400 hover:bg-slate-800/50">
+      <button
+        onClick={() => {
+          onSetView('landing')
+          setTimeout(() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
+        }}
+        className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-bold text-slate-400 hover:bg-slate-800/50"
+      >
         <Info size={20} /> <span>О сервисе</span>
       </button>
     </nav>
@@ -641,7 +747,8 @@ export default function VPNServiceApp() {
   const [firebaseUser, setFirebaseUser] = useState(null)
   const [configError, setConfigError] = useState(null)
   const [settingsLoading, setSettingsLoading] = useState(true)
-
+  const [landingReviews, setLandingReviews] = useState([])
+  const firebaseInitLoggedRef = useRef(false)
 
   // Обертка для setCurrentUser с сохранением в localStorage (для обратной совместимости)
   const setCurrentUser = useCallback((user) => {
@@ -654,9 +761,10 @@ export default function VPNServiceApp() {
         logger.error('App', 'Ошибка при сохранении пользователя в localStorage', { email: user?.email }, err)
       }
     } else {
+      const had = !!localStorage.getItem('vpn_current_user')
       localStorage.removeItem('vpn_current_user')
       localStorage.removeItem('vpn_current_view')
-      console.log('🗑️ Пользователь удален из localStorage')
+      if (had) console.log('🗑️ Пользователь удален из localStorage')
     }
   }, [])
 
@@ -701,9 +809,22 @@ export default function VPNServiceApp() {
       }
       setLoading(false)
     } else {
-      console.log('✅ Firebase компоненты инициализированы:', { app: !!app, auth: !!auth, db: !!db })
+      if (!firebaseInitLoggedRef.current) {
+        firebaseInitLoggedRef.current = true
+        console.log('✅ Firebase компоненты инициализированы:', { app: !!app, auth: !!auth, db: !!db })
+      }
     }
   }, [view])
+
+  // Загрузка одобренных отзывов для лендинга (когда пользователь не авторизован)
+  useEffect(() => {
+    if (!currentUser) {
+      fetch('/api/reviews/approved')
+        .then((r) => r.json())
+        .then((data) => setLandingReviews(data?.reviews ?? []))
+        .catch(() => setLandingReviews([]))
+    }
+  }, [currentUser])
 
   // Загрузка пользователей из Firestore
   // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
@@ -3793,7 +3914,7 @@ export default function VPNServiceApp() {
     if (configError) {
       return (
         <>
-          <LandingPage onSetView={setView} />
+          <LandingPage onSetView={setView} reviews={landingReviews} />
           <div className="fixed bottom-4 right-4 max-w-md bg-red-900/90 border border-red-800 rounded-lg p-4 shadow-xl z-50">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -3820,7 +3941,7 @@ export default function VPNServiceApp() {
         </>
       )
     }
-    return <LandingPage onSetView={setView} />
+    return <LandingPage onSetView={setView} reviews={landingReviews} />
   }
 
   // Для других view показываем ошибку конфигурации
@@ -4045,6 +4166,6 @@ export default function VPNServiceApp() {
   }
 
   // По умолчанию показываем landing
-  return <LandingPage onSetView={setView} />
+  return <LandingPage onSetView={setView} reviews={landingReviews} />
 }
 

@@ -58,8 +58,10 @@ elif [ "$DEPLOYMENT_TYPE" = "node" ]; then
         pm2 stop all 2>/dev/null || echo "   (PM2 процессы не найдены)"
     fi
     # Проверяем systemd сервисы
-    if systemctl is-active --quiet skyputh-vpn-backend 2>/dev/null; then
+    if systemctl is-active --quiet skypath-flow-backend 2>/dev/null || systemctl is-active --quiet skyputh-vpn-backend 2>/dev/null; then
         echo "   Останавливаю systemd сервисы..."
+        sudo systemctl stop skypath-flow-backend 2>/dev/null || true
+        sudo systemctl stop skypath-flow-frontend 2>/dev/null || true
         sudo systemctl stop skyputh-vpn-backend 2>/dev/null || true
         sudo systemctl stop skyputh-vpn-frontend 2>/dev/null || true
     fi
@@ -104,8 +106,12 @@ elif [ "$DEPLOYMENT_TYPE" = "node" ]; then
         if command -v pm2 &> /dev/null; then
             echo "   Запускаю через PM2..."
             pm2 restart all || pm2 start ecosystem.config.js || echo "   (PM2 конфигурация не найдена)"
+        elif systemctl list-units --type=service | grep -q skypath-flow; then
+            echo "   Запускаю через systemd (Skypath Flow)..."
+            sudo systemctl start skypath-flow-backend 2>/dev/null || true
+            sudo systemctl start skypath-flow-frontend 2>/dev/null || true
         elif systemctl list-units --type=service | grep -q skyputh-vpn; then
-            echo "   Запускаю через systemd..."
+            echo "   Запускаю через systemd (legacy)..."
             sudo systemctl start skyputh-vpn-backend 2>/dev/null || true
             sudo systemctl start skyputh-vpn-frontend 2>/dev/null || true
         else

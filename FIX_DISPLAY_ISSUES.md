@@ -40,7 +40,7 @@ ls -la dist/
 npm start
 
 # Или если используете PM2
-pm2 restart skyputh-vpn-frontend
+pm2 restart skypath-flow-frontend
 
 # Или если используете Docker
 docker-compose restart

@@ -1,4 +1,4 @@
-# 🔥 Настройка Firebase для SkyPuth VPN
+# 🔥 Настройка Firebase для SKYPATH FLOW
 
 ## ⚠️ Важно
 

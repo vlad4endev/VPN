@@ -142,6 +142,21 @@ service cloud.firestore {
       allow delete: if request.auth != null && isAdmin();
     }
     
+    // Отзывы — одобренные читают все (лендинг), создание — авторизованные, модерация — админы
+    match /artifacts/{appId}/public/data/reviews/{reviewId} {
+      // Публичное чтение только одобренных; админы читают все (в т.ч. pending/rejected)
+      allow read: if resource.data.status == 'approved' || (request.auth != null && isAdmin());
+      
+      // Создание: только авторизованные пользователи, только свой userId
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.keys().hasAll(['userId', 'status', 'createdAt']) &&
+        request.resource.data.status == 'pending';
+      
+      // Обновление и удаление: только админы (модерация)
+      allow update, delete: if request.auth != null && isAdmin();
+    }
+    
     // Запрет доступа ко всем остальным документам
     match /{document=**} {
       allow read, write: if false;

@@ -156,7 +156,7 @@ function startFrontend() {
 // Основная функция
 async function main() {
   log('\n' + '='.repeat(60), 'cyan')
-  log('🚀 Запуск SkyPuth VPN', 'cyan')
+  log('🚀 Запуск SKYPATH FLOW', 'cyan')
   log('='.repeat(60), 'cyan')
 
   try {

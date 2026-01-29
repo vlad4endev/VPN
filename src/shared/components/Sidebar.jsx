@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3 } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Info } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
@@ -70,9 +70,15 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
     setIsMenuOpen(false)
   }
 
+  const handleAboutClick = () => {
+    onSetView('landing')
+    setIsMenuOpen(false)
+    setTimeout(() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
+  }
+
   const blockHeader = (
     <div className="mb-4 sm:mb-6 md:mb-8">
-      <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYPATH VPN</h1>
+      <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYPATH FLOW</h1>
       <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
         {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
       </p>
@@ -137,6 +143,15 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
         <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
       </button>
+      <button
+        onClick={handleAboutClick}
+        className={navItemClass(view === 'landing')}
+        aria-label="О сервисе"
+        aria-selected={view === 'landing'}
+      >
+        <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>
+      </button>
     </nav>
   )
 
@@ -196,6 +211,15 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         >
           <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
+        </button>
+        <button
+          onClick={handleAboutClick}
+          className={navItemClass(view === 'landing')}
+          aria-label="О сервисе"
+          aria-selected={view === 'landing'}
+        >
+          <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>
         </button>
         {hasDashboardTabs && (
           <div className="space-y-0.5 sm:space-y-1">

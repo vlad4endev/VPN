@@ -1,14 +1,16 @@
-import { Shield, Globe, Check, Zap, Smartphone, Users, X, Server } from 'lucide-react'
+import { Shield, Globe, Check, Zap, Smartphone, Users, X, Star, Quote } from 'lucide-react'
 import Footer from './Footer.jsx'
 
 /**
  * Компонент главной страницы (Landing Page)
- * Отображается для неавторизованных пользователей
- * 
+ * Отображается для неавторизованных пользователей.
+ * Отзывы — одобренные из админки (передаются через props.reviews или API).
+ *
  * @param {Object} props
  * @param {Function} props.onSetView - Функция для переключения view (например, 'login', 'register')
+ * @param {Array<{ id: string, author: string, rating: number, text: string, date?: string }>} [props.reviews] - Одобренные отзывы
  */
-export default function LandingPage({ onSetView }) {
+export default function LandingPage({ onSetView, reviews = [] }) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
       {/* Hero Section */}
@@ -18,7 +20,7 @@ export default function LandingPage({ onSetView }) {
             <Zap size={14} /> Новый стандарт анонимности
           </div>
           <h1 className="text-5xl lg:text-7xl font-black text-white mb-6 tracking-tighter italic">
-            <span className="text-blue-600">SKYPATH</span> VPN
+            <span className="text-blue-600">SKYPATH</span> FLOW
           </h1>
           <p className="text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
             Суперзащищенный протокол <span className="text-white font-bold">VLESS</span> и <span className="text-white font-bold">обход белых списков в России</span> для полной свободы в сети.
@@ -112,26 +114,49 @@ export default function LandingPage({ onSetView }) {
 
       {/* Locations */}
       <div className="bg-slate-900/30 py-20 px-6 border-y border-slate-900">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col lg:flex-row items-center justify-between gap-12">
-            <div className="lg:w-1/2">
-              <h2 className="text-4xl font-black text-white mb-6 leading-none italic">Глобальное покрытие серверов</h2>
-              <p className="text-slate-400 text-lg mb-8 font-medium">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {['США', 'Нидерланды', 'Швейцария', 'Германия', 'Россия'].map((city) => (
-                  <div key={city} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-3 font-bold text-white">
-                    <Globe size={18} className="text-blue-600" /> {city}
-                  </div>
-                ))}
+        <div className="max-w-7xl mx-auto text-center">
+          <h2 className="text-4xl font-black text-white mb-4 leading-none italic">Глобальное покрытие серверов</h2>
+          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-12 font-medium leading-relaxed">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 max-w-4xl mx-auto">
+            {['США', 'Нидерланды', 'Швейцария', 'Германия', 'Россия'].map((city) => (
+              <div key={city} className={`flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors ${city === 'Россия' ? 'col-span-2 sm:col-span-1' : ''}`}>
+                {city}
               </div>
-            </div>
-            <div className="lg:w-1/2 flex justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-blue-600 blur-[100px] opacity-20 animate-pulse" />
-                <Server size={320} className="text-slate-800 relative z-10" />
-              </div>
-            </div>
+            ))}
           </div>
+        </div>
+      </div>
+
+      {/* Оценки и Отзывы */}
+      <div className="max-w-7xl mx-auto px-6 py-20">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Оценки и Отзывы</h2>
+          <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Что говорят наши пользователи</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {reviews.length > 0 ? (
+            reviews.map((review) => (
+              <article key={review.id} className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col hover:border-blue-500/40 transition-all">
+                <div className="flex items-center gap-1 mb-4">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star key={star} size={20} className={star <= review.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
+                  ))}
+                </div>
+                <Quote size={24} className="text-blue-500/50 mb-3" />
+                <p className="text-slate-300 font-medium mb-6 flex-1 leading-relaxed">{review.text}</p>
+                <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                  <span className="font-bold text-white">{review.author}</span>
+                  {review.date && (
+                    <span className="text-slate-500 text-sm font-medium">
+                      {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</div>
+          )}
         </div>
       </div>
 

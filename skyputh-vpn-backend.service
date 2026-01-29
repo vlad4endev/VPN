@@ -1,5 +1,5 @@
 [Unit]
-Description=SkyPuth VPN Backend Proxy Server
+Description=Skypath Flow Backend Proxy Server (legacy name: skyputh-vpn-backend)
 After=network.target
 
 [Service]

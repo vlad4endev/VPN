@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Скрипт для запуска всех служб проекта SkyPuth VPN
+# Скрипт для запуска всех служб проекта Skypath Flow
 # Использование: ./start-all.sh
 
 # Цвета для вывода
@@ -37,7 +37,7 @@ cleanup() {
 # НЕ используем EXIT, чтобы процессы работали в фоне после завершения скрипта
 trap cleanup SIGINT SIGTERM
 
-echo -e "${BLUE}🚀 Запуск SkyPuth VPN${NC}"
+echo -e "${BLUE}🚀 Запуск Skypath Flow${NC}"
 echo ""
 
 # Проверка Node.js

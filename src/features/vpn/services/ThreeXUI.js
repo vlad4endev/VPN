@@ -1374,7 +1374,7 @@ class ThreeXUI {
     const vlessPublicKey = options.publicKey || import.meta.env.VITE_VLESS_PUBLIC_KEY || 'your-public-key'
     const vlessShortId = options.shortId || import.meta.env.VITE_VLESS_SHORT_ID || 'your-short-id'
     
-    return `vless://${uuid}@${vlessServer}:${vlessPort}?type=tcp&security=reality&sni=${vlessSNI}&fp=${vlessFingerprint}&pbk=${vlessPublicKey}&sid=${vlessShortId}#SkyPuth-VPN`
+    return `vless://${uuid}@${vlessServer}:${vlessPort}?type=tcp&security=reality&sni=${vlessSNI}&fp=${vlessFingerprint}&pbk=${vlessPublicKey}&sid=${vlessShortId}#Skypath-Flow`
   }
 
   /**

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# SkyPuth VPN - Скрипт остановки всех служб
+# Skypath Flow - Скрипт остановки всех служб
 #
 # Использование:
 #   ./stop-all.sh
@@ -15,7 +15,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "${YELLOW}🛑 Остановка служб SkyPuth VPN...${NC}"
+echo -e "${YELLOW}🛑 Остановка служб Skypath Flow...${NC}"
 
 # Остановка по PID файлам
 if [ -f ".backend.pid" ]; then

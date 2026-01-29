@@ -1,4 +1,4 @@
-# 🚀 SkyPuth VPN
+# 🚀 SKYPATH FLOW
 
 > Современный веб-интерфейс для управления VPN-сервисом с интеграцией Firebase, админ-панелью и системой платежей.
 
@@ -25,7 +25,7 @@
 
 ## 🎯 Описание
 
-**SkyPuth VPN** — это полнофункциональное веб-приложение для управления VPN-сервисом, которое предоставляет:
+**SKYPATH FLOW** — это полнофункциональное веб-приложение для управления VPN-сервисом, которое предоставляет:
 
 - 🔐 **Система аутентификации** — регистрация и вход пользователей через Firebase Auth
 - 📊 **Личный кабинет** — просмотр статистики, управление подписками, получение конфигураций
@@ -324,12 +324,12 @@ npm run build
 #### 2. Копирование файлов на сервер
 
 ```bash
-scp -r dist/* user@your-server:/var/www/skyputh-vpn/
+scp -r dist/* user@your-server:/var/www/skypath-flow/
 ```
 
 #### 3. Настройка Nginx
 
-Создайте файл `/etc/nginx/sites-available/skyputh-vpn`:
+Создайте файл `/etc/nginx/sites-available/skypath-flow`:
 
 ```nginx
 server {
@@ -345,7 +345,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
     
-    root /var/www/skyputh-vpn;
+    root /var/www/skypath-flow;
     index index.html;
     
     # Проксирование к Backend Proxy
@@ -379,7 +379,7 @@ server {
 #### 4. Активация конфигурации
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/skyputh-vpn /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/skypath-flow /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -533,13 +533,13 @@ npm run analyze
 
 ## 📝 Лицензия
 
-Проект разработан для SkyPuth VPN.
+Проект разработан для SKYPATH FLOW.
 
 ---
 
 ## 👥 Авторы
 
-Разработано командой SkyPuth.
+Разработано командой SKYPATH FLOW.
 
 ---
 

@@ -1,7 +1,7 @@
 [Unit]
-Description=Skypath Flow Frontend Server (legacy name: skyputh-vpn-frontend)
-After=network.target skyputh-vpn-backend.service
-Requires=skyputh-vpn-backend.service
+Description=Skypath Flow Frontend Server
+After=network.target skypath-flow-backend.service
+Requires=skypath-flow-backend.service
 
 [Service]
 Type=simple

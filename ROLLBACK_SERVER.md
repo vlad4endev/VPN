@@ -16,7 +16,7 @@ ssh user@your-server-ip
 2. **Перейдите в директорию проекта:**
 ```bash
 cd /path/to/your/project
-# Например: cd ~/skyputh-vpn
+# Например: cd ~/skypath-flow
 ```
 
 3. **Скачайте скрипт отката (если его еще нет на сервере):**
@@ -46,9 +46,9 @@ ssh user@your-server-ip
 ```bash
 cd /path/to/your/project
 # Например:
-# cd ~/skyputh-vpn
+# cd ~/skypath-flow
 # или
-# cd /opt/skyputh-vpn
+# cd /opt/skypath-flow
 ```
 
 ### Шаг 3: Остановка сервисов
@@ -68,8 +68,9 @@ pm2 stop all
 #### Если используется systemd:
 
 ```bash
-sudo systemctl stop skyputh-vpn-backend
-sudo systemctl stop skyputh-vpn-frontend
+sudo systemctl stop skypath-flow-backend
+sudo systemctl stop skypath-flow-frontend
+# или (legacy): skyputh-vpn-backend, skyputh-vpn-frontend
 ```
 
 #### Если используется npm напрямую:
@@ -115,19 +116,19 @@ pm2 restart all
 
 # Или запуск с нуля:
 pm2 delete all
-cd server && pm2 start proxy-server.js --name skyputh-vpn-backend
-cd .. && pm2 serve dist 5173 --name skyputh-vpn-frontend --spa
+cd server && pm2 start proxy-server.js --name skypath-flow-backend
+cd .. && pm2 serve dist 5173 --name skypath-flow-frontend --spa
 ```
 
 #### Если используется systemd:
 
 ```bash
-sudo systemctl start skyputh-vpn-backend
-sudo systemctl start skyputh-vpn-frontend
+sudo systemctl start skypath-flow-backend
+sudo systemctl start skypath-flow-frontend
 
 # Проверка статуса:
-sudo systemctl status skyputh-vpn-backend
-sudo systemctl status skyputh-vpn-frontend
+sudo systemctl status skypath-flow-backend
+sudo systemctl status skypath-flow-frontend
 ```
 
 #### Если используется npm напрямую:
@@ -168,8 +169,8 @@ pm2 logs
 
 #### systemd:
 ```bash
-sudo systemctl status skyputh-vpn-backend
-sudo systemctl status skyputh-vpn-frontend
+sudo systemctl status skypath-flow-backend
+sudo systemctl status skypath-flow-frontend
 ```
 
 ### 3. Проверьте работоспособность:
@@ -196,7 +197,7 @@ ls docker-compose.yml docker-compose.yaml 2>/dev/null && echo "Использу�
 pm2 list 2>/dev/null && echo "Используется PM2"
 
 # Проверка systemd:
-systemctl list-units --type=service | grep skyputh && echo "Используется systemd"
+systemctl list-units --type=service | grep -E 'skypath-flow|skyputh-vpn' && echo "Используется systemd"
 
 # Проверка запущенных процессов:
 ps aux | grep -E "node|vite" | grep -v grep

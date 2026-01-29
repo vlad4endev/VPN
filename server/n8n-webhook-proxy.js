@@ -648,6 +648,39 @@ app.get('/api/vpn/health', async (req, res) => {
 })
 
 /**
+ * Одобренные отзывы для лендинга (модерация в админке)
+ * GET /api/reviews/approved
+ */
+app.get('/api/reviews/approved', async (req, res) => {
+  try {
+    if (!db) await initFirebaseAdmin()
+    if (!db) {
+      return res.status(503).json({ error: 'Firestore недоступен', reviews: [] })
+    }
+    const APP_ID = process.env.APP_ID || 'skyputh'
+    const coll = db.collection(`artifacts/${APP_ID}/public/data/reviews`)
+    const snapshot = await coll.get()
+    const list = []
+    snapshot.forEach((d) => {
+      const data = d.data()
+      if (data.status !== 'approved') return
+      list.push({
+        id: d.id,
+        author: data.author || data.userEmail || 'Пользователь',
+        rating: data.rating ?? 5,
+        text: data.text || '',
+        date: data.moderatedAt || data.createdAt,
+      })
+    })
+    list.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    res.json({ reviews: list })
+  } catch (err) {
+    console.error('❌ n8n-webhook-proxy: Ошибка загрузки одобренных отзывов:', err.message)
+    res.status(500).json({ error: err.message || 'Ошибка загрузки отзывов', reviews: [] })
+  }
+})
+
+/**
  * Добавление клиента
  * POST /api/vpn/add-client
  */

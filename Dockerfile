@@ -1,6 +1,6 @@
 # ========================================
 # 🐳 OPTIMIZED MULTI-STAGE DOCKERFILE
-# SkyPuth VPN - Production Ready
+# Skypath Flow - Production Ready
 # ========================================
 #
 # Build stages:
@@ -9,8 +9,8 @@
 # 3. production - Финальный легковесный образ
 #
 # Usage:
-#   docker build -t skyputh-vpn:latest .
-#   docker run -p 3001:3001 --env-file .env skyputh-vpn:latest
+#   docker build -t skypath-flow:latest .
+#   docker run -p 3001:3001 --env-file .env skypath-flow:latest
 
 # ========================================
 # STAGE 1: Frontend Build
@@ -66,8 +66,8 @@ RUN npm ci --only=production --frozen-lockfile && \
 FROM node:20-alpine AS production
 
 # Метаданные образа
-LABEL maintainer="SkyPuth VPN"
-LABEL description="SkyPuth VPN - Web application with backend proxy"
+LABEL maintainer="Skypath Flow"
+LABEL description="Skypath Flow - Web application with backend proxy"
 LABEL version="1.0.0"
 
 # Устанавливаем рабочую директорию

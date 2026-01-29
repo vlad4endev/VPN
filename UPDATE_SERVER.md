@@ -16,7 +16,7 @@ ssh user@your-server-ip
 
 ```bash
 cd /path/to/your/project
-# Например: cd ~/skyputh-vpn или cd /opt/my-frontend
+# Например: cd ~/skypath-flow или cd /opt/my-frontend
 ```
 
 ### 3. Запустите скрипт обновления
