@@ -2816,6 +2816,35 @@ const Dashboard = ({
           </div>
         )}
 
+        {/* Одобренные отзывы (мини-лендинг / страница приветствия) */}
+        {landingReviews.length > 0 && (
+          <div className="mt-6 sm:mt-8 bg-slate-900 rounded-lg sm:rounded-xl border border-slate-800 p-4 sm:p-5 md:p-6">
+            <h2 className="text-[clamp(1.125rem,1rem+0.5vw,1.5rem)] font-bold text-white mb-3 sm:mb-4">Оценки и отзывы</h2>
+            <p className="text-slate-400 text-sm mb-4">Что говорят наши пользователи</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+              {landingReviews.slice(0, 6).map((review) => (
+                <article key={review.id} className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col">
+                  <div className="flex items-center gap-1 mb-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star key={star} size={16} className={star <= review.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
+                    ))}
+                  </div>
+                  <Quote size={20} className="text-blue-500/50 mb-2" />
+                  <p className="text-slate-300 text-sm flex-1 line-clamp-3">{review.text}</p>
+                  <div className="flex items-center justify-between pt-3 mt-auto border-t border-slate-700">
+                    <span className="font-medium text-white text-sm">{review.author}</span>
+                    {review.date && (
+                      <span className="text-slate-500 text-xs">
+                        {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </span>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="max-sm:hidden">
           <Footer />
         </div>

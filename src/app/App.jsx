@@ -824,10 +824,12 @@ export default function VPNServiceApp() {
     }
   }, [view, currentUser])
 
-  // Загрузка одобренных отзывов для лендинга и страницы приветствия (при показе лендинга или когда пользователь не авторизован; повтор при появлении db)
+  // Загрузка одобренных отзывов для лендинга и страницы приветствия (Dashboard) — при гостевом лендинге или при кабинете
   useEffect(() => {
     if (!db) return
-    if (!currentUser || view === 'landing') {
+    const showLanding = view === 'landing' || !currentUser
+    const showDashboard = currentUser && (view === 'dashboard' || !view || view === 'landing')
+    if (showLanding || showDashboard) {
       reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
     }
   }, [currentUser, view, db])
