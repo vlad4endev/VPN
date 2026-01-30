@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2 } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, Star, MessageSquare, X, Quote } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
@@ -13,6 +13,7 @@ import logger from '../../../shared/utils/logger.js'
 import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
+import { reviewsService } from '../../reviews/services/reviewsService.js'
 
 const Dashboard = ({
   currentUser,
@@ -49,6 +50,7 @@ const Dashboard = ({
   onSetShowLogger,
   onGetKey,
   servers = [],
+  landingReviews = [],
 }) => {
   // Состояние для модальных окон выбора тарифа и успеха
   const [selectedTariff, setSelectedTariff] = useState(null)
@@ -74,6 +76,46 @@ const Dashboard = ({
   const handleManualPaymentCheckRef = useRef(() => {})
   /** Защита от двойного создания: orderId, для которых подписка уже создаётся или создана (до следующего нового платежа). */
   const subscriptionCreatedForOrderIdsRef = useRef(new Set())
+
+  // Форма «Оставить отзыв» — проверка по Firestore (раздел отзывов у админа), модальное окно и мотивирующий попап
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [reviewSent, setReviewSent] = useState(false)
+  const [userHasReviewInStore, setUserHasReviewInStore] = useState(null)
+  const [reviewError, setReviewError] = useState(null)
+  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false)
+  const REVIEW_PROMPT_KEY = 'vpn_review_prompt_dismissed_at'
+  const PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setUserHasReviewInStore(null)
+      return
+    }
+    let cancelled = false
+    reviewsService.hasUserReview(currentUser.id).then((has) => {
+      if (!cancelled) setUserHasReviewInStore(has)
+    }).catch(() => {
+      if (!cancelled) setUserHasReviewInStore(false)
+    })
+    return () => { cancelled = true }
+  }, [currentUser?.id])
+
+  useEffect(() => {
+    if (!currentUser || userHasReviewInStore !== false || reviewSent) return
+    try {
+      const dismissedAt = localStorage.getItem(REVIEW_PROMPT_KEY)
+      if (dismissedAt) {
+        const elapsed = Date.now() - Number(dismissedAt)
+        if (elapsed < PROMPT_COOLDOWN_MS) return
+      }
+      setShowReviewPrompt(true)
+    } catch (_) {}
+  }, [currentUser?.id, userHasReviewInStore, reviewSent])
+
+  const hasReview = userHasReviewInStore === true || reviewSent
 
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
@@ -2275,6 +2317,25 @@ const Dashboard = ({
                 </div>
               </div>
             )}
+
+            <div className="mt-6 pt-6 border-t border-slate-800">
+              {userHasReviewInStore === null ? null : hasReview ? (
+                <div className="p-4 bg-green-900/20 border border-green-700/50 rounded-xl text-green-300 text-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                  Спасибо! Ваш отзыв отправлен и ожидает модерации.
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowReviewModal(true)}
+                  className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 rounded-xl font-semibold text-sm transition-all"
+                  aria-label="Оставить отзыв"
+                >
+                  <Star className="w-5 h-5" />
+                  Оставить отзыв
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -2394,6 +2455,30 @@ const Dashboard = ({
                     aria-label="Редактировать профиль"
                   >
                     Редактировать
+                  </button>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-4 sm:pt-5 md:pt-6">
+                <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200 mb-3 sm:mb-4 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-blue-500" />
+                  Оставить отзыв о сервисе
+                </h3>
+                <p className="text-slate-500 text-sm mb-3">Ваш отзыв будет проверен модератором и может быть опубликован на главной странице.</p>
+                {userHasReviewInStore === null ? null : hasReview ? (
+                  <div className="p-4 bg-green-900/20 border border-green-700/50 rounded-xl text-green-300 text-sm flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                    Спасибо! Отзыв отправлен и ожидает модерации.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowReviewModal(true)}
+                    className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 rounded-xl font-semibold text-sm transition-all"
+                    aria-label="Оставить отзыв"
+                  >
+                    <Star className="w-5 h-5" />
+                    Оставить отзыв
                   </button>
                 )}
               </div>
@@ -2623,6 +2708,114 @@ const Dashboard = ({
             </div>
           </div>
         )}
+
+        {showReviewPrompt && !hasReview && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { try { localStorage.setItem(REVIEW_PROMPT_KEY, String(Date.now())) } catch (_) {} setShowReviewPrompt(false) }}>
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-amber-500/20 rounded-xl">
+                  <Star className="w-7 h-7 text-amber-400 fill-amber-400" />
+                </div>
+                <h3 className="text-lg font-bold text-white">Понравился сервис?</h3>
+              </div>
+              <p className="text-slate-300 text-sm mb-5">
+                Ваш отзыв поможет другим пользователям. Оцените нас звёздами и напишите пару слов — это займёт минуту.
+              </p>
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => { setShowReviewPrompt(false); setShowReviewModal(true) }}
+                  className="w-full min-h-[44px] px-4 py-3 bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <Star className="w-5 h-5" />
+                  Оставить отзыв
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { try { localStorage.setItem(REVIEW_PROMPT_KEY, String(Date.now())) } catch (_) {} setShowReviewPrompt(false) }}
+                  className="w-full min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 font-medium rounded-xl transition-all"
+                >
+                  Позже
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showReviewModal && !hasReview && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowReviewModal(false)}>
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between z-10">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Star className="w-5 h-5 text-amber-400" />
+                  Оставить отзыв
+                </h3>
+                <button type="button" onClick={() => setShowReviewModal(false)} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800" aria-label="Закрыть">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 sm:p-5">
+                <p className="text-slate-400 text-sm mb-4">После модерации отзыв может быть опубликован на главной странице.</p>
+                <div className="mb-4">
+                  <span className="text-slate-400 text-sm font-medium block mb-2">Оценка</span>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        className="p-1.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 hover:bg-slate-800"
+                        aria-label={`Оценка ${star}`}
+                      >
+                        <Star size={28} className={star <= reviewRating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <textarea
+                  value={reviewText}
+                  onChange={(e) => { setReviewText(e.target.value); setReviewError(null) }}
+                  placeholder="Напишите ваш отзыв..."
+                  rows={4}
+                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y mb-3"
+                />
+                {reviewError && <p className="text-red-400 text-sm mb-2">{reviewError}</p>}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const text = reviewText.trim()
+                    if (!text) { setReviewError('Введите текст отзыва'); return }
+                    setReviewSubmitting(true)
+                    setReviewError(null)
+                    try {
+                      await reviewsService.createReview({
+                        userId: currentUser.id,
+                        userEmail: currentUser.email,
+                        author: currentUser.name || currentUser.email,
+                        rating: reviewRating,
+                        text,
+                      })
+                      setReviewSent(true)
+                      setUserHasReviewInStore(true)
+                      setReviewText('')
+                      setShowReviewModal(false)
+                      setShowReviewPrompt(false)
+                    } catch (err) {
+                      setReviewError(err.message || 'Не удалось отправить отзыв')
+                    } finally {
+                      setReviewSubmitting(false)
+                    }
+                  }}
+                  disabled={reviewSubmitting}
+                  className="w-full min-h-[44px] px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  {reviewSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Отправка...</> : 'Отправить отзыв'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="max-sm:hidden">
           <Footer />
         </div>

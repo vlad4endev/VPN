@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Info } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Info, Star } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
@@ -25,6 +25,7 @@ const ADMIN_NAV_ITEMS = [
   { id: 'settings', label: 'Настройки', icon: Server },
   { id: 'tariffs', label: 'Тарифы', icon: DollarSign },
   { id: 'payments', label: 'Платежи', icon: CreditCard },
+  { id: 'reviews', label: 'Отзывы', icon: Star },
   { id: 'n8n', label: 'n8n', icon: Link2 },
 ]
 

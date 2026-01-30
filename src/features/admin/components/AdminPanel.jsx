@@ -10,6 +10,7 @@ import VirtualizedUserTable from './VirtualizedUserTable.jsx'
 import UserCard from './UserCard.jsx'
 import N8nPanel from './N8nPanel.jsx'
 import YooMoneyPanel from './YooMoneyPanel.jsx'
+import ReviewsPanel from './ReviewsPanel.jsx'
 import SystemMonitor from './SystemMonitor.jsx'
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
 import { logError } from '../utils/errorHandler.js'
@@ -92,6 +93,15 @@ const AdminPanel = ({
     }, 'prop', 'AdminPanel')
   }
   
+  const adminContext = useAdminContext()
+  const {
+    reviews = [],
+    reviewsLoading = false,
+    loadReviews,
+    handleApproveReview,
+    handleRejectReview,
+  } = adminContext || {}
+
   // Состояние для открытия карточки пользователя
   const [selectedUser, setSelectedUser] = useState(null)
   
@@ -961,6 +971,17 @@ const AdminPanel = ({
               </div>
             </div>
           </div>
+        )}
+
+        {adminTab === 'reviews' && (
+          <ReviewsPanel
+            reviews={reviews}
+            reviewsLoading={reviewsLoading}
+            loadReviews={loadReviews}
+            onApproveReview={handleApproveReview}
+            onRejectReview={handleRejectReview}
+            formatDate={formatDate}
+          />
         )}
 
         {adminTab === 'n8n' && (

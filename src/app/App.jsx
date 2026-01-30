@@ -37,6 +37,7 @@ import { validatePassword } from '../features/auth/utils/validatePassword.js'
 import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/constants/admin.js'
 import { APP_ID } from '../shared/constants/app.js'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
+import { reviewsService } from '../features/reviews/services/reviewsService.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -468,11 +469,14 @@ const LandingPage = ({ onSetView, reviews = [] }) => (
                 <p className="text-slate-300 font-medium mb-6 flex-1 leading-relaxed">{review.text}</p>
                 <div className="flex items-center justify-between pt-4 border-t border-slate-800">
                   <span className="font-bold text-white">{review.author}</span>
-                  {review.date && (
-                    <span className="text-slate-500 text-sm font-medium">
-                      {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
-                  )}
+                  {review.date && (() => {
+                    const d = new Date(review.date)
+                    return !Number.isNaN(d.getTime()) ? (
+                      <span className="text-slate-500 text-sm font-medium">
+                        {d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </span>
+                    ) : null
+                  })()}
                 </div>
               </article>
             ))
@@ -813,18 +817,20 @@ export default function VPNServiceApp() {
         firebaseInitLoggedRef.current = true
         console.log('✅ Firebase компоненты инициализированы:', { app: !!app, auth: !!auth, db: !!db })
       }
+      // Когда Firebase готов — подгружаем одобренные отзывы для лендинга (чтобы не зависеть от порядка эффектов)
+      if (view === 'landing' || !currentUser) {
+        reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
+      }
     }
-  }, [view])
+  }, [view, currentUser])
 
-  // Загрузка одобренных отзывов для лендинга (когда пользователь не авторизован)
+  // Загрузка одобренных отзывов для лендинга и страницы приветствия (при показе лендинга или когда пользователь не авторизован; повтор при появлении db)
   useEffect(() => {
-    if (!currentUser) {
-      fetch('/api/reviews/approved')
-        .then((r) => r.json())
-        .then((data) => setLandingReviews(data?.reviews ?? []))
-        .catch(() => setLandingReviews([]))
+    if (!db) return
+    if (!currentUser || view === 'landing') {
+      reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
     }
-  }, [currentUser])
+  }, [currentUser, view, db])
 
   // Загрузка пользователей из Firestore
   // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
@@ -4149,6 +4155,7 @@ export default function VPNServiceApp() {
         onSetShowLogger={setShowLogger}
         onGetKey={handleGetKey}
         servers={servers}
+        landingReviews={landingReviews}
       />
     )
   }

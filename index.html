@@ -27,7 +27,7 @@
           "@id": "https://skypath.fun/#organization",
           "name": "SKYPATH FLOW",
           "url": "https://skypath.fun",
-          "logo": "https://skypath.fun/vite.svg",
+          "logo": "https://skypath.fun/favicon.svg",
           "description": "Защищённый VPN-сервис с протоколом VLESS и обходом белых списков в России.",
           "sameAs": ["https://t.me/+M3Wd-rkrqytmMTg6"]
         },
@@ -42,46 +42,10 @@
         {
           "@type": "FAQPage",
           "mainEntity": [
-            {
-              "@type": "Question",
-              "name": "Что такое SKYPATH FLOW?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "SKYPATH FLOW — это VPN-сервис для России с протоколом VLESS и технологией обхода белых списков. Даёт стабильный доступ в интернет без блокировок, с серверами в США, Нидерландах, Швейцарии, Германии и России."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Сколько стоит SKYPATH FLOW?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "Тариф Super — 150 ₽ в месяц (1 устройство, обход белого списка, VLESS). Тариф MULTI — 250 ₽ в месяц (5 устройств, высокая скорость). Оплата помесячно, без скрытых платежей."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Как подключиться к SKYPATH FLOW?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "Нажмите «Начать работу» на сайте, зарегистрируйтесь, выберите тариф и оплатите. После оплаты в личном кабинете получите ключ и инструкцию для подключения на телефон или компьютер."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "Что такое обход белых списков?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "Обход белых списков — технология, позволяющая VPN стабильно работать в регионах с ограничениями (в том числе в России), когда провайдер блокирует или фильтрует трафик. SKYPATH использует её в тарифе Super."
-              }
-            },
-            {
-              "@type": "Question",
-              "name": "В каких странах есть сервера SKYPATH FLOW?",
-              "acceptedAnswer": {
-                "@type": "Answer",
-                "text": "Сервера расположены в США, Нидерландах, Швейцарии, Германии и России для минимальной задержки и высокой скорости."
-              }
-            }
+            { "@type": "Question", "name": "Что такое SKYPATH FLOW?", "acceptedAnswer": { "@type": "Answer", "text": "SKYPATH FLOW — VPN-сервис для России с протоколом VLESS и обходом белых списков. Стабильный доступ без блокировок, сервера в США, Нидерландах, Швейцарии, Германии и России." } },
+            { "@type": "Question", "name": "Сколько стоит SKYPATH FLOW?", "acceptedAnswer": { "@type": "Answer", "text": "Super — 150 ₽/мес (1 устройство, обход белого списка). MULTI — 250 ₽/мес (5 устройств). Без скрытых платежей." } },
+            { "@type": "Question", "name": "Как подключиться к SKYPATH FLOW?", "acceptedAnswer": { "@type": "Answer", "text": "«Начать работу» → регистрация → тариф → оплата. В личном кабинете ключ и инструкция для телефона или ПК." } },
+            { "@type": "Question", "name": "Что такое обход белых списков?", "acceptedAnswer": { "@type": "Answer", "text": "Технология стабильной работы VPN в регионах с ограничениями. SKYPATH использует её в тарифе Super." } }
           ]
         },
         {
@@ -199,45 +163,47 @@
     </section>
 
     <section class="bg-slate-900/30 py-20 px-6 border-y border-slate-900" aria-label="Локации">
-      <div class="max-w-7xl mx-auto">
-        <div class="flex flex-col lg:flex-row items-center justify-between gap-12">
-          <div class="lg:w-1/2">
-            <h2 class="text-4xl font-black text-white mb-6 leading-none italic">Глобальное покрытие серверов</h2>
-            <p class="text-slate-400 text-lg mb-8 font-medium">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
-            <ul class="grid grid-cols-2 sm:grid-cols-3 gap-4 list-none p-0 m-0">
-              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">США</li>
-              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Нидерланды</li>
-              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Швейцария</li>
-              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Германия</li>
-              <li class="bg-slate-900 border border-slate-800 p-4 rounded-2xl font-bold text-white">Россия</li>
-            </ul>
-          </div>
-        </div>
+      <div class="max-w-7xl mx-auto text-center">
+        <h2 class="text-4xl font-black text-white mb-4 leading-none italic">Глобальное покрытие серверов</h2>
+        <p class="text-slate-400 text-lg max-w-2xl mx-auto mb-12 font-medium leading-relaxed">Мы размещаем наши узлы в лучших дата-центрах мира для обеспечения минимальной задержки и максимальной пропускной способности.</p>
+        <ul class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 list-none p-0 m-0 max-w-4xl mx-auto">
+          <li class="flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors">США</li>
+          <li class="flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors">Нидерланды</li>
+          <li class="flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors">Швейцария</li>
+          <li class="flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors">Германия</li>
+          <li class="flex items-center justify-center min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-2xl py-4 px-5 font-bold text-white text-base shadow-sm hover:border-blue-500/30 transition-colors col-span-2 sm:col-span-1">Россия</li>
+        </ul>
       </div>
     </section>
 
-    <section class="max-w-3xl mx-auto px-6 py-20" aria-labelledby="faq-heading">
-      <h2 id="faq-heading" class="text-3xl font-black text-white mb-10 italic">Частые вопросы</h2>
-      <dl class="space-y-8">
-        <div>
-          <dt class="text-lg font-bold text-white mb-2">Что такое SKYPATH FLOW?</dt>
-          <dd class="text-slate-400 leading-relaxed">SKYPATH FLOW — это VPN-сервис для России с протоколом VLESS и технологией обхода белых списков. Даёт стабильный доступ в интернет без блокировок, с серверами в США, Нидерландах, Швейцарии, Германии и России.</dd>
+    <section class="max-w-7xl mx-auto px-6 py-20" aria-labelledby="reviews-heading">
+      <div class="text-center mb-16">
+        <h2 id="reviews-heading" class="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Оценки и Отзывы</h2>
+        <p class="text-slate-500 font-bold uppercase tracking-widest text-sm">Что говорят наши пользователи</p>
+      </div>
+      <div id="reviews-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <p class="col-span-full text-center py-8 text-slate-500 font-medium">Загрузка отзывов…</p>
+      </div>
+    </section>
+
+    <section class="max-w-7xl mx-auto px-6 py-20" aria-labelledby="faq-heading" itemscope itemtype="https://schema.org/FAQPage">
+      <h2 id="faq-heading" class="text-2xl font-black text-white mb-8 italic text-center">Частые вопросы</h2>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-6">
+        <div class="flex flex-col" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-sm font-bold text-white mb-1.5" itemprop="name">Что такое SKYPATH FLOW?</dt>
+          <dd class="text-slate-400 text-sm leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">VPN-сервис для России с протоколом VLESS и обходом белых списков. Стабильный доступ без блокировок, сервера в США, Нидерландах, Швейцарии, Германии и России.</span></dd>
         </div>
-        <div>
-          <dt class="text-lg font-bold text-white mb-2">Сколько стоит SKYPATH FLOW?</dt>
-          <dd class="text-slate-400 leading-relaxed">Тариф Super — 150 ₽ в месяц (1 устройство, обход белого списка, VLESS). Тариф MULTI — 250 ₽ в месяц (5 устройств, высокая скорость). Оплата помесячно, без скрытых платежей.</dd>
+        <div class="flex flex-col" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-sm font-bold text-white mb-1.5" itemprop="name">Сколько стоит?</dt>
+          <dd class="text-slate-400 text-sm leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Super — 150 ₽/мес (1 устройство, обход белого списка). MULTI — 250 ₽/мес (5 устройств). Без скрытых платежей.</span></dd>
         </div>
-        <div>
-          <dt class="text-lg font-bold text-white mb-2">Как подключиться к SKYPATH FLOW?</dt>
-          <dd class="text-slate-400 leading-relaxed">Нажмите «Начать работу» на сайте, зарегистрируйтесь, выберите тариф и оплатите. После оплаты в личном кабинете получите ключ и инструкцию для подключения на телефон или компьютер.</dd>
+        <div class="flex flex-col" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-sm font-bold text-white mb-1.5" itemprop="name">Как подключиться?</dt>
+          <dd class="text-slate-400 text-sm leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">«Начать работу» → регистрация → тариф → оплата. В личном кабинете ключ и инструкция для телефона или ПК.</span></dd>
         </div>
-        <div>
-          <dt class="text-lg font-bold text-white mb-2">Что такое обход белых списков?</dt>
-          <dd class="text-slate-400 leading-relaxed">Обход белых списков — технология, позволяющая VPN стабильно работать в регионах с ограничениями (в том числе в России), когда провайдер блокирует или фильтрует трафик. SKYPATH использует её в тарифе Super.</dd>
-        </div>
-        <div>
-          <dt class="text-lg font-bold text-white mb-2">В каких странах есть сервера SKYPATH FLOW?</dt>
-          <dd class="text-slate-400 leading-relaxed">Сервера расположены в США, Нидерландах, Швейцарии, Германии и России для минимальной задержки и высокой скорости.</dd>
+        <div class="flex flex-col" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+          <dt class="text-sm font-bold text-white mb-1.5" itemprop="name">Что такое обход белых списков?</dt>
+          <dd class="text-slate-400 text-sm leading-relaxed" itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><span itemprop="text">Технология стабильной работы VPN в регионах с ограничениями. SKYPATH использует её в тарифе Super.</span></dd>
         </div>
       </dl>
     </section>
@@ -257,5 +223,49 @@
       </div>
     </footer>
 
+    <script>
+      (function () {
+        var esc = function (s) {
+          if (s == null) return '';
+          var d = document.createElement('div');
+          d.textContent = s;
+          return d.innerHTML;
+        };
+        var container = document.getElementById('reviews-container');
+        if (!container) return;
+        fetch('/api/reviews/approved')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var list = (data && data.reviews) ? data.reviews : [];
+            if (list.length === 0) {
+              container.innerHTML = '<p class="col-span-full text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</p>';
+              return;
+            }
+            var html = list.map(function (r) {
+              var stars = '';
+              for (var i = 1; i <= 5; i++) {
+                stars += '<span class="' + (i <= (r.rating || 0) ? 'text-amber-400' : 'text-slate-600') + '" aria-hidden="true">★</span>';
+              }
+              var dateStr = '';
+              if (r.date) {
+                try {
+                  dateStr = new Date(r.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+                } catch (e) {}
+              }
+              return '<article class="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col hover:border-blue-500/40 transition-all">' +
+                '<div class="flex items-center gap-1 mb-4" aria-label="Оценка ' + (r.rating || 0) + ' из 5">' + stars + '</div>' +
+                '<p class="text-slate-300 font-medium mb-6 flex-1 leading-relaxed">' + esc(r.text || '') + '</p>' +
+                '<div class="flex items-center justify-between pt-4 border-t border-slate-800">' +
+                  '<span class="font-bold text-white">' + esc(r.author || 'Пользователь') + '</span>' +
+                  (dateStr ? '<span class="text-slate-500 text-sm font-medium">' + esc(dateStr) + '</span>' : '') +
+                '</div></article>';
+            }).join('');
+            container.innerHTML = html;
+          })
+          .catch(function () {
+            container.innerHTML = '<p class="col-span-full text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</p>';
+          });
+      })();
+    </script>
   </body>
 </html>

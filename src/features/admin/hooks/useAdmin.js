@@ -3,6 +3,7 @@ import { useUsers } from './useUsers.js'
 import { useServers } from './useServers.js'
 import { useTariffs } from './useTariffs.js'
 import { useSettings } from './useSettings.js'
+import { useReviews } from './useReviews.js'
 
 /**
  * Главный хук для управления Admin панелью
@@ -60,6 +61,7 @@ export function useAdmin({
   )
 
   const tariffsHook = useTariffs(tariffs, setTariffs, setError, setSuccess)
+  const reviewsHook = useReviews(currentUser, setError, setSuccess)
 
   // Отладочное логирование для проверки экспорта функций
   if (import.meta.env.DEV) {
@@ -180,6 +182,13 @@ export function useAdmin({
     handleTariffDurationDaysChange: tariffsHook.handleTariffDurationDaysChange,
     handleTariffActiveChange: tariffsHook.handleTariffActiveChange,
     handleTariffSubscriptionLinkChange: tariffsHook.handleTariffSubscriptionLinkChange,
+
+    // Отзывы пользователей
+    reviews: reviewsHook.reviews,
+    reviewsLoading: reviewsHook.reviewsLoading,
+    loadReviews: reviewsHook.loadReviews,
+    handleApproveReview: reviewsHook.handleApproveReview,
+    handleRejectReview: reviewsHook.handleRejectReview,
   }
 }
 
