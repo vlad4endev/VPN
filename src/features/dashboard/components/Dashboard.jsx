@@ -50,7 +50,7 @@ const Dashboard = ({
   onSetShowLogger,
   onGetKey,
   servers = [],
-  landingReviews = [],
+  welcomeReviews = [],
 }) => {
   // Состояние для модальных окон выбора тарифа и успеха
   const [selectedTariff, setSelectedTariff] = useState(null)
@@ -2817,12 +2817,12 @@ const Dashboard = ({
         )}
 
         {/* Одобренные отзывы (мини-лендинг / страница приветствия) */}
-        {landingReviews.length > 0 && (
+        {welcomeReviews.length > 0 && (
           <div className="mt-6 sm:mt-8 bg-slate-900 rounded-lg sm:rounded-xl border border-slate-800 p-4 sm:p-5 md:p-6">
             <h2 className="text-[clamp(1.125rem,1rem+0.5vw,1.5rem)] font-bold text-white mb-3 sm:mb-4">Оценки и отзывы</h2>
             <p className="text-slate-400 text-sm mb-4">Что говорят наши пользователи</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-              {landingReviews.slice(0, 6).map((review) => (
+              {welcomeReviews.slice(0, 6).map((review) => (
                 <article key={review.id} className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col">
                   <div className="flex items-center gap-1 mb-2">
                     {[1, 2, 3, 4, 5].map((star) => (

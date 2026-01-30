@@ -3,7 +3,7 @@ import { collection, getDocs, addDoc, doc, setDoc, getDoc } from 'firebase/fires
 import { useFirebase } from './shared/hooks/useFirebase.js'
 import LoggerPanel from './shared/components/LoggerPanel.jsx'
 import ConfigErrorScreen from './shared/components/ConfigErrorScreen.jsx'
-import LandingPage from './shared/components/LandingPage.jsx'
+import WelcomePage from './shared/components/WelcomePage.jsx'
 
 // Lazy loading для code splitting
 const LoginForm = lazy(() => import('./features/auth/components/LoginForm.jsx'))
@@ -38,7 +38,7 @@ import { stripUndefinedForFirestore } from './shared/utils/firestoreSafe.js'
 
 // UI компоненты вынесены в отдельные файлы:
 // - ConfigErrorScreen: src/shared/components/ConfigErrorScreen.jsx
-// - LandingPage: src/shared/components/LandingPage.jsx
+// - WelcomePage: src/shared/components/WelcomePage.jsx
 // - LoginForm: src/features/auth/components/LoginForm.jsx
 
 // KeyModal вынесен в src/shared/components/KeyModal.jsx
@@ -1635,14 +1635,14 @@ export default function VPNServiceApp() {
 
 
   // Основной рендер
-  // Если view === landing - показываем landing page даже при ошибках конфигурации
-  // (ошибки конфигурации не критичны для показа landing page)
-  if (view === 'landing' && !currentUser) {
-    // Показываем предупреждение об ошибке, но не блокируем landing page
+  // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации
+  // (ошибки конфигурации не критичны для показа экрана приветствия)
+  if (view === 'welcome' && !currentUser) {
+    // Показываем предупреждение об ошибке, но не блокируем экран приветствия
     if (configError) {
     return (
         <>
-          <LandingPage onSetView={setView} />
+          <WelcomePage onSetView={setView} reviews={[]} />
           <div className="fixed bottom-4 right-4 max-w-md bg-red-900/90 border border-red-800 rounded-lg p-4 shadow-xl z-50">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -1669,7 +1669,7 @@ export default function VPNServiceApp() {
         </>
       )
     }
-    return <LandingPage onSetView={setView} />
+    return <WelcomePage onSetView={setView} reviews={[]} />
   }
 
   // Для других view показываем ошибку конфигурации
@@ -1826,7 +1826,7 @@ export default function VPNServiceApp() {
   // Личный кабинет пользователя
   // ВАЖНО: Полная изоляция данных - каждый пользователь видит только свои данные
   // Все запросы фильтруются по currentUser.id (userId)
-  if (currentUser && (view === 'dashboard' || !view || view === 'landing')) {
+  if (currentUser && (view === 'dashboard' || !view || view === 'welcome')) {
     // Если пользователь админ, но view не 'admin' - показываем личный кабинет
     // Админы тоже имеют личный кабинет со своими данными
     return (
@@ -1867,7 +1867,7 @@ export default function VPNServiceApp() {
     )
   }
 
-  // По умолчанию показываем landing
-  return <LandingPage onSetView={setView} />
+  // По умолчанию показываем экран приветствия
+  return <WelcomePage onSetView={setView} reviews={[]} />
 }
 

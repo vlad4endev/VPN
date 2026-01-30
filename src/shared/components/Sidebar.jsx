@@ -72,9 +72,9 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   }
 
   const handleAboutClick = () => {
-    onSetView('landing')
+    onSetView('welcome')
     setIsMenuOpen(false)
-    setTimeout(() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
+    setTimeout(() => document.getElementById('welcome-reviews-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
   }
 
   const blockHeader = (
@@ -146,9 +146,9 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
       </button>
       <button
         onClick={handleAboutClick}
-        className={navItemClass(view === 'landing')}
+        className={navItemClass(view === 'welcome')}
         aria-label="О сервисе"
-        aria-selected={view === 'landing'}
+        aria-selected={view === 'welcome'}
       >
         <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
         <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>
@@ -215,9 +215,9 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         </button>
         <button
           onClick={handleAboutClick}
-          className={navItemClass(view === 'landing')}
+          className={navItemClass(view === 'welcome')}
           aria-label="О сервисе"
-          aria-selected={view === 'landing'}
+          aria-selected={view === 'welcome'}
         >
           <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>

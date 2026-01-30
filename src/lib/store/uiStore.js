@@ -4,8 +4,8 @@ import { persist } from 'zustand/middleware'
 export const useUIStore = create(
   persist(
     (set) => ({
-      // Текущий view (landing, dashboard, admin)
-      view: 'landing',
+      // Текущий view (welcome, dashboard, admin)
+      view: 'welcome',
       setView: (view) => set({ view }),
 
       // Модальные окна

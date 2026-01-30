@@ -48,7 +48,7 @@ export function useFirebase() {
       console.error('firebaseInitError:', firebaseInitError)
       
       // Устанавливаем configError только если это критично
-      // Если view === 'landing', не блокируем показ страницы (это будет обработано в компоненте)
+      // Если view === 'welcome', не блокируем показ страницы (это будет обработано в компоненте)
       setConfigError(errorMsg)
       setLoading(false)
     } else {

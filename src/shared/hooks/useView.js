@@ -12,7 +12,7 @@ import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
  * @returns {Object} Объект с view и функцией setView
  */
 export function useView({ currentUser, onViewChange } = {}) {
-  // Приоритет: hash из URL (с SEO-лендинга /app/#login, /app/#register) → localStorage → landing
+  // Приоритет: hash из URL (с экрана приветствия /app/#login, /app/#register) → localStorage → welcome
   const [view, setViewState] = useState(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash?.toLowerCase()
@@ -34,13 +34,13 @@ export function useView({ currentUser, onViewChange } = {}) {
     } catch (err) {
       logger.error('useView', 'Ошибка при восстановлении view из localStorage', null, err)
     }
-    return 'landing'
+    return 'welcome'
   })
 
   // Обертка для setView с сохранением в localStorage
   const setView = useCallback((newView) => {
     setViewState(newView)
-    if (newView && newView !== 'landing' && newView !== 'login' && newView !== 'register') {
+    if (newView && newView !== 'welcome' && newView !== 'login' && newView !== 'register') {
       try {
         localStorage.setItem('vpn_current_view', newView)
         logger.debug('useView', 'View сохранен в localStorage', { view: newView })
@@ -60,9 +60,9 @@ export function useView({ currentUser, onViewChange } = {}) {
   // Автоматическое определение view на основе текущего пользователя
   useEffect(() => {
     if (!currentUser) {
-      // Если пользователь не авторизован, показываем landing
-      if (view !== 'landing' && view !== 'login' && view !== 'register') {
-        setView('landing')
+      // Если пользователь не авторизован, показываем welcome
+      if (view !== 'welcome' && view !== 'login' && view !== 'register') {
+        setView('welcome')
       }
       return
     }
@@ -70,8 +70,8 @@ export function useView({ currentUser, onViewChange } = {}) {
     // Если пользователь авторизован, определяем правильный view
     let correctView = view
 
-    // Если текущий view - landing/login/register, переключаемся на dashboard или admin
-    if (view === 'landing' || view === 'login' || view === 'register') {
+    // Если текущий view - welcome/login/register, переключаемся на dashboard или admin
+    if (view === 'welcome' || view === 'login' || view === 'register') {
       correctView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
     }
 
