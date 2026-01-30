@@ -34,7 +34,7 @@ import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/const
 import { APP_ID } from '../shared/constants/app.js'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
-import { app, auth, db, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
+import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -383,10 +383,6 @@ export default function VPNServiceApp() {
   const [welcomeReviews, setWelcomeReviews] = useState([])
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
-  const dbRef = useRef(db)
-  useEffect(() => {
-    dbRef.current = db
-  }, [db])
 
   // Обертка для setCurrentUser с сохранением в localStorage (для обратной совместимости)
   const setCurrentUser = useCallback((user) => {
@@ -564,7 +560,7 @@ export default function VPNServiceApp() {
   }, [])
 
   const loadUserData = useCallback(async (uid, dbOverride) => {
-    const dbToUse = dbOverride ?? db
+    const dbToUse = dbOverride ?? getDb()
     if (!dbToUse || !uid) return null
     
     try {
@@ -605,11 +601,11 @@ export default function VPNServiceApp() {
       logger.error('Auth', 'Ошибка загрузки данных пользователя', { uid }, err)
       return null
     }
-  }, [db])
+  }, [])
 
-  // Отслеживание состояния авторизации Firebase Auth (dbRef — актуальный db, избегаем FirebaseError после HMR/Strict Mode)
+  // Отслеживание состояния авторизации Firebase Auth (getDb() — актуальный Firestore, избегаем FirebaseError при дублировании модуля)
   useEffect(() => {
-    if (!auth || !dbRef.current) {
+    if (!auth || !getDb()) {
       setLoading(false)
       setAuthChecking(false)
       return
@@ -618,14 +614,14 @@ export default function VPNServiceApp() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       logger.debug('App', 'onAuthStateChanged', { user: !!firebaseUser, uid: firebaseUser?.uid })
       setFirebaseUser(firebaseUser)
-      const dbInstance = dbRef.current
+      const dbInstance = getDb()
       if (!dbInstance) {
         setLoading(false)
         setAuthChecking(false)
         return
       }
       if (firebaseUser) {
-        // Пользователь авторизован - загружаем данные из Firestore (dbInstance — актуальный db, избегаем FirebaseError после HMR)
+        // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
         try {
           let userData = await loadUserData(firebaseUser.uid, dbInstance)
           if (userData) {

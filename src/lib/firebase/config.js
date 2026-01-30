@@ -1,6 +1,20 @@
 import { initializeApp, getApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+
+/**
+ * Возвращает актуальный экземпляр Firestore (из текущего app).
+ * Используйте в колбэках (onAuthStateChanged и т.д.), чтобы избежать FirebaseError
+ * "Expected first argument to doc() to be a CollectionReference..." при дублировании модуля или порядке загрузки.
+ */
+function getDb() {
+  try {
+    const appInstance = getApp()
+    return getFirestore(appInstance)
+  } catch {
+    return db
+  }
+}
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { validateEnvVars, getEnvErrorMessage } from '../../shared/utils/envValidation.js'
 import logger from '../../shared/utils/logger.js'
@@ -184,4 +198,4 @@ try {
 }
 
 // Экспортируем инициализированные объекты
-export { app, auth, db, googleProvider, appCheck, firebaseInitError, envValidation }
+export { app, auth, db, getDb, googleProvider, appCheck, firebaseInitError, envValidation }
