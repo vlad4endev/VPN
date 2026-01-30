@@ -1,4 +1,4 @@
-import { initializeApp, getApp, deleteApp } from 'firebase/app'
+import { initializeApp, getApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
@@ -151,14 +151,9 @@ try {
       authDomain: firebaseConfig.authDomain,
     })
 
-    // Safari: при выгрузке страницы отключаем Firestore до перезагрузки,
-    // чтобы не получать "Fetch API cannot load ... due to access control checks"
-    if (typeof window !== 'undefined' && app) {
-      const handleBeforeUnload = () => {
-        deleteApp(app).catch(() => {})
-      }
-      window.addEventListener('beforeunload', handleBeforeUnload)
-    }
+    // Не вызываем deleteApp(app) на beforeunload: после уничтожения приложения
+    // ссылка db остаётся в модуле, но экземпляр недействителен — вызовы doc(db, ...)
+    // и collection(db, ...) приводят к FirebaseError "Expected first argument to doc()...".
   } else {
     const missing = []
     if (!firebaseConfig.apiKey) missing.push('apiKey')

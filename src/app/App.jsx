@@ -843,7 +843,12 @@ export default function VPNServiceApp() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       logger.debug('App', 'onAuthStateChanged', { user: !!firebaseUser, uid: firebaseUser?.uid })
       setFirebaseUser(firebaseUser)
-      
+      // Защита от недействительного db (например после HMR или удаления приложения)
+      if (!db) {
+        setLoading(false)
+        setAuthChecking(false)
+        return
+      }
       if (firebaseUser) {
         // Пользователь авторизован - загружаем данные из Firestore
         try {
