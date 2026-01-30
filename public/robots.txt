@@ -5,6 +5,7 @@
 User-agent: Googlebot
 Allow: /
 Allow: /app/
+Allow: /api/reviews/approved
 Disallow: /api/
 Disallow: /api
 
@@ -16,6 +17,7 @@ Disallow: /api/
 User-agent: Google-Extended
 Allow: /
 Allow: /app/
+Allow: /api/reviews/approved
 Disallow: /api/
 Disallow: /api
 

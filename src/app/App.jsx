@@ -1,24 +1,19 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { initializeApp, getApp } from 'firebase/app'
-import { 
-  getAuth, 
+import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
-  GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  updateProfile,
-  setPersistence,
-  browserLocalPersistence
+  updateProfile
 } from 'firebase/auth'
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
+import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
 import axios from 'axios'
 // bcrypt больше не нужен - используем Firebase Auth
 import ThreeXUI from '../features/vpn/services/ThreeXUI.js' // Используется только для утилит (generateUUID, generateSubId)
 import { dashboardService } from '../features/dashboard/services/dashboardService.js' // Работает через Backend Proxy для создания клиентов в 3x-ui
-import { validateEnvVars, getEnvErrorMessage } from '../shared/utils/envValidation.js'
+import { getEnvErrorMessage } from '../shared/utils/envValidation.js'
 import logger from '../shared/utils/logger.js'
 import LoggerPanel from '../shared/components/LoggerPanel.jsx'
 import LoginForm from '../features/auth/components/LoginForm.jsx'
@@ -38,144 +33,12 @@ import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/const
 import { APP_ID } from '../shared/constants/app.js'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
+import { app, auth, db, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
 
-// Валидация переменных окружения при старте
-logger.info('App', '🔍 Проверка конфигурации переменных окружения...')
-const envValidation = validateEnvVars()
-if (!envValidation.isValid) {
-  const errorMsg = getEnvErrorMessage(envValidation)
-  console.error('Ошибка конфигурации:\n', errorMsg)
-  logger.error('App', '❌ Ошибка конфигурации переменных окружения', { validation: envValidation })
-} else {
-  logger.info('App', '✅ Конфигурация переменных окружения проверена успешно')
-}
-
-// Конфигурация Firebase (будет загружаться из переменных окружения)
-// ВАЖНО: Vite загружает переменные окружения только при старте сервера!
-// Если вы изменили .env - обязательно перезапустите dev сервер!
-
-// Диагностика: проверяем, загружены ли переменные окружения
-const envVars = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-}
-
-// Логируем загруженные переменные (для диагностики) - используем logger из config
-
-const firebaseConfig = {
-  apiKey: envVars.apiKey,
-  authDomain: envVars.authDomain,
-  projectId: envVars.projectId,
-  storageBucket: envVars.storageBucket,
-  messagingSenderId: envVars.messagingSenderId,
-  appId: envVars.appId,
-}
-
-// Проверка конфигурации Firebase перед инициализацией
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  const missing = []
-  if (!firebaseConfig.apiKey) missing.push('VITE_FIREBASE_API_KEY')
-  if (!firebaseConfig.authDomain) missing.push('VITE_FIREBASE_AUTH_DOMAIN')
-  if (!firebaseConfig.projectId) missing.push('VITE_FIREBASE_PROJECT_ID')
-  if (!firebaseConfig.storageBucket) missing.push('VITE_FIREBASE_STORAGE_BUCKET')
-  if (!firebaseConfig.messagingSenderId) missing.push('VITE_FIREBASE_MESSAGING_SENDER_ID')
-  if (!firebaseConfig.appId) missing.push('VITE_FIREBASE_APP_ID')
-  
-  // Ошибка уже залогирована в config.js через logger
-  
-  logger.error('Firebase', 'Конфигурация Firebase неполная', { 
-    missing,
-    config: { 
-      ...firebaseConfig, 
-      apiKey: firebaseConfig.apiKey ? '***' : null 
-    } 
-  })
-}
-
-// Инициализация Firebase
-let app = null
-let auth = null
-let db = null
-let googleProvider = null
-let firebaseInitError = null
-
-try {
-  if (firebaseConfig.apiKey && firebaseConfig.projectId) {
-    logger.info('Firebase', '🔥 Инициализация Firebase...')
-    
-    // Проверяем, не была ли уже инициализирована Firebase (защита от hot reload)
-    try {
-    app = initializeApp(firebaseConfig)
-    } catch (initError) {
-      // Если приложение уже инициализировано, получаем существующий экземпляр
-      if (initError.code === 'app/duplicate-app') {
-        app = getApp()
-        logger.debug('Firebase', 'Используется существующий экземпляр Firebase (hot reload)', null)
-      } else {
-        throw initError
-      }
-    }
-    
-    auth = getAuth(app)
-    // Явно включаем сохранение сессии в браузере — один аккаунт на браузер, сессия переживает перезагрузку
-    setPersistence(auth, browserLocalPersistence).catch((err) => {
-      logger.warn('Firebase', 'Не удалось установить persistence (сессия может не сохраняться)', null, err)
-    })
-    try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-      })
-    } catch (e) {
-      if (e.code === 'failed-precondition') {
-        db = getFirestore(app)
-      } else {
-        throw e
-      }
-    }
-    
-    googleProvider = new GoogleAuthProvider()
-    googleProvider.setCustomParameters({
-      prompt: 'select_account'
-    })
-    logger.info('Firebase', '✅ Firebase успешно инициализирован', {
-      projectId: firebaseConfig.projectId,
-      authDomain: firebaseConfig.authDomain,
-    })
-  } else {
-    const missing = []
-    if (!firebaseConfig.apiKey) missing.push('apiKey')
-    if (!firebaseConfig.projectId) missing.push('projectId')
-    firebaseInitError = `Отсутствуют обязательные поля конфигурации: ${missing.join(', ')}`
-    logger.warn('Firebase', '⚠️ Firebase не может быть инициализирован', {
-      missing,
-      hasApiKey: !!firebaseConfig.apiKey,
-      hasProjectId: !!firebaseConfig.projectId,
-    })
-  }
-} catch (error) {
-  // Игнорируем ошибки persistence - они обрабатываются отдельно
-  if (error.code === 'failed-precondition' && error.message?.includes('persistence')) {
-    // Это ошибка persistence при hot reload - не критично, просто игнорируем
-    logger.debug('Firebase', 'Ошибка persistence при инициализации (hot reload)', null)
-    // Не устанавливаем firebaseInitError, так как это не критичная ошибка
-  } else {
-    // Другие ошибки логируем как критические
-  firebaseInitError = error.message || 'Неизвестная ошибка'
-  logger.error('Firebase', '❌ Ошибка инициализации Firebase', null, error)
-  console.error('Детали ошибки:', {
-    code: error.code,
-    message: error.message,
-    stack: error.stack
-  })
-  }
-}
+// Конфигурация Firebase — единая инициализация в lib/firebase/config.js
 
 // XUIService удален - теперь используется ThreeXUI из services/ThreeXUI.js
 
@@ -523,7 +386,6 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       // Загружаем тариф и используем ссылку из него (если есть tariffId)
       if (user.tariffId) {
         try {
-          const db = getFirestore()
           const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
           const tariffSnapshot = await getDoc(tariffDoc)
           if (tariffSnapshot.exists()) {
@@ -753,6 +615,7 @@ export default function VPNServiceApp() {
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [landingReviews, setLandingReviews] = useState([])
   const firebaseInitLoggedRef = useRef(false)
+  const landingReviewsLoadedRef = useRef(false)
 
   // Обертка для setCurrentUser с сохранением в localStorage (для обратной совместимости)
   const setCurrentUser = useCallback((user) => {
@@ -774,14 +637,14 @@ export default function VPNServiceApp() {
 
   // Проверка конфигурации при монтировании
   useEffect(() => {
-    logger.info('App', 'Инициализация приложения')
+    logger.debug('App', 'Инициализация приложения')
     if (!envValidation.isValid) {
       const errorMsg = getEnvErrorMessage(envValidation)
       setConfigError(errorMsg)
       setLoading(false)
       logger.error('App', 'Приложение не может быть запущено из-за ошибок конфигурации')
     } else {
-      logger.info('App', 'Конфигурация проверена успешно')
+      logger.debug('App', 'Конфигурация проверена успешно')
     }
   }, [])
 
@@ -815,24 +678,17 @@ export default function VPNServiceApp() {
     } else {
       if (!firebaseInitLoggedRef.current) {
         firebaseInitLoggedRef.current = true
-        console.log('✅ Firebase компоненты инициализированы:', { app: !!app, auth: !!auth, db: !!db })
-      }
-      // Когда Firebase готов — подгружаем одобренные отзывы для лендинга (чтобы не зависеть от порядка эффектов)
-      if (view === 'landing' || !currentUser) {
-        reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
+        logger.debug('App', 'Firebase компоненты инициализированы', { app: !!app, auth: !!auth, db: !!db })
       }
     }
   }, [view, currentUser])
 
-  // Загрузка одобренных отзывов для лендинга и страницы приветствия (Dashboard) — при гостевом лендинге или при кабинете
+  // Загрузка одобренных отзывов один раз при готовности db (для лендинга и Dashboard)
   useEffect(() => {
-    if (!db) return
-    const showLanding = view === 'landing' || !currentUser
-    const showDashboard = currentUser && (view === 'dashboard' || !view || view === 'landing')
-    if (showLanding || showDashboard) {
-      reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
-    }
-  }, [currentUser, view, db])
+    if (!db || landingReviewsLoadedRef.current) return
+    landingReviewsLoadedRef.current = true
+    reviewsService.getApprovedReviews().then(setLandingReviews).catch(() => setLandingReviews([]))
+  }, [db])
 
   // Загрузка пользователей из Firestore
   // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
@@ -985,7 +841,7 @@ export default function VPNServiceApp() {
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('🔄 onAuthStateChanged вызван:', { user: !!firebaseUser, uid: firebaseUser?.uid })
+      logger.debug('App', 'onAuthStateChanged', { user: !!firebaseUser, uid: firebaseUser?.uid })
       setFirebaseUser(firebaseUser)
       
       if (firebaseUser) {

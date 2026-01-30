@@ -75,7 +75,7 @@ export const reviewsService = {
       })
       // moderatedAt уже в порядке убывания из запроса; сортировка по date на случай отсутствия индекса
       list.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-      logger.info('Reviews', `Загружено одобренных отзывов для лендинга: ${list.length}`)
+      logger.debug('Reviews', `Загружено одобренных отзывов: ${list.length}`)
       return list
     } catch (err) {
       // Если нет индекса по (status, moderatedAt), пробуем без orderBy
@@ -96,7 +96,7 @@ export const reviewsService = {
             })
           })
           list.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-          logger.info('Reviews', `Загружено одобренных отзывов (без orderBy): ${list.length}`)
+          logger.debug('Reviews', `Загружено одобренных отзывов (без orderBy): ${list.length}`)
           return list
         } catch (fallbackErr) {
           logger.error('Reviews', 'Ошибка загрузки одобренных отзывов (fallback)', { code: fallbackErr.code }, fallbackErr)

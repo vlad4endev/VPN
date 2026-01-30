@@ -6,6 +6,7 @@
 
 - `AdminProvider.jsx` больше **не использует** `useState` и `useAdmin` — только формирует value и рендерит провайдер.
 - Админка рендерится через `AdminViewWithContext` в `App.jsx`, который вызывает `useAdmin` и передаёт результат в `AdminProviderWrapper` как `injectHandlers`.
+- **vite.config.js:** для React заданы `resolve.alias` и `dedupe: ['react', 'react-dom']`, чтобы везде использовался один экземпляр. После изменений нужна чистая сборка и сброс кэша (см. ниже).
 
 ## Что сделать, чтобы ошибка пропала на www.skypath.fun
 

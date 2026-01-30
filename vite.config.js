@@ -369,17 +369,14 @@ export default defineConfig(({ mode }) => {
         },
         output: {
           manualChunks(id) {
-            // Не разделяем React на отдельный chunk - оставляем в основном bundle
-            // Это предотвращает проблемы с асинхронной загрузкой React
+            // React не выносим в отдельный chunk — оставляем в entry bundle (избегаем circular chunk и двух копий React)
             if (id.includes('node_modules')) {
               if (id.includes('react') || id.includes('react-dom')) {
-                // React должен быть в основном bundle, не в отдельном chunk
                 return undefined
               }
               if (id.includes('firebase')) {
                 return 'firebase'
               }
-              // Остальные node_modules в vendor chunk
               return 'vendor'
             }
           },

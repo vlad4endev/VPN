@@ -5,15 +5,15 @@ import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { validateEnvVars, getEnvErrorMessage } from '../../shared/utils/envValidation.js'
 import logger from '../../shared/utils/logger.js'
 
-// Валидация переменных окружения при старте
-logger.info('Firebase', '🔍 Проверка конфигурации переменных окружения...')
+// Валидация переменных окружения при старте (логируем один раз)
+logger.debug('Firebase', 'Проверка конфигурации переменных окружения...')
 const envValidation = validateEnvVars()
 if (!envValidation.isValid) {
   const errorMsg = getEnvErrorMessage(envValidation)
   console.error('Ошибка конфигурации:\n', errorMsg)
   logger.error('Firebase', '❌ Ошибка конфигурации переменных окружения', { validation: envValidation })
 } else {
-  logger.info('Firebase', '✅ Конфигурация переменных окружения проверена успешно')
+  logger.debug('Firebase', 'Конфигурация переменных окружения проверена успешно')
 }
 
 // Конфигурация Firebase (будет загружаться из переменных окружения)
@@ -78,7 +78,7 @@ let firebaseInitError = null
 
 try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
-    logger.info('Firebase', '🔥 Инициализация Firebase...')
+    logger.debug('Firebase', 'Инициализация Firebase...')
     
     // Проверяем, не была ли уже инициализирована Firebase (защита от hot reload)
     try {
@@ -129,10 +129,7 @@ try {
         // В development режиме используем debug token (только для разработки)
         if (import.meta.env.DEV) {
           // В development можно использовать debug token
-          // Для этого нужно установить debug token в Firebase Console
-          logger.info('Firebase', '⚠️ App Check не настроен - используйте reCAPTCHA для production', {
-            note: 'Добавьте VITE_RECAPTCHA_SITE_KEY в .env для включения App Check'
-          })
+          logger.debug('Firebase', 'App Check не настроен (добавьте VITE_RECAPTCHA_SITE_KEY для production)', null)
         } else {
           logger.warn('Firebase', '⚠️ App Check не настроен в production - рекомендуется настроить reCAPTCHA', {
             note: 'Добавьте VITE_RECAPTCHA_SITE_KEY в .env'
@@ -149,7 +146,7 @@ try {
     googleProvider.setCustomParameters({
       prompt: 'select_account'
     })
-    logger.info('Firebase', '✅ Firebase успешно инициализирован', {
+    logger.info('Firebase', 'Firebase инициализирован', {
       projectId: firebaseConfig.projectId,
       authDomain: firebaseConfig.authDomain,
     })

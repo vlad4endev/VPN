@@ -7,10 +7,8 @@ import App from './App.jsx'
 import './index.css'
 import logger from '../shared/utils/logger.js'
 
-// Логируем старт приложения
-logger.info('App', '🚀 Приложение запускается...', {
+logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
-  userAgent: navigator.userAgent,
   logLevel: logger.getLogLevel(),
 })
 
@@ -24,5 +22,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>,
 )
 
-// Логируем успешную инициализацию
-logger.info('App', '✅ React приложение инициализировано')
+logger.debug('App', 'React приложение инициализировано')

@@ -63,33 +63,14 @@ export function useAdmin({
   const tariffsHook = useTariffs(tariffs, setTariffs, setError, setSuccess)
   const reviewsHook = useReviews(currentUser, setError, setSuccess)
 
-  // Отладочное логирование для проверки экспорта функций
-  if (import.meta.env.DEV) {
-    console.log('🔍 useAdmin: Проверка usersHook', {
-      hasHandleSaveUserCard: !!usersHook.handleSaveUserCard,
-      hasGenerateUUID: !!usersHook.generateUUID,
-      handleSaveUserCardType: typeof usersHook.handleSaveUserCard,
-      generateUUIDType: typeof usersHook.generateUUID,
-      usersHookKeys: Object.keys(usersHook),
-      usersHook: usersHook,
-    })
-  }
-  
   // Создаем стабильные функции с fallback, используя useMemo для обновления при изменении
   const safeHandleSaveUserCard = useMemo(() => {
-    console.log('🔍 useAdmin: Создание safeHandleSaveUserCard', {
-      hasUsersHook: !!usersHook,
-      hasHandleSaveUserCard: !!usersHook?.handleSaveUserCard,
-      handleSaveUserCardType: typeof usersHook?.handleSaveUserCard,
-      usersHookKeys: usersHook ? Object.keys(usersHook) : 'usersHook is null',
-    })
-    
     if (usersHook?.handleSaveUserCard && typeof usersHook.handleSaveUserCard === 'function') {
-      console.log('✅ useAdmin: Используем usersHook.handleSaveUserCard')
       return usersHook.handleSaveUserCard
     }
-    
-    console.warn('⚠️ useAdmin: handleSaveUserCard не определен, создаем fallback')
+    if (import.meta.env.DEV) {
+      console.warn('⚠️ useAdmin: handleSaveUserCard не определен, используется fallback')
+    }
     // Fallback функция
     return async (updatedUser) => {
       console.error('❌ useAdmin: handleSaveUserCard не определен в usersHook!', {
