@@ -319,12 +319,13 @@ function AdminViewWithContext({ children, adminTab, setAdminTab, ...adminProps }
 }
 
 export default function VPNServiceApp() {
-  // Инициализация view: приоритет — hash (#review, #login, #register), затем сохранённый view, иначе welcome
+  // Инициализация view: приоритет — path/hash (#review, /review, #login, #register), затем сохранённый view, иначе welcome
   const getInitialView = () => {
     try {
-      if (typeof window !== 'undefined' && window.location.hash) {
-        const hash = window.location.hash.toLowerCase()
-        if (hash === '#review') return 'review'
+      if (typeof window !== 'undefined') {
+        const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
+        const hash = (window.location.hash || '').toLowerCase()
+        if (path === '/review' || hash === '#review') return 'review'
         if (hash === '#login') return 'login'
         if (hash === '#register') return 'register'
       }
@@ -457,18 +458,23 @@ export default function VPNServiceApp() {
     }
   }, [view, currentUser])
 
-  // Синхронизация view с hash при переходе по ссылке (например на /#review)
+  // Синхронизация view с path/hash при загрузке и при переходе (/#review или /review)
   useEffect(() => {
-    const syncViewFromHash = () => {
-      if (typeof window === 'undefined' || !window.location.hash) return
-      const hash = window.location.hash.toLowerCase()
-      if (hash === '#review') setViewState('review')
+    const syncViewFromUrl = () => {
+      if (typeof window === 'undefined') return
+      const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
+      const hash = (window.location.hash || '').toLowerCase()
+      if (path === '/review' || hash === '#review') setViewState('review')
       else if (hash === '#login') setViewState('login')
       else if (hash === '#register') setViewState('register')
     }
-    syncViewFromHash()
-    window.addEventListener('hashchange', syncViewFromHash)
-    return () => window.removeEventListener('hashchange', syncViewFromHash)
+    syncViewFromUrl()
+    window.addEventListener('hashchange', syncViewFromUrl)
+    window.addEventListener('popstate', syncViewFromUrl)
+    return () => {
+      window.removeEventListener('hashchange', syncViewFromUrl)
+      window.removeEventListener('popstate', syncViewFromUrl)
+    }
   }, [])
 
   // Загрузка одобренных отзывов один раз при готовности db (для лендинга и Dashboard)
@@ -866,7 +872,18 @@ export default function VPNServiceApp() {
         // Пользователь не авторизован
         setCurrentUser(null)
         logger.info('Firebase', 'Пользователь не авторизован')
-        setView('login')
+        // Не переключать на логин, если открыта страница отзыва (/#review или /review)
+        if (typeof window !== 'undefined') {
+          const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
+          const hash = (window.location.hash || '').toLowerCase()
+          if (path === '/review' || hash === '#review') {
+            setViewState('review')
+          } else {
+            setView('login')
+          }
+        } else {
+          setView('login')
+        }
       }
       
       setLoading(false)
@@ -3575,6 +3592,11 @@ export default function VPNServiceApp() {
 
 
   // Основной рендер
+  // Страница отзыва по ссылке /#review или /review — показываем сразу, без ожидания auth/loading
+  if (view === 'review') {
+    return <PublicReviewPage onSetView={setView} />
+  }
+
   // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации
   // (ошибки конфигурации не критичны для показа экрана приветствия)
   if (view === 'welcome' && !currentUser) {
@@ -3610,11 +3632,6 @@ export default function VPNServiceApp() {
       )
     }
     return <WelcomePage onSetView={setView} reviews={welcomeReviews} />
-  }
-
-  // Отдельная страница «Оставить отзыв» по ссылке /#review — без авторизации
-  if (view === 'review') {
-    return <PublicReviewPage onSetView={setView} />
   }
 
   // Для других view показываем ошибку конфигурации

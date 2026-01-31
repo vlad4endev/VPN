@@ -122,7 +122,7 @@ export default function PublicReviewPage({ onSetView }) {
 
               <div>
                 <label htmlFor="public-review-text" className="block text-slate-400 text-sm font-medium mb-1.5">
-                  Текст отзыва <span className="text-red-400">*</span>
+                  Текст отзыва <span className="text-red-400" aria-hidden="true">*</span>
                 </label>
                 <textarea
                   id="public-review-text"
@@ -131,9 +131,11 @@ export default function PublicReviewPage({ onSetView }) {
                     setText(e.target.value)
                     setError(null)
                   }}
-                  placeholder="Напишите ваш отзыв..."
+                  placeholder="Напишите ваш отзыв (обязательно)..."
                   rows={4}
                   maxLength={3000}
+                  required
+                  aria-required="true"
                   className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
                 />
                 <p className="text-slate-600 text-xs mt-1">{text.length} / 3000</p>
@@ -147,7 +149,7 @@ export default function PublicReviewPage({ onSetView }) {
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !text.trim() || text.trim().length < 2}
                 className="w-full min-h-[48px] px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
               >
                 {submitting ? (
