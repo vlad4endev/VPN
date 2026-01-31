@@ -258,12 +258,20 @@ const LoginForm = ({
           </button>
         )}
       </div>
-        <a 
-          href="/" 
-          className="block w-full mt-8 text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline text-center"
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof onSetView === 'function') {
+              onSetView('welcome')
+            }
+            if (typeof window !== 'undefined' && (window.location.hash === '#login' || window.location.hash === '#register')) {
+              window.history.replaceState(null, '', window.location.pathname || '/')
+            }
+          }}
+          className="block w-full mt-8 text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline text-center bg-transparent border-0 cursor-pointer p-0"
         >
           Вернуться на главную
-        </a>
+        </button>
         </div>
       </div>
       <div className="max-sm:hidden">

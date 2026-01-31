@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { Shield, Globe, Check, Zap, Star, Quote } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Shield, Globe, Check, Zap, Star, Quote, ChevronLeft, ChevronRight } from 'lucide-react'
 import Footer from './Footer.jsx'
+
+/** Порог символов: показывать «Читать далее» для длинных отзывов */
+const REVIEW_EXPAND_THRESHOLD = 150
 
 /** Цены по срокам: только 12 мес со скидкой 20% */
 const TARIFFS = {
@@ -27,7 +30,27 @@ function getPrices(pricePerMonth) {
  */
 export default function WelcomePage({ onSetView, reviews = [] }) {
   const [activeTariff, setActiveTariff] = useState('Super')
+  const [expandedReviewIds, setExpandedReviewIds] = useState(() => new Set())
+  const reviewsScrollRef = useRef(null)
   const prices = getPrices(TARIFFS[activeTariff].pricePerMonth)
+
+  const toggleReviewExpanded = (id) => {
+    setExpandedReviewIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const scrollReviews = (direction) => {
+    const el = reviewsScrollRef.current
+    if (!el) return
+    const cardWidth = el.querySelector('article')?.offsetWidth ?? 320
+    const gap = 32
+    const step = (cardWidth + gap) * (direction === 'left' ? -1 : 1)
+    el.scrollBy({ left: step, behavior: 'smooth' })
+  }
   const durations = [
     { key: 1, label: '1 месяц' },
     { key: 3, label: '3 месяца' },
@@ -93,7 +116,8 @@ export default function WelcomePage({ onSetView, reviews = [] }) {
         </section>
 
         {/* Тарифы */}
-        <section className="max-w-7xl mx-auto px-6 py-20" aria-labelledby="welcome-tariffs-heading">
+        <section className="py-16 px-4 sm:px-6" aria-labelledby="welcome-tariffs-heading">
+          <div className="max-w-7xl mx-auto rounded-[2.5rem] bg-slate-900/60 border border-slate-700/80 shadow-2xl shadow-blue-900/10 px-6 sm:px-8 py-12 sm:py-16">
           <div className="text-center mb-12">
             <h2 id="welcome-tariffs-heading" className="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Тарифы</h2>
             {/* Переключатель тарифов */}
@@ -162,6 +186,37 @@ export default function WelcomePage({ onSetView, reviews = [] }) {
             <Check className="text-blue-500 shrink-0" size={20} />
             Скидка 20% при оплате на год. Выгоднее всего покупать на 12 месяцев.
           </p>
+          </div>
+        </section>
+
+        {/* Статистика: отзывы и пользователи */}
+        <section className="py-16 px-6" aria-label="Статистика">
+          <div className="max-w-5xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              {/* Пользователей */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-center hover:border-blue-500/40 transition-all">
+                <div className="text-5xl font-black text-blue-500 mb-2">200+</div>
+                <div className="text-slate-400 font-bold uppercase tracking-wider text-sm">Пользователей</div>
+              </div>
+              {/* Отзывов */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-center hover:border-blue-500/40 transition-all">
+                <div className="text-5xl font-black text-white mb-2">{reviews.length}</div>
+                <div className="text-slate-400 font-bold uppercase tracking-wider text-sm">Отзывов</div>
+              </div>
+              {/* Средняя оценка */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-center hover:border-blue-500/40 transition-all">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <span className="text-5xl font-black text-amber-400">
+                    {reviews.length > 0
+                      ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
+                      : '5.0'}
+                  </span>
+                  <Star size={32} className="text-amber-400 fill-amber-400" />
+                </div>
+                <div className="text-slate-400 font-bold uppercase tracking-wider text-sm">Средняя оценка</div>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* Локации */}
@@ -179,37 +234,81 @@ export default function WelcomePage({ onSetView, reviews = [] }) {
           </div>
         </section>
 
-        {/* Отзывы */}
+        {/* Отзывы — карусель влево/вправо, длинные тексты сворачиваются */}
         <section className="max-w-7xl mx-auto px-6 py-20" aria-labelledby="welcome-reviews-heading">
-          <div className="text-center mb-16">
+          <div className="text-center mb-12">
             <h2 id="welcome-reviews-heading" className="text-4xl lg:text-5xl font-black text-white mb-4 tracking-tighter">Оценки и Отзывы</h2>
             <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Что говорят наши пользователи</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {reviews.length > 0 ? (
-              reviews.map((review) => (
-                <article key={review.id} className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col hover:border-blue-500/40 transition-all">
-                  <div className="flex items-center gap-1 mb-4" aria-label={`Оценка ${review.rating} из 5`}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star key={star} size={20} className={star <= review.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
-                    ))}
-                  </div>
-                  <Quote size={24} className="text-blue-500/50 mb-3" aria-hidden="true" />
-                  <p className="text-slate-300 font-medium mb-6 flex-1 leading-relaxed">{review.text}</p>
-                  <footer className="flex items-center justify-between pt-4 border-t border-slate-800">
-                    <span className="font-bold text-white">{review.author}</span>
-                    {review.date && (
-                      <time className="text-slate-500 text-sm font-medium" dateTime={new Date(review.date).toISOString().slice(0, 10)}>
-                        {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </time>
-                    )}
-                  </footer>
-                </article>
-              ))
-            ) : (
-              <p className="col-span-full text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</p>
-            )}
-          </div>
+          {reviews.length > 0 ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => scrollReviews('left')}
+                aria-label="Предыдущий отзыв"
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 transition-all shadow-xl -translate-x-2 sm:translate-x-0"
+              >
+                <ChevronLeft size={24} />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollReviews('right')}
+                aria-label="Следующий отзыв"
+                className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 transition-all shadow-xl translate-x-2 sm:translate-x-0"
+              >
+                <ChevronRight size={24} />
+              </button>
+              <div
+                ref={reviewsScrollRef}
+                className="flex gap-8 overflow-x-auto overflow-y-hidden pb-4 scroll-smooth snap-x snap-mandatory scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent"
+                style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch' }}
+                role="list"
+              >
+                {reviews.map((review) => {
+                  const isExpanded = expandedReviewIds.has(review.id)
+                  const isLong = review.text.length > REVIEW_EXPAND_THRESHOLD
+                  return (
+                    <article
+                      key={review.id}
+                      className="flex-shrink-0 w-[85vw] sm:w-[400px] lg:w-[380px] snap-start bg-slate-900/50 border border-slate-800 p-6 sm:p-8 rounded-[2.5rem] flex flex-col hover:border-blue-500/40 transition-all"
+                      role="listitem"
+                    >
+                      <div className="flex items-center gap-1 mb-4" aria-label={`Оценка ${review.rating} из 5`}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star key={star} size={20} className={star <= review.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-600'} />
+                        ))}
+                      </div>
+                      <Quote size={24} className="text-blue-500/50 mb-3 flex-shrink-0" aria-hidden="true" />
+                      <p
+                        className={`text-slate-300 font-medium flex-1 leading-relaxed ${!isExpanded && isLong ? 'line-clamp-3' : ''}`}
+                      >
+                        {review.text}
+                      </p>
+                      {isLong && (
+                        <button
+                          type="button"
+                          onClick={() => toggleReviewExpanded(review.id)}
+                          className="mt-2 text-left text-blue-400 hover:text-blue-300 text-sm font-semibold transition-colors"
+                        >
+                          {isExpanded ? 'Свернуть' : 'Читать далее'}
+                        </button>
+                      )}
+                      <footer className="flex items-center justify-between pt-4 mt-auto border-t border-slate-800">
+                        <span className="font-bold text-white">{review.author}</span>
+                        {review.date && (
+                          <time className="text-slate-500 text-sm font-medium" dateTime={new Date(review.date).toISOString().slice(0, 10)}>
+                            {new Date(review.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </time>
+                        )}
+                      </footer>
+                    </article>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-center py-16 text-slate-500 font-medium">Отзывы скоро появятся здесь.</p>
+          )}
         </section>
       </main>
       <Footer />
