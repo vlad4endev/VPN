@@ -648,6 +648,67 @@ app.get('/api/vpn/health', async (req, res) => {
 })
 
 /**
+ * Публичный отзыв без авторизации
+ * POST /api/public/review
+ * Body: { author?: string, rating?: number, text: string }
+ * Отзыв сохраняется в Firestore со статусом pending и затем модерируется в админке.
+ */
+app.post('/api/public/review', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: 'Сервис отзывов временно недоступен',
+      })
+    }
+    const body = req.body || {}
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    const author = typeof body.author === 'string' ? body.author.trim().slice(0, 100) : ''
+    let rating = Number(body.rating)
+    if (!Number.isFinite(rating) || rating < 1) rating = 5
+    if (rating > 5) rating = 5
+
+    if (!text || text.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Текст отзыва обязателен (минимум 2 символа)',
+      })
+    }
+    if (text.length > 3000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Текст отзыва не более 3000 символов',
+      })
+    }
+
+    const APP_ID = process.env.APP_ID || 'skyputh'
+    const reviewsRef = db.collection(`artifacts/${APP_ID}/public/data/reviews`).doc()
+    const now = new Date().toISOString()
+    await reviewsRef.set({
+      userId: null,
+      userEmail: '',
+      author: author || 'Гость',
+      rating,
+      text,
+      status: 'pending',
+      createdAt: now,
+    })
+    console.log('✅ Публичный отзыв создан:', reviewsRef.id)
+    return res.status(200).json({
+      success: true,
+      id: reviewsRef.id,
+      message: 'Отзыв отправлен на модерацию',
+    })
+  } catch (err) {
+    console.error('❌ POST /api/public/review:', err)
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Не удалось отправить отзыв',
+    })
+  }
+})
+
+/**
  * Добавление клиента
  * POST /api/vpn/add-client
  */

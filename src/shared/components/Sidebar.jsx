@@ -22,6 +22,7 @@ const DASHBOARD_NAV_ITEMS = [
 
 const ADMIN_NAV_ITEMS = [
   { id: 'users', label: 'Пользователи', icon: Users },
+  { id: 'tickets', label: 'Тикеты', icon: MessageCircle },
   { id: 'settings', label: 'Настройки', icon: Server },
   { id: 'tariffs', label: 'Тарифы', icon: DollarSign },
   { id: 'payments', label: 'Платежи', icon: CreditCard },
@@ -79,7 +80,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
   const blockHeader = (
     <div className="mb-4 sm:mb-6 md:mb-8">
-      <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYPATH FLOW</h1>
+      <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYFLOW</h1>
       <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
         {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
       </p>
@@ -88,16 +89,28 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
   const blockSupportAndLogout = (
     <div className="border-t border-slate-800 pt-3 sm:pt-4 mt-auto flex-shrink-0 space-y-1.5">
+      <button
+        type="button"
+        onClick={() => {
+          onSetView('support')
+          setIsMenuOpen(false)
+        }}
+        className={`w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-colors touch-manipulation ${view === 'support' ? navItemClass(true) : 'text-slate-300 hover:bg-slate-800 hover:text-sky-400 active:bg-slate-700'}`}
+        aria-label="Тех. поддержка"
+        aria-selected={view === 'support'}
+      >
+        <MessageCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Тех. поддержка</span>
+      </button>
       <a
         href={SUPPORT_TELEGRAM_URL}
         target="_blank"
         rel="noopener noreferrer"
         onClick={() => setIsMenuOpen(false)}
-        className="w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-sky-400 active:bg-slate-700 transition-colors touch-manipulation"
-        aria-label="Тех. поддержка в Telegram"
+        className="w-full min-h-[40px] flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-800 hover:text-sky-400 text-sm transition-colors"
+        aria-label="Telegram"
       >
-        <MessageCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Тех. поддержка</span>
+        <span className="font-medium">Telegram</span>
       </a>
       <button
         onClick={handleLogout}

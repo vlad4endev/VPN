@@ -12,7 +12,7 @@ import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
  * @returns {Object} Объект с view и функцией setView
  */
 export function useView({ currentUser, onViewChange } = {}) {
-  // Приоритет: hash из URL (с экрана приветствия /app/#login, /app/#register) → localStorage → welcome
+  // Приоритет: hash из URL (/#login, /#register) → localStorage → welcome
   const [view, setViewState] = useState(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash?.toLowerCase()

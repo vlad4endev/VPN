@@ -11,6 +11,7 @@ import UserCard from './UserCard.jsx'
 import N8nPanel from './N8nPanel.jsx'
 import YooMoneyPanel from './YooMoneyPanel.jsx'
 import ReviewsPanel from './ReviewsPanel.jsx'
+import SupportTicketsPanel from './SupportTicketsPanel.jsx'
 import SystemMonitor from './SystemMonitor.jsx'
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
 import { logError } from '../utils/errorHandler.js'
@@ -982,6 +983,10 @@ const AdminPanel = ({
             onRejectReview={handleRejectReview}
             formatDate={formatDate}
           />
+        )}
+
+        {adminTab === 'tickets' && (
+          <SupportTicketsPanel currentUser={currentUser} />
         )}
 
         {adminTab === 'n8n' && (

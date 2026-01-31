@@ -142,10 +142,41 @@ service cloud.firestore {
       allow delete: if request.auth != null && isAdmin();
     }
     
-    // Отзывы — одобренные читают все (лендинг), создание — авторизованные, модерация — админы
+    // Тикеты техподдержки — пользователь видит только свои, админ все
+    match /artifacts/{appId}/public/data/tickets/{ticketId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.subject is string &&
+        request.resource.data.subject.size() > 0 &&
+        request.resource.data.status == 'open';
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if request.auth != null && isAdmin();
+    }
+    
+    // Сообщения в тикете — чтение/запись если есть доступ к тикету
+    match /artifacts/{appId}/public/data/tickets/{ticketId}/messages/{messageId} {
+      allow read: if request.auth != null && (
+        get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tickets/$(ticketId)).data.userId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if request.auth != null && (
+        get(/databases/$(database)/documents/artifacts/$(appId)/public/data/tickets/$(ticketId)).data.userId == request.auth.uid ||
+        isAdmin()
+      );
+      allow update, delete: if request.auth != null && isAdmin();
+    }
+    
+    // Отзывы — одобренные читают все (лендинг), свой отзыв пользователь может читать (проверка «уже оставил»), модерация — админы
     match /artifacts/{appId}/public/data/reviews/{reviewId} {
-      // Публичное чтение только одобренных; админы читают все (в т.ч. pending/rejected)
-      allow read: if resource.data.status == 'approved' || (request.auth != null && isAdmin());
+      // Чтение: одобренные — всем; свой документ (userId == uid) — автору; все — админам
+      allow read: if resource.data.status == 'approved' ||
+        (request.auth != null && isAdmin()) ||
+        (request.auth != null && resource.data.userId == request.auth.uid);
       
       // Создание: только авторизованные пользователи, только свой userId
       allow create: if request.auth != null &&

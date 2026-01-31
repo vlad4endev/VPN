@@ -33,14 +33,6 @@ export const LazyLoginForm = lazy(() =>
   import('../features/auth/components/LoginForm.jsx')
 )
 
-/**
- * Ленивая загрузка LandingPage (главная страница)
- * Размер: ~30-50 KB
- */
-export const LazyLandingPage = lazy(() => 
-  import('../shared/components/LandingPage.jsx')
-)
-
 // ============================================
 // Модальные окна и панели
 // ============================================

@@ -135,6 +135,24 @@ export const reviewsService = {
   },
 
   /**
+   * Отправить отзыв без авторизации (через API бэкенда).
+   * Отзыв уходит на модерацию и после одобрения отображается в панели отзывов.
+   * @param {{ author?: string, rating?: number, text: string }} payload
+   * @returns {Promise<{ id: string, message?: string }>}
+   */
+  async submitPublicReview({ author, rating, text }) {
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/public/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: author || '', rating: rating ?? 5, text: String(text || '').trim() }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'Не удалось отправить отзыв')
+    return data
+  },
+
+  /**
    * Обновить статус отзыва (модерация)
    */
   async updateReviewStatus(reviewId, status, moderatedBy) {

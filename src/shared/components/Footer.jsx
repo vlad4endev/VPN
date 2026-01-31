@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Send, BookOpen, FileText, Shield } from 'lucide-react'
+import { Send, BookOpen, FileText, FileCheck, Shield } from 'lucide-react'
 import PrivacyPolicyModal from './PrivacyPolicyModal.jsx'
+import UserAgreementModal from './UserAgreementModal.jsx'
 
 const TELEGRAM_URL = 'https://t.me/+M3Wd-rkrqytmMTg6'
 const KNOWLEDGE_BASE_URL = '#'
@@ -15,6 +16,7 @@ const linkClass =
  */
 export default function Footer() {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false)
+  const [showAgreementModal, setShowAgreementModal] = useState(false)
 
   return (
     <>
@@ -22,7 +24,7 @@ export default function Footer() {
         <div className="max-w-[90rem] mx-auto px-4 sm:px-6 py-6 sm:py-8">
           <div className="flex flex-col items-center gap-4 sm:gap-5 text-center">
             <p className="text-slate-500 font-bold text-[clamp(0.8rem,0.75rem+0.25vw,0.95rem)] tracking-wide">
-              SKYPATH FLOW | 2026
+              SKYFLOW | 2026
             </p>
             <nav className="flex flex-wrap items-center justify-center gap-x-4 sm:gap-x-6 gap-y-2" aria-label="Подвал">
               <a
@@ -30,15 +32,24 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={linkClass}
-                aria-label="Telegram-канал SKYPATH FLOW — Лучший в России"
+                aria-label="Telegram-канал SKYFLOW — Лучший в России"
               >
                 <Send className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>SKYPATH FLOW | Лучший в России</span>
+                <span>SKYFLOW | Лучший в России</span>
               </a>
               <a href={KNOWLEDGE_BASE_URL} className={linkClass} aria-label="База знаний">
                 <BookOpen className="w-4 h-4 flex-shrink-0" aria-hidden />
                 <span>База знаний</span>
               </a>
+              <button
+                type="button"
+                onClick={() => setShowAgreementModal(true)}
+                className={linkClass + ' bg-transparent border-none cursor-pointer'}
+                aria-label="Пользовательское соглашение"
+              >
+                <FileCheck className="w-4 h-4 flex-shrink-0" aria-hidden />
+                <span>Пользовательское соглашение</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(true)}
@@ -58,6 +69,7 @@ export default function Footer() {
       </footer>
 
       <PrivacyPolicyModal isOpen={showPrivacyModal} onClose={() => setShowPrivacyModal(false)} />
+      <UserAgreementModal isOpen={showAgreementModal} onClose={() => setShowAgreementModal(false)} />
     </>
   )
 }

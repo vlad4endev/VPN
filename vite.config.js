@@ -363,10 +363,7 @@ export default defineConfig(({ mode }) => {
     build: {
       chunkSizeWarningLimit: 1400,
       rollupOptions: {
-        input: {
-          main: path.resolve(__dirname, 'index.html'),
-          app: path.resolve(__dirname, 'app/index.html'),
-        },
+        input: path.resolve(__dirname, 'index.html'),
         output: {
           manualChunks(id) {
             // React не выносим в отдельный chunk — оставляем в entry bundle (избегаем circular chunk и двух копий React)

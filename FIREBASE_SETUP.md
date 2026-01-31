@@ -1,4 +1,4 @@
-# 🔥 Настройка Firebase для SKYPATH FLOW
+# 🔥 Настройка Firebase для SKYFLOW
 
 ## ⚠️ Важно
 

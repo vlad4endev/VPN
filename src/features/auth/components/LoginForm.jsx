@@ -45,7 +45,7 @@ const LoginForm = ({
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-[3rem] p-10 shadow-2xl backdrop-blur-xl">
       <div className="text-center mb-10">
         <h2 className="text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? 'Вход' : 'Регистрация'}</h2>
-        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYPATH FLOW System</p>
+        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYFLOW System</p>
         </div>
 
         {error && (
@@ -159,7 +159,7 @@ const LoginForm = ({
                 <div className="min-h-0 overflow-hidden">
                   <div className="space-y-3 p-4 pt-0 border-t border-slate-800">
                     <p className="text-slate-400 text-[13px] leading-relaxed">
-                      Я, пользователь, даю своё добровольное согласие <strong className="text-slate-300">SKYPATH FLOW</strong> на обработку моих персональных данных, включая:
+                      Я, пользователь, даю своё добровольное согласие <strong className="text-slate-300">SKYFLOW</strong> на обработку моих персональных данных, включая:
                     </p>
                     <ul className="list-disc list-inside text-slate-500 text-[13px] space-y-0.5 ml-1">
                       <li>контактную информацию (e-mail, телефон);</li>
@@ -182,7 +182,7 @@ const LoginForm = ({
                         onClick={() => setShowPrivacyModal(true)}
                         className="text-blue-400 hover:text-blue-300 underline focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded"
                       >
-                        Политикой конфиденциальности SKYPATH FLOW
+                        Политикой конфиденциальности SKYFLOW
                       </button>
                       {' '}и согласен с условиями обработки моих персональных данных.
                     </p>

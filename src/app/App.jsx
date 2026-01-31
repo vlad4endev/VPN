@@ -20,6 +20,8 @@ import LoginForm from '../features/auth/components/LoginForm.jsx'
 import Dashboard from '../features/dashboard/components/Dashboard.jsx'
 import AdminPanel from '../features/admin/components/AdminPanel.jsx'
 import FinancesDashboard from '../features/admin/components/FinancesDashboard.jsx'
+import SupportView from '../features/support/components/SupportView.jsx'
+import PublicReviewPage from '../features/reviews/components/PublicReviewPage.jsx'
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
 import SidebarNav from '../shared/components/Sidebar.jsx'
 import Footer from '../shared/components/Footer.jsx'
@@ -277,7 +279,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
       <div className="bg-blue-600 p-2.5 rounded-2xl">
         <Shield className="text-white" size={24} />
       </div>
-      <span className="text-2xl font-black tracking-tighter text-white italic">SKYPATH FLOW</span>
+      <span className="text-2xl font-black tracking-tighter text-white italic">SKYFLOW</span>
     </div>
     <nav className="space-y-2 flex-1">
       <button 
@@ -317,13 +319,18 @@ function AdminViewWithContext({ children, adminTab, setAdminTab, ...adminProps }
 }
 
 export default function VPNServiceApp() {
-  // Инициализация view: при первом заходе всегда страница приветствия, иначе — сохранённый view
+  // Инициализация view: приоритет — hash (#review, #login, #register), затем сохранённый view, иначе welcome
   const getInitialView = () => {
     try {
+      if (typeof window !== 'undefined' && window.location.hash) {
+        const hash = window.location.hash.toLowerCase()
+        if (hash === '#review') return 'review'
+        if (hash === '#login') return 'login'
+        if (hash === '#register') return 'register'
+      }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUser = localStorage.getItem('vpn_current_user')
-      // Если есть сохранённый пользователь и view (кабинет/админка), восстанавливаем их
-      if (savedView && savedUser && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome') {
+      if (savedView && savedUser && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome' && savedView !== 'review') {
         return savedView
       }
     } catch (err) {
@@ -356,7 +363,7 @@ export default function VPNServiceApp() {
   // Обертка для setView с сохранением в localStorage
   const setView = useCallback((newView) => {
     setViewState(newView)
-    if (newView && newView !== 'welcome' && newView !== 'login' && newView !== 'register') {
+    if (newView && newView !== 'welcome' && newView !== 'login' && newView !== 'register' && newView !== 'review') {
       try {
         localStorage.setItem('vpn_current_view', newView)
         console.log('💾 View сохранен в localStorage:', newView)
@@ -449,6 +456,20 @@ export default function VPNServiceApp() {
       }
     }
   }, [view, currentUser])
+
+  // Синхронизация view с hash при переходе по ссылке (например на /#review)
+  useEffect(() => {
+    const syncViewFromHash = () => {
+      if (typeof window === 'undefined' || !window.location.hash) return
+      const hash = window.location.hash.toLowerCase()
+      if (hash === '#review') setViewState('review')
+      else if (hash === '#login') setViewState('login')
+      else if (hash === '#register') setViewState('register')
+    }
+    syncViewFromHash()
+    window.addEventListener('hashchange', syncViewFromHash)
+    return () => window.removeEventListener('hashchange', syncViewFromHash)
+  }, [])
 
   // Загрузка одобренных отзывов один раз при готовности db (для лендинга и Dashboard)
   useEffect(() => {
@@ -3591,6 +3612,11 @@ export default function VPNServiceApp() {
     return <WelcomePage onSetView={setView} reviews={welcomeReviews} />
   }
 
+  // Отдельная страница «Оставить отзыв» по ссылке /#review — без авторизации
+  if (view === 'review') {
+    return <PublicReviewPage onSetView={setView} />
+  }
+
   // Для других view показываем ошибку конфигурации
   if (configError) {
     return <ConfigErrorScreen configError={configError} />
@@ -3653,6 +3679,25 @@ export default function VPNServiceApp() {
           </div>
         </div>
       </div>
+    )
+  }
+
+  // Раздел «Тех. поддержка» — тикеты для всех авторизованных
+  if (view === 'support') {
+    if (!currentUser) {
+      setView('login')
+      return null
+    }
+    return (
+      <SupportView
+        currentUser={currentUser}
+        onSetView={setView}
+        onLogout={handleLogout}
+        dashboardTab={dashboardTab}
+        onSetDashboardTab={setDashboardTab}
+        adminTab={adminTab}
+        onSetAdminTab={setAdminTab}
+      />
     )
   }
 
