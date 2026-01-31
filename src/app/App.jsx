@@ -5,7 +5,9 @@ import {
   signInWithPopup,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  getAuth,
+  GoogleAuthProvider
 } from 'firebase/auth'
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
@@ -1363,9 +1365,9 @@ export default function VPNServiceApp() {
     }
   }, [auth, db, generateUniqueSubId])
 
-  // Вход через Google: используем redirect вместо popup — обходит COOP и блокировку всплывающих окон
+  // Вход через Google: auth и provider создаём из того же firebase/auth, что и signInWithPopup (избегаем auth/argument-error при дублировании модуля)
   const handleGoogleSignIn = useCallback(async () => {
-    if (!auth || !db || !googleProvider) {
+    if (!app || !db) {
       setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
       return
     }
@@ -1378,7 +1380,10 @@ export default function VPNServiceApp() {
     setGoogleSignInLoading(true)
     try {
       logger.info('Auth', 'Открытие окна входа через Google')
-      const result = await signInWithPopup(auth, googleProvider)
+      const authInstance = getAuth(app)
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const result = await signInWithPopup(authInstance, provider)
       const firebaseUser = result.user
       let userData = await loadUserData(firebaseUser.uid)
       if (!userData) {
@@ -1447,6 +1452,8 @@ export default function VPNServiceApp() {
           errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
         } else if (err?.code === 'auth/operation-not-allowed') {
           errorMessage = 'Вход через Google не включен. Обратитесь к администратору.'
+        } else if (err?.code === 'auth/argument-error') {
+          errorMessage = 'Ошибка инициализации входа через Google. Обновите страницу и попробуйте снова.'
         } else if (err?.message) {
           errorMessage = 'Ошибка входа через Google: ' + err.message
         }
@@ -1455,7 +1462,7 @@ export default function VPNServiceApp() {
     } finally {
       setGoogleSignInLoading(false)
     }
-  }, [auth, db, googleProvider, loadUserData, generateUniqueSubId])
+  }, [app, db, loadUserData, generateUniqueSubId])
 
   // Обработка выхода
   const handleLogout = useCallback(async () => {
