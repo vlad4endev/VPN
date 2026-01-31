@@ -12,7 +12,7 @@ import {
   GoogleAuthProvider
 } from 'firebase/auth'
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
-import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Info, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
+import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
 import axios from 'axios'
 // bcrypt больше не нужен - используем Firebase Auth
 import ThreeXUI from '../features/vpn/services/ThreeXUI.js' // Используется только для утилит (generateUUID, generateSubId)
@@ -291,15 +291,6 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
         className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-bold ${view === 'dashboard' || view === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800/50'}`}
       >
         <Activity size={20} /> <span>{currentUser.role === 'admin' ? 'Управление' : 'Кабинет'}</span>
-      </button>
-      <button
-        onClick={() => {
-          onSetView('welcome')
-          setTimeout(() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
-        }}
-        className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-bold text-slate-400 hover:bg-slate-800/50"
-      >
-        <Info size={20} /> <span>О сервисе</span>
       </button>
     </nav>
     <button 
@@ -3920,7 +3911,6 @@ export default function VPNServiceApp() {
         onSetShowLogger={setShowLogger}
         onGetKey={handleGetKey}
         servers={servers}
-        welcomeReviews={welcomeReviews}
       />
     )
   }

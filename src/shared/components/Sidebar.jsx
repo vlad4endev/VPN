@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Info, Star } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Star } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
@@ -70,12 +70,6 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   const handleLogout = () => {
     onLogout()
     setIsMenuOpen(false)
-  }
-
-  const handleAboutClick = () => {
-    onSetView('welcome')
-    setIsMenuOpen(false)
-    setTimeout(() => document.getElementById('welcome-reviews-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
   }
 
   const blockHeader = (
@@ -157,15 +151,6 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
         <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
       </button>
-      <button
-        onClick={handleAboutClick}
-        className={navItemClass(view === 'welcome')}
-        aria-label="О сервисе"
-        aria-selected={view === 'welcome'}
-      >
-        <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>
-      </button>
     </nav>
   )
 
@@ -225,15 +210,6 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         >
           <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
-        </button>
-        <button
-          onClick={handleAboutClick}
-          className={navItemClass(view === 'welcome')}
-          aria-label="О сервисе"
-          aria-selected={view === 'welcome'}
-        >
-          <Info size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">О сервисе</span>
         </button>
         {hasDashboardTabs && (
           <div className="space-y-0.5 sm:space-y-1">
