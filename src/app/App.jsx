@@ -1445,8 +1445,13 @@ export default function VPNServiceApp() {
       setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
       logger.info('Auth', 'Успешный вход через Google (popup)', { email: firebaseUser.email, uid: firebaseUser.uid, role: effectiveRole })
     } catch (err) {
-      logger.error('Auth', 'Ошибка входа через Google', null, err)
-      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+      const isUserClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request'
+      if (isUserClosed) {
+        logger.debug('Auth', 'Вход через Google отменён пользователем (popup закрыт)')
+      } else {
+        logger.error('Auth', 'Ошибка входа через Google', null, err)
+      }
+      if (!isUserClosed) {
         let errorMessage = 'Ошибка входа через Google. Попробуйте ещё раз.'
         if (err?.code === 'auth/network-request-failed') {
           errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
