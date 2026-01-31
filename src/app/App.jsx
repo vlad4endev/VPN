@@ -3,6 +3,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   onAuthStateChanged,
   updateProfile,
@@ -1365,27 +1367,9 @@ export default function VPNServiceApp() {
     }
   }, [auth, db, generateUniqueSubId])
 
-  // Вход через Google: auth и provider создаём из того же firebase/auth, что и signInWithPopup (избегаем auth/argument-error при дублировании модуля)
-  const handleGoogleSignIn = useCallback(async () => {
-    if (!app || !db) {
-      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
-      return
-    }
-    if (googleSignInLoading) {
-      logger.warn('Auth', 'Попытка входа через Google, когда уже выполняется вход')
-      return
-    }
-    setError('')
-    setSuccess('')
-    setGoogleSignInLoading(true)
-    try {
-      logger.info('Auth', 'Открытие окна входа через Google')
-      const authInstance = getAuth(app)
-      const provider = new GoogleAuthProvider()
-      provider.setCustomParameters({ prompt: 'select_account' })
-      const result = await signInWithPopup(authInstance, provider)
-      const firebaseUser = result.user
-      let userData = await loadUserData(firebaseUser.uid)
+  // Общая обработка успешного входа через Google (popup или redirect)
+  const processGoogleSignInUser = useCallback(async (firebaseUser) => {
+    let userData = await loadUserData(firebaseUser.uid)
       if (!userData) {
         logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { uid: firebaseUser.uid, email: firebaseUser.email })
         const generatedUUID = ThreeXUI.generateUUID()
@@ -1443,7 +1427,29 @@ export default function VPNServiceApp() {
       setCurrentUser(currentUserData)
       setSuccess('Вход выполнен успешно')
       setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-      logger.info('Auth', 'Успешный вход через Google (popup)', { email: firebaseUser.email, uid: firebaseUser.uid, role: effectiveRole })
+      logger.info('Auth', 'Успешный вход через Google', { email: firebaseUser.email, uid: firebaseUser.uid, role: effectiveRole })
+  }, [db, loadUserData, generateUniqueSubId])
+
+  // Вход через Google (popup): auth и provider создаём из того же firebase/auth (избегаем auth/argument-error при дублировании модуля)
+  const handleGoogleSignIn = useCallback(async () => {
+    if (!app || !db) {
+      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      return
+    }
+    if (googleSignInLoading) {
+      logger.warn('Auth', 'Попытка входа через Google, когда уже выполняется вход')
+      return
+    }
+    setError('')
+    setSuccess('')
+    setGoogleSignInLoading(true)
+    try {
+      logger.info('Auth', 'Открытие окна входа через Google')
+      const authInstance = getAuth(app)
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const result = await signInWithPopup(authInstance, provider)
+      await processGoogleSignInUser(result.user)
     } catch (err) {
       const isUserClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request'
       if (isUserClosed) {
@@ -1459,6 +1465,9 @@ export default function VPNServiceApp() {
           errorMessage = 'Вход через Google не включен. Обратитесь к администратору.'
         } else if (err?.code === 'auth/argument-error') {
           errorMessage = 'Ошибка инициализации входа через Google. Обновите страницу и попробуйте снова.'
+        } else if (err?.code === 'auth/unauthorized-domain' || (err?.message && /requested action is invalid|invalid.*action/i.test(err.message))) {
+          const origin = typeof window !== 'undefined' ? window.location.origin : ''
+          errorMessage = `Вход через Google недоступен для этого сайта. Добавьте в Google Cloud Console (OAuth 2.0 → Authorized JavaScript origins) адрес: ${origin || 'ваш домен'}. Или нажмите «Войти через переход» ниже.`
         } else if (err?.message) {
           errorMessage = 'Ошибка входа через Google: ' + err.message
         }
@@ -1467,7 +1476,47 @@ export default function VPNServiceApp() {
     } finally {
       setGoogleSignInLoading(false)
     }
-  }, [app, db, loadUserData, generateUniqueSubId])
+  }, [app, db, processGoogleSignInUser, googleSignInLoading])
+
+  // Вход через Google через переход на страницу Google (обход ошибки «The requested action is invalid» при popup)
+  const handleGoogleSignInRedirect = useCallback(() => {
+    if (!app || !db) {
+      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      return
+    }
+    if (googleSignInLoading) return
+    setError('')
+    setSuccess('')
+    setGoogleSignInLoading(true)
+    const authInstance = getAuth(app)
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
+    signInWithRedirect(authInstance, provider)
+    // Страница перенаправится на Google, после входа вернётся сюда — результат обработает getRedirectResult
+  }, [app, db, googleSignInLoading])
+
+  // Обработка возврата после входа через Google (redirect)
+  useEffect(() => {
+    if (!auth) return
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!result?.user) return
+        setGoogleSignInLoading(true)
+        try {
+          await processGoogleSignInUser(result.user)
+          setSuccess('Вход выполнен успешно')
+        } catch (err) {
+          logger.error('Auth', 'Ошибка после возврата с Google (redirect)', null, err)
+          setError(err?.message || 'Ошибка входа через Google.')
+        } finally {
+          setGoogleSignInLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/unauthorized-domain') return
+        logger.error('Auth', 'getRedirectResult', null, err)
+      })
+  }, [auth, processGoogleSignInUser])
 
   // Обработка выхода
   const handleLogout = useCallback(async () => {
@@ -3679,6 +3728,7 @@ export default function VPNServiceApp() {
         onLogin={handleLogin}
         onRegister={handleRegister}
         onGoogleSignIn={handleGoogleSignIn}
+        onGoogleSignInRedirect={handleGoogleSignInRedirect}
         googleSignInLoading={googleSignInLoading}
         onSetView={setView}
       />

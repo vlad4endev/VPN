@@ -36,6 +36,20 @@
 4. Укажите **"Project support email"** (ваш email)
 5. Нажмите **"Save"**
 
+### Шаг 4.1: Добавьте домен в OAuth (обязательно для Google Sign-In)
+
+Если при входе через Google появляется **"The requested action is invalid"** или **"Access blocked"**:
+
+1. Откройте **Google Cloud Console**: https://console.cloud.google.com
+2. Выберите проект, совпадающий с вашим Firebase-проектом (например, `skypathvpn`)
+3. Меню **APIs & Services** → **Credentials**
+4. В разделе **OAuth 2.0 Client IDs** найдите клиент типа **Web application** (его создаёт Firebase при включении Google Sign-In)
+5. Нажмите на него и в **Authorized JavaScript origins** добавьте **точно** ваш адрес сайта:
+   - Для продакшена: `https://www.skypath.fun` и при необходимости `https://skypath.fun`
+   - Для локальной разработки: `http://localhost:5173` (или порт, на котором запущен dev-сервер)
+6. В **Authorized redirect URIs** обычно уже есть `https://<project-id>.firebaseapp.com/__/auth/handler` — не удаляйте его
+7. Нажмите **Save**. Изменения могут примениться с задержкой 1–5 минут
+
 ### Шаг 5: Настройте правила безопасности Firestore
 
 1. Перейдите в **"Firestore Database"** → **"Rules"**
@@ -126,6 +140,11 @@ service cloud.firestore {
 ### Ошибка: "permission-denied"
 - ✅ Проверьте правила безопасности Firestore (Шаг 5)
 - ✅ Убедитесь, что пользователь авторизован через Firebase Auth
+
+### Ошибка: "The requested action is invalid" или "Access blocked" (Google Sign-In)
+- ✅ Добавьте **Authorized JavaScript origins** в Google Cloud Console (см. **Шаг 4.1** выше)
+- ✅ Укажите точный адрес: с `https://` или `http://`, с `www` или без — так, как открываете сайт в браузере
+- ✅ Подождите 1–5 минут после сохранения настроек
 
 ### Ошибка: "auth/popup-blocked" (для Google Sign-In)
 - ✅ Разрешите всплывающие окна в браузере

@@ -16,6 +16,7 @@ const LoginForm = ({
   onLogin,
   onRegister,
   onGoogleSignIn,
+  onGoogleSignInRedirect,
   googleSignInLoading,
   onSetView
 }) => {
@@ -246,6 +247,16 @@ const LoginForm = ({
           </svg>
           {googleSignInLoading ? 'Вход...' : 'Войти через Google'}
         </button>
+        {onGoogleSignInRedirect && (
+          <button
+            type="button"
+            onClick={onGoogleSignInRedirect}
+            disabled={googleSignInLoading}
+            className="w-full mt-2 text-slate-500 hover:text-sky-400 text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            Не открывается окно? Войти через переход на страницу Google
+          </button>
+        )}
       </div>
         <a 
           href="/" 
