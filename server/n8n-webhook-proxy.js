@@ -652,13 +652,18 @@ app.get('/api/vpn/health', async (req, res) => {
  * POST /api/public/review
  * Body: { author?: string, rating?: number, text: string }
  * Отзыв сохраняется в Firestore со статусом pending и затем модерируется в админке.
+ * Требуется Firebase Admin: FIREBASE_PROJECT_ID + FIREBASE_SERVICE_ACCOUNT_KEY (или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY).
  */
 app.post('/api/public/review', async (req, res) => {
   try {
     if (!db) {
+      await initFirebaseAdmin()
+    }
+    if (!db) {
+      console.warn('⚠️ POST /api/public/review: Firestore недоступен (настройте Firebase Admin в .env)')
       return res.status(503).json({
         success: false,
-        error: 'Сервис отзывов временно недоступен',
+        error: 'Сервис отзывов временно недоступен. Обратитесь к администратору.',
       })
     }
     const body = req.body || {}

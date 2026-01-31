@@ -1,0 +1,6 @@
+{
+  "redirects": [
+    { "source": "/review", "destination": "/#review", "permanent": false },
+    { "source": "/review/", "destination": "/#review", "permanent": false }
+  ]
+}

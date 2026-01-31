@@ -107,6 +107,15 @@ server {
         block-all-mixed-content;
     " always;
     
+    # ========== SPA: страница отзывов без авторизации ==========
+    # Редирект /review -> /#review, чтобы приложение показало форму отзыва (не страницу авторизации)
+    location = /review {
+        return 302 $scheme://$host/#review;
+    }
+    location = /review/ {
+        return 302 $scheme://$host/#review;
+    }
+
     # ========== Проксирование на Express ==========
     location / {
         proxy_pass http://localhost:3001;

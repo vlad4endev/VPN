@@ -1,0 +1,3 @@
+# Netlify: редирект /review -> /#review (страница отзыва без авторизации)
+/review  /#review  302
+/review/ /#review  302

@@ -83,6 +83,14 @@
     </script>
   </head>
   <body class="min-h-screen bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
+    <script>
+      (function() {
+        var path = (window.location.pathname || '').replace(/\/+$/, '');
+        if (path.toLowerCase() === '/review' && !window.location.hash) {
+          window.location.replace(window.location.pathname.replace(/\/review\/?$/i, '/') + '#review');
+        }
+      })();
+    </script>
     <div id="root">
       <noscript>
         <h1 class="text-2xl font-bold text-white p-8">SKYFLOW</h1>
