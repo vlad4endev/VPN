@@ -2,9 +2,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Вспомогательная функция для проверки, является ли пользователь админом
+    // ОБНОВЛЕНО: Проверяем кастомный claim 'admin' в токене Firebase Auth
+    // Если claim отсутствует или не равен true - доступ запрещен
+    function isAdmin() {
+      return request.auth != null && 
+        request.auth.token.admin == true;
+    }
+    
+    // Вспомогательная функция для проверки админа через Firestore (fallback)
     // ОПТИМИЗИРОВАНО: Используем exists() для проверки существования документа перед get()
     // Это уменьшает количество операций чтения
-    function isAdmin() {
+    function isAdminFromFirestore() {
       return request.auth != null && 
         exists(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'admin';
@@ -43,8 +51,12 @@ service cloud.firestore {
     
     // Пользователи - только свой документ или админы могут читать/писать все
     match /artifacts/{appId}/public/data/users_v4/{userId} {
-      // Чтение: только свой документ или админы
-      allow read: if request.auth != null && (isOwner(userId) || isAdmin());
+      // Чтение: только свой документ или админы с кастомным claim
+      // ВАЖНО: Для чтения других пользователей требуется кастомный claim admin: true
+      allow read: if request.auth != null && (
+        isOwner(userId) || 
+        (isAdmin() && request.auth.token.admin == true)
+      );
       
       // Создание: только аутентифицированные пользователи могут создавать свой документ
       // ВАЛИДАЦИЯ: Проверяем обязательные поля и их формат

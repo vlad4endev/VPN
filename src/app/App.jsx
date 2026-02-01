@@ -598,6 +598,13 @@ export default function VPNServiceApp() {
       }
       return null
     } catch (err) {
+      // Обработка permission-denied (отсутствует admin claim)
+      if (err.code === 'permission-denied') {
+        logger.error('Auth', 'Нет доступа к данным пользователя: отсутствует custom claim admin: true', { uid }, err)
+        setError('Нет доступа к базе данных. У вас отсутствуют необходимые права администратора (custom claim admin: true). Обратитесь к администратору системы.')
+        return null
+      }
+      
       // Обработка офлайн-режима Firebase
       if (err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')) {
         logger.warn('Auth', 'Firebase офлайн, пытаемся загрузить из кеша localStorage', { uid })
@@ -731,6 +738,20 @@ export default function VPNServiceApp() {
                 // Не блокируем загрузку из-за ошибки уведомлений
               }
             }, 2000) // Задержка 2 секунды, чтобы не показывать запрос сразу при загрузке
+            
+            // Проверяем, был ли вход через Google (по провайдеру)
+            const isGoogleSignIn = firebaseUser.providerData?.some((p) => p.providerId === 'google.com')
+            
+            // Если это Google-авторизация и мы на странице логина/регистрации - перенаправляем на dashboard
+            if (isGoogleSignIn && (view === 'login' || view === 'register' || view === 'welcome')) {
+              logger.info('Auth', 'Google-авторизация завершена, перенаправление на /dashboard', { 
+                uid: firebaseUser.uid, 
+                role: effectiveRole 
+              })
+              // Используем location.replace для перенаправления без добавления в историю
+              window.location.replace('/dashboard')
+              return
+            }
             
             // Устанавливаем правильный view после загрузки пользователя
             const savedView = localStorage.getItem('vpn_current_view')
@@ -1415,10 +1436,20 @@ export default function VPNServiceApp() {
         name: firebaseUser.displayName || userData.name || '',
         role: effectiveRole,
       }
+      
+      // Добавляем задержку 300 мс для стабилизации Firestore-канала перед закрытием сессии
+      logger.debug('Auth', 'Ожидание стабилизации Firestore-канала (300 мс)', { uid: firebaseUser.uid })
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
       setCurrentUser(currentUserData)
       setSuccess('Вход выполнен успешно')
-      setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-      logger.info('Auth', 'Успешный вход через Google', { email: firebaseUser.email, uid: firebaseUser.uid, role: effectiveRole })
+      
+      // Не устанавливаем view сразу - ждём onAuthStateChanged для перенаправления
+      logger.info('Auth', 'Успешный вход через Google, ожидание onAuthStateChanged для перенаправления', { 
+        email: firebaseUser.email, 
+        uid: firebaseUser.uid, 
+        role: effectiveRole 
+      })
   }, [db, loadUserData, generateUniqueSubId])
 
   // Вход через Google (popup): auth и provider создаём из того же firebase/auth (избегаем auth/argument-error при дублировании модуля)

@@ -351,13 +351,18 @@ export const authService = {
       'auth/account-exists-with-different-credential': 'Аккаунт с таким email уже существует. Используйте другой способ входа.',
       'auth/cancelled-popup-request': null, // Не показываем ошибку, пользователь отменил
       'auth/popup-closed-by-user': null, // Не показываем ошибку, пользователь закрыл
-      'permission-denied': 'Нет доступа к базе данных. Проверьте правила безопасности Firestore.',
+      'permission-denied': 'Нет доступа к базе данных. У вас отсутствуют необходимые права администратора (custom claim admin: true). Обратитесь к администратору системы.',
       'unavailable': 'Сервис временно недоступен. Попробуйте позже.',
     }
     
     // Специальная обработка для отмененных операций
     if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
       return null // Возвращаем null, чтобы не показывать ошибку
+    }
+    
+    // Специальная обработка для permission-denied с проверкой на отсутствие admin claim
+    if (error.code === 'permission-denied') {
+      return errorMessages['permission-denied']
     }
     
     return errorMessages[error.code] || error.message || 'Произошла ошибка. Попробуйте еще раз.'
