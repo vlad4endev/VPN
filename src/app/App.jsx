@@ -314,15 +314,13 @@ function AdminViewWithContext({ children, adminTab, setAdminTab, ...adminProps }
 }
 
 export default function VPNServiceApp() {
-  // Инициализация view: приоритет — path/hash (#review, /review, #login, #register), затем сохранённый view, иначе welcome
+  // Инициализация view: при переходе на сайт всегда welcome, затем таймер или кнопка — login
   const getInitialView = () => {
     try {
       if (typeof window !== 'undefined') {
         const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
         const hash = (window.location.hash || '').toLowerCase()
         if (path === '/review' || hash === '#review') return 'review'
-        if (hash === '#login') return 'login'
-        if (hash === '#register') return 'register'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUser = localStorage.getItem('vpn_current_user')
@@ -453,15 +451,13 @@ export default function VPNServiceApp() {
     }
   }, [view, currentUser])
 
-  // Синхронизация view с path/hash при загрузке и при переходе (/#review или /review)
+  // Синхронизация view с path/hash — только #review (login/register игнорируются для приоритета welcome)
   useEffect(() => {
     const syncViewFromUrl = () => {
       if (typeof window === 'undefined') return
       const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
-      else if (hash === '#login') setViewState('login')
-      else if (hash === '#register') setViewState('register')
     }
     syncViewFromUrl()
     window.addEventListener('hashchange', syncViewFromUrl)
