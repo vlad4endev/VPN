@@ -78,19 +78,18 @@ const Dashboard = ({
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
   
-  // Проверяем наличие активной подписки
-  // Показываем подписку если:
-  // 1. Есть UUID и tariffId И (подписка активна ИЛИ тестовый период ИЛИ неоплаченная но не прошло 5 дней)
-  // ВАЖНО: Используем subscription.status вместо paymentStatus
+  // Показываем блок подписки, если есть ключ и тариф, и статус не «окончательно истёк»
+  // active до конца срока, expiring_soon (< 2 дней), grace (5 дней после просрочки), затем expired — только тогда «нет подписки»
   const hasSubscription = currentUser?.uuid && currentUser?.tariffId && (
     subscriptionStatus === 'active' ||
     subscriptionStatus === 'test_period' ||
     subscriptionStatus === 'activating' ||
+    subscriptionStatus === 'expiring_soon' ||
+    subscriptionStatus === 'grace' ||
     (subscriptionStatus === 'expired' && (() => {
-      // Для обратной совместимости: проверяем unpaidStartDate если subscription не загружена
       if (!subscription && currentUser?.unpaidStartDate) {
         const daysUnpaid = (Date.now() - new Date(currentUser.unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000)
-        return daysUnpaid < 5 // Показываем если не прошло 5 дней
+        return daysUnpaid < 5
       }
       return false
     })())
@@ -1913,6 +1912,7 @@ const Dashboard = ({
                         )}
                         <div className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg ${userStatus.color} font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]`}>
                           {userStatus.status === 'active' && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                          {(userStatus.status === 'expiring_soon' || userStatus.status === 'grace') && <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
                           {userStatus.status === 'expired' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
                           {userStatus.status === 'unpaid' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
                           {userStatus.status === 'test_period' && <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
@@ -2027,6 +2027,114 @@ const Dashboard = ({
 
                     {/* Компактные предупреждения */}
                     <div className="space-y-2 sm:space-y-2.5">
+                      {/* Подписка истекает через X дней — показываем блок и кнопку «Продлить» */}
+                      {userStatus.status === 'expiring_soon' && currentUser?.expiresAt && (
+                        <div className="p-2.5 sm:p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-yellow-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+                                  Подписка истекает через {timeRemaining?.days != null ? (timeRemaining.days === 0 ? 'менее дня' : `${timeRemaining.days} ${timeRemaining.days === 1 ? 'день' : timeRemaining.days < 5 ? 'дня' : 'дней'}`) : '2 дня'}
+                                </p>
+                                <p className="text-yellow-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
+                                  До {formatDate(currentUser.expiresAt)}. Продлите, чтобы не потерять доступ.
+                                </p>
+                              </div>
+                              {onHandleRenewSubscription && (
+                                <button
+                                  onClick={async () => {
+                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+                                    setPaymentProcessingMessage('Бухгалтер создает платежку')
+                                    setShowPaymentProcessing(true)
+                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
+                                      setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+                                      paymentProcessingMessageTimerRef.current = null
+                                    }, 3000)
+                                    try {
+                                      const result = await onHandleRenewSubscription()
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
+                                      setShowPaymentProcessing(false)
+                                      if (result && result.paymentUrl && result.requiresPayment) {
+                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                                        if (paymentWindow) paymentWindow.focus()
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для активации подписки.', tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || 'Не указан', devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
+                                        setShowSuccessModal(true)
+                                      }
+                                    } catch (error) {
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
+                                      setShowPaymentProcessing(false)
+                                    }
+                                  }}
+                                  disabled={creatingSubscription || showPaymentProcessing}
+                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
+                                  aria-label="Продлить подписку"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Продлить'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {/* Просрочено до 5 дней — показываем блок и кнопку «Продлить», подписка не исчезает */}
+                      {userStatus.status === 'grace' && (
+                        <div className="p-2.5 sm:p-3 bg-orange-900/20 border border-orange-800/50 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <Clock className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-orange-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+                                  {userStatus.label}
+                                </p>
+                                <p className="text-orange-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
+                                  Оплатите в течение 5 дней, чтобы не потерять доступ к подписке.
+                                </p>
+                              </div>
+                              {onHandleRenewSubscription && (
+                                <button
+                                  onClick={async () => {
+                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
+                                    setPaymentProcessingMessage('Бухгалтер создает платежку')
+                                    setShowPaymentProcessing(true)
+                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
+                                      setPaymentProcessingMessage('Бухгалтер Ирина побежала подписывать платежку Александру Викторовичу')
+                                      paymentProcessingMessageTimerRef.current = null
+                                    }, 3000)
+                                    try {
+                                      const result = await onHandleRenewSubscription()
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
+                                      setShowPaymentProcessing(false)
+                                      if (result && result.paymentUrl && result.requiresPayment) {
+                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                                        if (paymentWindow) {
+                                          paymentWindow.focus()
+                                          setPaymentWindowRef(paymentWindow)
+                                          setPaymentOrderId(result.orderId)
+                                        }
+                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: 'Окно оплаты открыто. Завершите оплату для продления подписки.', tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || 'Не указан', devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
+                                        setShowSuccessModal(true)
+                                      }
+                                    } catch (error) {
+                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
+                                      setShowPaymentProcessing(false)
+                                    }
+                                  }}
+                                  disabled={creatingSubscription || showPaymentProcessing}
+                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
+                                  aria-label="Продлить подписку"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Продлить'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {currentUser?.paymentStatus === 'test_period' && currentUser?.testPeriodEndDate && (
                         <div className="p-2.5 sm:p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
                           <div className="flex items-start gap-2">

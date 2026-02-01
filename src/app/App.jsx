@@ -1103,6 +1103,16 @@ export default function VPNServiceApp() {
     }
   }, [firebaseUser, view, currentUser?.role, setView])
 
+  // Автоматический переход с экрана приветствия на страницу входа (через 1 минуту)
+  useEffect(() => {
+    if (view === 'welcome' && !currentUser && !firebaseUser) {
+      const timer = setTimeout(() => {
+        setView('login')
+      }, 60000)
+      return () => clearTimeout(timer)
+    }
+  }, [view, currentUser, firebaseUser, setView])
+
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
 

@@ -7,9 +7,32 @@
 
 ## Если скрипта нет на сервере
 
-Файл может не попадать при деплое. Тогда его нужно скопировать на сервер.
+Файл может не попадать при деплое. Создать его на сервере можно так.
 
-### Вариант 1: с локальной машины по SCP
+### Способ 1: установщик одной командой (рекомендуется)
+
+На сервере выполните **одну из** команд ниже.
+
+**Если репозиторий на GitHub** (подставьте `USER`, `REPO`, ветку при необходимости — например `main`):
+
+```bash
+cd /opt/my-frontend/server
+curl -sL "https://raw.githubusercontent.com/USER/REPO/main/server/create-set-admin-claim.sh" -o create-set-admin-claim.sh
+bash create-set-admin-claim.sh
+node set-admin-claim.cjs --migrate
+```
+
+**Если доступа к GitHub нет** — скопируйте на сервер файл `server/create-set-admin-claim.sh` из репозитория (через scp, sftp или вставкой в nano), затем на сервере:
+
+```bash
+cd /opt/my-frontend/server
+bash create-set-admin-claim.sh
+node set-admin-claim.cjs --migrate
+```
+
+Скрипт `create-set-admin-claim.sh` создаёт в текущей папке файл `set-admin-claim.cjs`.
+
+### Способ 2: scp с локальной машины
 
 На компьютере, где лежит репозиторий (не на сервере):
 
@@ -17,9 +40,9 @@
 scp server/set-admin-claim.cjs skyputh@skyputh:/opt/my-frontend/server/
 ```
 
-Подставьте свой пользователь и хост, если отличаются (например `user@your-server.com`).
+Подставьте свой пользователь и хост при необходимости.
 
-### Вариант 2: git pull на сервере
+### Способ 3: git pull на сервере
 
 Если на сервере есть полный клон репозитория:
 
@@ -28,18 +51,7 @@ cd /opt/my-frontend
 git pull origin main
 ```
 
-После этого в `server/` должны появиться `set-admin-claim.cjs` и/или `set-admin-claim.js`.
-
-### Вариант 3: создать файл вручную на сервере
-
-На сервере:
-
-```bash
-cd /opt/my-frontend/server
-nano set-admin-claim.cjs
-```
-
-Вставьте содержимое файла `server/set-admin-claim.cjs` из репозитория, сохраните (Ctrl+O, Enter, Ctrl+X).
+После этого в `server/` должны появиться `set-admin-claim.cjs` и `create-set-admin-claim.sh`.
 
 ---
 
