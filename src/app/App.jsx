@@ -884,17 +884,13 @@ export default function VPNServiceApp() {
         // Пользователь не авторизован
         setCurrentUser(null)
         logger.info('Firebase', 'Пользователь не авторизован')
-        // Не переключать на логин, если открыта страница отзыва (/#review или /review)
+        // Не переключать view — остаёмся на welcome до клика (без глобального редиректа)
         if (typeof window !== 'undefined') {
           const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
           const hash = (window.location.hash || '').toLowerCase()
           if (path === '/review' || hash === '#review') {
             setViewState('review')
-          } else {
-            setView('login')
           }
-        } else {
-          setView('login')
         }
       }
       
@@ -1098,16 +1094,6 @@ export default function VPNServiceApp() {
       logger.debug('App', 'Уже авторизован — редирект с экрана входа', { view, nextView })
     }
   }, [firebaseUser, view, currentUser?.role, setView])
-
-  // Автоматический переход с экрана приветствия на страницу входа (через 1 минуту)
-  useEffect(() => {
-    if (view === 'welcome' && !currentUser && !firebaseUser) {
-      const timer = setTimeout(() => {
-        setView('login')
-      }, 60000)
-      return () => clearTimeout(timer)
-    }
-  }, [view, currentUser, firebaseUser, setView])
 
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
