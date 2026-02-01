@@ -41,11 +41,11 @@ const LoginForm = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-[3rem] p-10 shadow-2xl backdrop-blur-xl">
-      <div className="text-center mb-10">
-        <h2 className="text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? 'Вход' : 'Регистрация'}</h2>
+    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive overflow-x-hidden" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
+      <div className="flex-1 flex items-center justify-center p-3 sm:p-4 lg:p-6">
+        <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 lg:p-10 shadow-2xl backdrop-blur-xl mx-auto">
+      <div className="text-center mb-6 sm:mb-10">
+        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? 'Вход' : 'Регистрация'}</h2>
         <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYFLOW System</p>
         </div>
 
@@ -61,10 +61,10 @@ const LoginForm = ({
           </div>
         )}
 
-        <div className="flex gap-2 mb-6">
+        <div className="flex gap-2 mb-5 sm:mb-6">
           <button
           onClick={onAuthModeLogin}
-          className={`flex-1 py-3 px-4 rounded-2xl transition-all font-bold ${
+          className={`flex-1 min-h-[44px] py-3 px-3 sm:px-4 rounded-xl sm:rounded-2xl transition-all font-bold touch-manipulation ${
               authMode === 'login'
               ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20'
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -74,7 +74,7 @@ const LoginForm = ({
           </button>
           <button
           onClick={onAuthModeRegister}
-          className={`flex-1 py-3 px-4 rounded-2xl transition-all font-bold ${
+          className={`flex-1 min-h-[44px] py-3 px-3 sm:px-4 rounded-xl sm:rounded-2xl transition-all font-bold touch-manipulation ${
               authMode === 'register'
               ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20'
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
@@ -87,7 +87,7 @@ const LoginForm = ({
         <form onSubmit={handleSubmit}>
         <div className="space-y-5">
           <div className="space-y-2">
-            <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-5 uppercase tracking-widest">Email</label>
+            <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">Email</label>
             <input
               id="login-email"
               type="email"
@@ -95,7 +95,7 @@ const LoginForm = ({
               autoComplete="email"
               value={loginData.email}
               onChange={onEmailChange}
-              className="w-full bg-slate-950/50 border border-slate-800 p-5 rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all"
+              className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
               placeholder="user@skyputh.com"
               required
             />
@@ -103,7 +103,7 @@ const LoginForm = ({
 
           {authMode === 'register' && (
             <div className="space-y-2">
-              <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-5 uppercase tracking-widest">Имя</label>
+              <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">Имя</label>
               <input
                 key="register-name-input"
                 id="register-name"
@@ -112,7 +112,7 @@ const LoginForm = ({
                 autoComplete="name"
                 value={loginData.name || ''}
                 onChange={onNameChange}
-                className="w-full bg-slate-950/50 border border-slate-800 p-5 rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all"
+                className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
                 placeholder="Ваше имя"
                 required
               />
@@ -120,7 +120,7 @@ const LoginForm = ({
           )}
 
           <div className="space-y-2">
-            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-5 uppercase tracking-widest">Пароль</label>
+            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">Пароль</label>
             <input
               id={`${authMode}-password`}
               type="password"
@@ -128,7 +128,7 @@ const LoginForm = ({
               autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
               value={loginData.password}
               onChange={onPasswordChange}
-              className="w-full bg-slate-950/50 border border-slate-800 p-5 rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all"
+              className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
               placeholder="••••••••"
               required
             />
@@ -216,7 +216,7 @@ const LoginForm = ({
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-3xl font-black text-white text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-95"
+            className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-500 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-[0.98] touch-manipulation"
           >
             {authMode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
@@ -237,7 +237,7 @@ const LoginForm = ({
           type="button"
           onClick={onGoogleSignIn}
           disabled={googleSignInLoading}
-          className="w-full mt-6 bg-white hover:bg-gray-100 disabled:bg-gray-300 disabled:cursor-not-allowed text-gray-900 py-4 rounded-3xl font-bold text-lg transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3"
+          className="w-full mt-6 min-h-[48px] bg-white hover:bg-gray-100 disabled:bg-gray-300 disabled:cursor-not-allowed text-gray-900 py-4 rounded-2xl sm:rounded-3xl font-bold text-base sm:text-lg transition-all shadow-xl active:scale-[0.98] flex items-center justify-center gap-3 touch-manipulation"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>

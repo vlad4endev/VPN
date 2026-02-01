@@ -21,12 +21,12 @@ export default function Footer() {
   return (
     <>
       <footer className="mt-auto border-t border-slate-800 bg-slate-950/50">
-        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="max-w-content mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           <div className="flex flex-col items-center gap-4 sm:gap-5 text-center">
             <p className="text-slate-500 font-bold text-[clamp(0.8rem,0.75rem+0.25vw,0.95rem)] tracking-wide">
               SKYFLOW | 2026
             </p>
-            <nav className="flex flex-wrap items-center justify-center gap-x-4 sm:gap-x-6 gap-y-2" aria-label="Подвал">
+            <nav className="flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-6 gap-y-3 sm:gap-y-2" aria-label="Подвал">
               <a
                 href={TELEGRAM_URL}
                 target="_blank"

@@ -17,14 +17,14 @@ const CreateTicketModal = ({ onClose, onSubmit, sending }) => {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-800 rounded-xl border border-slate-700 shadow-xl">
-        <div className="flex items-center justify-between p-4 border-b border-slate-700">
-          <h2 className="text-lg font-semibold text-white">Новое обращение</h2>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="w-full max-w-md bg-slate-800 rounded-xl border border-slate-700 shadow-xl my-4 sm:my-0">
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-700">
+          <h2 className="text-base sm:text-lg font-semibold text-white">Новое обращение</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+            className="p-2 min-h-[44px] min-w-[44px] rounded-lg text-slate-400 hover:bg-slate-700 hover:text-white transition-colors flex items-center justify-center touch-manipulation"
             aria-label="Закрыть"
           >
             <X size={20} />
@@ -59,18 +59,18 @@ const CreateTicketModal = ({ onClose, onSubmit, sending }) => {
               required
             />
           </div>
-          <div className="flex gap-2 justify-end pt-2">
+          <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors"
+              className="px-4 py-3 sm:py-2 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors min-h-[44px] touch-manipulation"
             >
               Отмена
             </button>
             <button
               type="submit"
               disabled={sending || !subject.trim() || !message.trim()}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[44px] touch-manipulation"
             >
               {sending ? (
                 <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />

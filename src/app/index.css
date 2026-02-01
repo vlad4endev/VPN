@@ -34,28 +34,35 @@ img, video, iframe, embed, object {
   min-width: 0; /* Prevent flex items from pushing out their parents */
 }
 
-/* Container utility - Mobile First */
+/* Container utility - Mobile First (320→480→1025→1441) */
 @layer utilities {
   .container-responsive {
     width: 100%;
-    max-width: 1280px; /* Adjust based on your design */
+    max-width: 1280px;
     margin-left: auto;
     margin-right: auto;
-    padding-left: 1.25rem; /* 20px - safe zone for mobile */
-    padding-right: 1.25rem;
+    padding-left: clamp(1rem, 4vw, 1.25rem);  /* 16-20px mobile */
+    padding-right: clamp(1rem, 4vw, 1.25rem);
   }
   
-  @media (min-width: 640px) {
+  @media (min-width: 481px) {
     .container-responsive {
-      padding-left: 1.5rem; /* 24px */
+      padding-left: 1.5rem;
       padding-right: 1.5rem;
     }
   }
   
-  @media (min-width: 1024px) {
+  @media (min-width: 1025px) {
     .container-responsive {
-      padding-left: 2rem; /* 32px */
+      padding-left: 2rem;
       padding-right: 2rem;
+    }
+  }
+  
+  @media (min-width: 1441px) {
+    .container-responsive {
+      padding-left: 2.5rem;
+      padding-right: 2.5rem;
     }
   }
 }
@@ -112,12 +119,11 @@ code, pre {
     -webkit-tap-highlight-color: transparent;
   }
   
-  /* Icon-only buttons on mobile (<640px) */
-  @media (max-width: 639px) {
+  /* Icon-only / compact buttons on mobile (<481px) */
+  @media (max-width: 480px) {
     .btn-icon-only-mobile .btn-text {
       display: none;
     }
-    /* Кнопки с подписью всегда видимой — только адаптивный размер шрифта */
     .btn-label-adaptive.btn-icon-only-mobile .btn-text {
       display: inline;
       font-size: clamp(0.7rem, 2.2vw, 0.875rem);
@@ -147,14 +153,14 @@ code, pre {
     background-repeat: no-repeat;
   }
   
-  @media (max-width: 639px) {
+  @media (max-width: 480px) {
     .bg-responsive {
       background-size: contain;
     }
   }
 }
 
-/* Card layout for tables on mobile */
+/* Card layout for tables on mobile/tablet portrait */
 @media (max-width: 767px) {
   .table-card-mobile {
     display: block;
@@ -235,18 +241,22 @@ code, pre {
     min-width: 0;
   }
   
-  /* Ensure containers don't overflow */
   .overflow-safe {
     overflow-x: hidden;
     overflow-y: auto;
   }
   
-  /* Safe text truncation */
   .truncate-safe {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+  }
+  
+  /* Prevent horizontal scroll globally */
+  .no-scroll-x {
+    overflow-x: hidden;
+    max-width: 100vw;
   }
 }
 

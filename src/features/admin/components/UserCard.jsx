@@ -411,8 +411,8 @@ const UserCard = ({
   })()
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-4xl max-h-[90vh] overflow-y-auto m-2 sm:m-4">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-4xl max-h-[90vh] min-h-0 overflow-y-auto my-4 mx-auto">
         {/* Заголовок */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-4 sm:p-6 flex items-center justify-between z-10">
           <div>

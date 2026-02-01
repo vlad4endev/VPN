@@ -7,15 +7,25 @@ export default {
   theme: {
     extend: {
       screens: {
-        'xs': '375px', // iPhone SE and similar
-        'sm': '640px', // Small tablets
-        'md': '768px', // Tablets
-        'lg': '1024px', // Desktops
-        'xl': '1280px', // Large desktops
-        '2xl': '1536px', // Extra large desktops
+        // Mobile-first: 320-480px (base), 481+ tablet, 1025+ laptop, 1441+ large
+        'xs': '375px',   // Large phones (iPhone SE+)
+        'sm': '481px',   // Tablets portrait
+        'md': '768px',   // Tablets landscape
+        'lg': '1025px',  // Laptops
+        'xl': '1441px',  // Large desktops
+        '2xl': '1920px', // Ultra-wide
       },
       maxWidth: {
-        'container': '1280px', // Max design width
+        'container': '1280px',
+        'content': '90rem',
+      },
+      minHeight: {
+        'touch': '44px',
+        'touch-lg': '48px',
+      },
+      spacing: {
+        'safe-top': 'env(safe-area-inset-top, 0px)',
+        'safe-bottom': 'env(safe-area-inset-bottom, 0px)',
       },
     },
   },

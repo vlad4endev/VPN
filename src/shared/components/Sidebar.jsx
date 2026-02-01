@@ -40,7 +40,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
-    const mql = window.matchMedia('(max-width: 1023px)')
+    const mql = window.matchMedia('(max-width: 1024px)')
     const handler = () => setIsMobile(mql.matches)
     handler()
     mql.addEventListener('change', handler)
@@ -263,10 +263,10 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           bg-slate-900 border-r border-slate-800
           p-3 sm:p-4 md:p-6
           flex flex-col
-          h-screen
+          h-screen max-h-[100dvh]
           fixed lg:static lg:h-full
           top-0 left-0 z-40 lg:z-auto
-          w-[280px] sm:w-64
+          w-[min(280px,85vw)] sm:w-64
           transform transition-transform duration-300 ease-out
           overflow-y-auto overflow-x-hidden
           ${isMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}

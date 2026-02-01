@@ -44,7 +44,7 @@ const SupportView = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row">
+    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row overflow-x-hidden">
       <Sidebar
         currentUser={currentUser}
         view="support"
@@ -57,18 +57,18 @@ const SupportView = ({
       />
 
       <main className="flex-1 flex flex-col min-h-0 lg:min-h-screen pb-20 lg:pb-0 lg:pl-0">
-        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 lg:p-6 gap-4">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-3 sm:p-4 lg:p-6 gap-3 sm:gap-4 min-w-0">
           {/* Список тикетов */}
-          <section className="lg:w-80 xl:w-96 flex-shrink-0 flex flex-col bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-slate-700/50">
-              <h1 className="text-lg font-semibold text-white flex items-center gap-2">
-                <MessageCircle size={22} />
+          <section className="lg:w-80 xl:w-96 flex-shrink-0 flex flex-col bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden min-w-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 sm:p-4 border-b border-slate-700/50">
+              <h1 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+                <MessageCircle size={20} className="sm:w-[22px] sm:h-[22px] flex-shrink-0" />
                 Тех. поддержка
               </h1>
               <button
                 type="button"
                 onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors text-sm font-medium"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-500 active:bg-blue-600 transition-colors text-sm font-medium min-h-[44px] touch-manipulation w-full sm:w-auto"
               >
                 <PlusCircle size={18} />
                 Новое обращение

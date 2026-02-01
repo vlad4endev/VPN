@@ -213,12 +213,12 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
   const userStatus = getUserStatus(user, clientStats)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md overflow-y-auto" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl"
+        className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl sm:rounded-[2.5rem] overflow-hidden shadow-2xl my-4 sm:my-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-8 border-b border-slate-800 flex justify-between items-center">
+        <div className="p-4 sm:p-6 lg:p-8 border-b border-slate-800 flex justify-between items-center">
           <h3 className="text-xl font-bold text-white flex items-center gap-3">
             <Globe size={22} className="text-blue-500" /> Нидерланды
           </h3>
@@ -226,7 +226,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             <X size={24} className="text-slate-400" />
             </button>
           </div>
-        <div className="p-8 space-y-6">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6">
           <div className="space-y-2">
             <p className="text-sm text-slate-400 font-medium">Статус:</p>
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold ${
@@ -248,7 +248,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           </div>
               <button
                 onClick={() => onCopy(subscriptionLink)}
-            className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-3xl font-bold flex items-center justify-center gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-95"
+            className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-500 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-bold flex items-center justify-center gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-[0.98] touch-manipulation"
               >
             <Copy size={20} /> Копировать ссылку
               </button>
@@ -3733,15 +3733,15 @@ export default function VPNServiceApp() {
       return null
     }
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
+      <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
         <SidebarNav
           currentUser={currentUser}
           view="finances"
           onSetView={setView}
           onLogout={handleLogout}
         />
-        <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-24 lg:pb-6 overflow-y-auto">
-          <div className="w-full max-w-[90rem] mx-auto">
+        <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+          <div className="w-full max-w-content mx-auto">
             <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
           </div>
           <div className="max-sm:hidden">

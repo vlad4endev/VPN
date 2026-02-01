@@ -159,7 +159,7 @@ const AdminPanel = ({
   const [showMonitoring, setShowMonitoring] = useState(false)
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
+    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
       <Sidebar
         currentUser={currentUser}
         view="admin"
@@ -168,8 +168,8 @@ const AdminPanel = ({
         adminTab={adminTab}
         onSetAdminTab={onSetAdminTab}
       />
-      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-24 lg:pb-6 overflow-y-auto">
-        <div className="w-full max-w-[90rem] mx-auto">
+      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+        <div className="w-full max-w-content mx-auto min-w-0">
           {/* Шапка - Mobile First компактная */}
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 mb-3 sm:mb-4 border border-slate-800">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
@@ -180,10 +180,10 @@ const AdminPanel = ({
                 </h1>
                 <p className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-0.5">Управление системой</p>
               </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto min-w-0 shrink-0">
                 <button
                   onClick={() => setShowMonitoring(true)}
-                  className="btn-icon-only-mobile min-h-[36px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm flex-1 sm:flex-initial touch-manipulation"
+                  className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
                   title="Открыть мониторинг сервера"
                   aria-label="Открыть мониторинг"
                 >
@@ -192,7 +192,7 @@ const AdminPanel = ({
                 </button>
                 <button
                   onClick={() => onSetShowLogger(true)}
-                  className="btn-icon-only-mobile min-h-[36px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm flex-1 sm:flex-initial touch-manipulation"
+                  className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
                   title="Открыть логи"
                   aria-label="Открыть логи"
                 >
