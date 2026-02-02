@@ -2907,7 +2907,8 @@ app.post('/api/payment/verify', async (req, res) => {
         }
       }
 
-      // При успешной оплате: обновляем статус платежа в Firestore (idempotency); при наличии промокода — инкрементируем счётчик
+      // При успешной оплате: обновляем статус платежа в Firestore (idempotency) для ВСЕХ оплаченных заказов;
+      // затем при наличии promocodeId — инкрементируем счётчик промокода (отдельный шаг).
       if (paymentData?.status === 'completed' && db) {
         try {
           const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
@@ -2915,8 +2916,11 @@ app.post('/api/payment/verify', async (req, res) => {
           if (!paymentsSnap.empty) {
             const paymentDoc = paymentsSnap.docs[0]
             const paymentDocData = paymentDoc.data()
+            // 1) Всегда обновляем статус pending → completed (для всех оплаченных заказов, с промокодом и без)
             if (paymentDocData.status === 'pending') {
               await paymentDoc.ref.update({ status: 'completed' })
+              console.log('✅ n8n-webhook-proxy: Статус платежа обновлён на completed', { orderId })
+              // 2) Только при первом переходе в completed: инкремент использования промокода (не при повторе вебхука)
               const promocodeId = paymentDocData.promocodeId
               if (promocodeId) {
                 const promoRef = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${promocodeId}`)

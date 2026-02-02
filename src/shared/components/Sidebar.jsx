@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
-import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
+import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS, ADMIN_MOBILE_PRIMARY_IDS, ADMIN_MOBILE_OTHER_ITEMS } from '../../features/admin/constants/navSections.js'
 import NotificationsCenter from '../../features/notifications/components/NotificationsCenter.jsx'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
@@ -37,6 +37,7 @@ const getSectionKeyByTabId = (tabId) => {
 const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDashboardTab, adminTab, onSetAdminTab }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [showAdminMore, setShowAdminMore] = useState(false)
   const [expandedAdminSections, setExpandedAdminSections] = useState(() => {
     const openKey = getSectionKeyByTabId(adminTab)
     return openKey ? { [openKey]: true } : { [ADMIN_NAV_SECTIONS[0]?.title]: true }
@@ -356,30 +357,96 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
       )}
 
       {hasAdminTabs && (
-        <nav
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch bg-slate-900/95 border-t border-slate-800 backdrop-blur-md safe-area-pb overflow-x-auto scrollbar-hide"
-          role="tablist"
-          aria-label="Разделы админ-панели"
-        >
-          {ADMIN_NAV_ITEMS.map(({ id, label, icon: Icon }) => {
-            const active = adminTab === id
-            return (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={active}
-                aria-label={label}
-                onClick={() => handleAdminTab(id)}
-                className={`min-w-0 flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-1.5 transition-all duration-250 ease-out touch-manipulation shrink-0 ${active ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
+        <>
+          {/* Компактная нижняя панель: Дашборд, Пользователи, Отзывы, Прочее */}
+          <nav
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch bg-slate-900/95 border-t border-slate-800 backdrop-blur-md safe-area-pb"
+            role="tablist"
+            aria-label="Разделы админ-панели"
+          >
+            {ADMIN_NAV_ITEMS.filter((item) => ADMIN_MOBILE_PRIMARY_IDS.includes(item.id)).map(({ id, label, icon: Icon }) => {
+              const active = adminTab === id
+              return (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={label}
+                  onClick={() => handleAdminTab(id)}
+                  className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${active ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
+                >
+                  <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${active ? 'bg-blue-600/20 scale-110' : ''}`}>
+                    <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+                  </span>
+                  <span className="text-[11px] font-medium truncate max-w-full px-0.5">{label}</span>
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab)}
+              aria-expanded={showAdminMore}
+              aria-label="Прочее"
+              onClick={() => setShowAdminMore((v) => !v)}
+              className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
+            >
+              <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'bg-blue-600/20 scale-110' : ''}`}>
+                <MoreHorizontal size={22} strokeWidth={2} />
+              </span>
+              <span className="text-[11px] font-medium">Прочее</span>
+            </button>
+          </nav>
+
+          {/* Панель «Прочее»: остальные разделы */}
+          {showAdminMore && (
+            <>
+              <div
+                className="lg:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+                aria-hidden="true"
+                onClick={() => setShowAdminMore(false)}
+              />
+              <div
+                className="lg:hidden fixed left-0 right-0 bottom-0 z-50 rounded-t-2xl bg-slate-900 border-t border-slate-700 shadow-2xl safe-area-pb max-h-[70vh] overflow-hidden flex flex-col"
+                role="dialog"
+                aria-label="Остальные разделы"
               >
-                <span className={`flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-250 ${active ? 'bg-blue-600/20 scale-110' : ''}`}>
-                  <Icon size={20} strokeWidth={active ? 2.5 : 2} />
-                </span>
-                <span className="text-[10px] font-medium truncate max-w-full">{label}</span>
-              </button>
-            )
-          })}
-        </nav>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+                  <span className="text-sm font-semibold text-slate-300">Разделы</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminMore(false)}
+                    className="p-2 -m-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                    aria-label="Закрыть"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto p-3 pb-8 grid grid-cols-2 gap-2">
+                  {ADMIN_MOBILE_OTHER_ITEMS.map(({ id, label, icon: Icon }) => {
+                    const active = adminTab === id
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          onSetAdminTab(id)
+                          setShowAdminMore(false)
+                        }}
+                        className={`flex items-center gap-3 p-3 rounded-xl text-left transition-colors touch-manipulation ${active ? 'bg-blue-600/30 text-blue-300' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 active:bg-slate-600'}`}
+                      >
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-700/80 flex items-center justify-center">
+                          <Icon size={18} strokeWidth={2} />
+                        </span>
+                        <span className="text-sm font-medium truncate">{label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </>
       )}
     </>
   )

@@ -88,7 +88,8 @@ service cloud.firestore {
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email']) || isValidEmail(request.resource.data.email)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || isValidName(request.resource.data.name)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || isValidRole(request.resource.data.role)) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uuid']) || isValidUUID(request.resource.data.uuid)) &&
+        // uuid: либо не меняется, либо валидный UUID, либо null (при отмене подписки)
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uuid']) || isValidUUID(request.resource.data.uuid) || request.resource.data.uuid == null) &&
         // Запрещаем изменение роли на admin (только через backend)
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || 
          request.resource.data.role == resource.data.role || 
@@ -184,8 +185,8 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }
     
-    // Промокоды — чтение и запись только админам (claim или роль в Firestore)
-    // Валидация промокодов выполняется через серверный API
+    // Промокоды — чтение и запись только админам (claim или роль в Firestore).
+    // Требуется custom claim admin: true у админа (Firebase Auth → Users → Custom Claims) или роль admin в users_v4.
     match /artifacts/{appId}/public/data/promocodes/{promocodeId} {
       allow read, write: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }

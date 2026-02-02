@@ -42,6 +42,14 @@ export const ADMIN_NAV_SECTIONS = [
 /** Плоский список всех пунктов (для нижней панели на мобильных) */
 export const ADMIN_NAV_ITEMS = ADMIN_NAV_SECTIONS.flatMap((s) => s.items)
 
+/** ID пунктов, которые показываются в мобильной панели отдельными кнопками (Дашборд, Пользователи, Отзывы) */
+export const ADMIN_MOBILE_PRIMARY_IDS = ['dashboard', 'users', 'reviews']
+
+/** Пункты для кнопки «Прочее» на мобильных (остальные разделы) */
+export const ADMIN_MOBILE_OTHER_ITEMS = ADMIN_NAV_ITEMS.filter(
+  (item) => !ADMIN_MOBILE_PRIMARY_IDS.includes(item.id)
+)
+
 /**
  * Возвращает заголовок раздела и название пункта по id таба (для шапки контента)
  * @param {string} tabId
