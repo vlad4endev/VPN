@@ -340,8 +340,15 @@ export default function VPNServiceApp() {
   const [showLogger, setShowLogger] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
-  const [adminTab, setAdminTab] = useState('users')
+  const [adminTab, setAdminTab] = useState('dashboard')
   const [dashboardTab, setDashboardTab] = useState('subscription')
+  const prevViewRef = useRef(view)
+  useEffect(() => {
+    if (view === 'admin' && prevViewRef.current !== 'admin') {
+      setAdminTab('dashboard')
+    }
+    prevViewRef.current = view
+  }, [view])
   const [editingUser, setEditingUser] = useState(null)
   const [editingServer, setEditingServer] = useState(null)
   const [editingTariff, setEditingTariff] = useState(null)
@@ -1903,7 +1910,7 @@ export default function VPNServiceApp() {
   }, [db, currentUser?.id, handleLogout])
 
   // Оформление подписки (создание клиента в 3x-ui)
-  const handleCreateSubscription = useCallback(async (tariff, devices = null, natrockPort = null, periodMonths = 1, testPeriod = false, paymentMode = 'pay_now', discount = 0) => {
+  const handleCreateSubscription = useCallback(async (tariff, devices = null, natrockPort = null, periodMonths = 1, testPeriod = false, paymentMode = 'pay_now', discount = 0, promocodeId = null) => {
     console.log('🎯 App.handleCreateSubscription вызван с параметрами:', {
       tariffName: tariff?.name,
       tariffId: tariff?.id,
@@ -1957,7 +1964,8 @@ export default function VPNServiceApp() {
         periodMonths, 
         testPeriod, 
         paymentMode, 
-        discount
+        discount,
+        promocodeId
       )
       
       console.log('✅ App.handleCreateSubscription: dashboardService.createSubscription вернул данные:', {
@@ -3865,6 +3873,8 @@ export default function VPNServiceApp() {
           onSetShowLogger={setShowLogger}
           success={success}
           error={error}
+          onSetSuccess={setSuccess}
+          onSetError={setError}
           onHandleServerNameChange={handleServerNameChange}
           onHandleServerIPChange={handleServerIPChange}
           onHandleServerPortChange={handleServerPortChange}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, X, CheckCircle2, XCircle, AlertCircle, Copy, Download, Smartphone, Monitor, Laptop, Apple, ExternalLink } from 'lucide-react'
+import { Globe, X, CheckCircle2, XCircle, AlertCircle, Copy, Download, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { getFirestore, doc, getDoc } from 'firebase/firestore'
 import { APP_ID } from '../../../shared/constants/app.js'
@@ -200,10 +200,13 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">Статус:</p>
             <div className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${
               userStatus.status === 'active' ? 'bg-green-900/30 text-green-400' :
+              userStatus.status === 'expiring_soon' ? 'bg-yellow-900/30 text-yellow-400' :
+              userStatus.status === 'grace' ? 'bg-orange-900/30 text-orange-400' :
               userStatus.status === 'expired' ? 'bg-red-900/30 text-red-400' :
               'bg-slate-800 text-slate-400'
             }`}>
               {userStatus.status === 'active' && <CheckCircle2 className="w-4 h-4 animate-pulse flex-shrink-0" />}
+              {(userStatus.status === 'expiring_soon' || userStatus.status === 'grace') && <Clock className="w-4 h-4 flex-shrink-0" />}
               {userStatus.status === 'expired' && <XCircle className="w-4 h-4 flex-shrink-0" />}
               {userStatus.status === 'no-key' && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
               <span>{userStatus.label}</span>

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, Server, DollarSign, Link2, MessageCircle, BarChart3, Star } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
+import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
+import NotificationsCenter from '../../features/notifications/components/NotificationsCenter.jsx'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
 
@@ -20,24 +22,25 @@ const DASHBOARD_NAV_ITEMS = [
   { id: 'payments', label: 'Платежи', icon: History },
 ]
 
-const ADMIN_NAV_ITEMS = [
-  { id: 'users', label: 'Пользователи', icon: Users },
-  { id: 'tickets', label: 'Тикеты', icon: MessageCircle },
-  { id: 'settings', label: 'Настройки', icon: Server },
-  { id: 'tariffs', label: 'Тарифы', icon: DollarSign },
-  { id: 'payments', label: 'Платежи', icon: CreditCard },
-  { id: 'reviews', label: 'Отзывы', icon: Star },
-  { id: 'n8n', label: 'n8n', icon: Link2 },
-]
 
 /**
  * Боковая панель навигации.
  * Desktop: полное меню слева (разделы кабинета или админки).
  * Mobile: нижняя панель с разделами, оверлей по гамбургеру — только переключение Кабинет/Админ и Выйти (без дубля разделов).
  */
+/** Возвращает ключ раздела, в котором находится таб */
+const getSectionKeyByTabId = (tabId) => {
+  const section = ADMIN_NAV_SECTIONS.find((s) => s.items.some((i) => i.id === tabId))
+  return section ? section.title : null
+}
+
 const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDashboardTab, adminTab, onSetAdminTab }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [expandedAdminSections, setExpandedAdminSections] = useState(() => {
+    const openKey = getSectionKeyByTabId(adminTab)
+    return openKey ? { [openKey]: true } : { [ADMIN_NAV_SECTIONS[0]?.title]: true }
+  })
 
   useEffect(() => {
     const mql = window.matchMedia('(max-width: 1024px)')
@@ -46,6 +49,19 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
     mql.addEventListener('change', handler)
     return () => mql.removeEventListener('change', handler)
   }, [])
+
+  // При смене таба админки раскрывать раздел, в котором он находится
+  useEffect(() => {
+    if (view !== 'admin' || !adminTab) return
+    const sectionKey = getSectionKeyByTabId(adminTab)
+    if (sectionKey && !expandedAdminSections[sectionKey]) {
+      setExpandedAdminSections((prev) => ({ ...prev, [sectionKey]: true }))
+    }
+  }, [view, adminTab])
+
+  const toggleAdminSection = (sectionTitle) => {
+    setExpandedAdminSections((prev) => ({ ...prev, [sectionTitle]: !prev[sectionTitle] }))
+  }
 
   const hasDashboardTabs = view === 'dashboard' && typeof onSetDashboardTab === 'function' && dashboardTab != null
   const hasAdminTabs = view === 'admin' && typeof onSetAdminTab === 'function' && adminTab != null
@@ -74,10 +90,19 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
   const blockHeader = (
     <div className="mb-4 sm:mb-6 md:mb-8">
-      <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYFLOW</h1>
-      <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
-        {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYFLOW</h1>
+          <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
+            {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
+          </p>
+        </div>
+        {currentUser?.id && (
+          <div className="flex-shrink-0">
+            <NotificationsCenter userId={currentUser.id} />
+          </div>
+        )}
+      </div>
     </div>
   )
 
@@ -170,18 +195,45 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           </button>
           {hasAdminTabs && (
             <div className="space-y-0.5 sm:space-y-1">
-              {ADMIN_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => handleAdminTab(id)}
-                  className={navSubItemClass(adminTab === id)}
-                  aria-label={label}
-                  aria-selected={adminTab === id}
-                >
-                  <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span className="font-medium">{label}</span>
-                </button>
-              ))}
+              {ADMIN_NAV_SECTIONS.map((section) => {
+                const isExpanded = expandedAdminSections[section.title] === true
+                return (
+                  <div key={section.title} className="space-y-0.5 sm:space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleAdminSection(section.title)}
+                      className="w-full min-h-[36px] flex items-center gap-2 pl-6 sm:pl-7 pr-3 sm:pr-4 py-1.5 sm:py-2 rounded-lg text-left text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors touch-manipulation"
+                      aria-expanded={isExpanded}
+                      aria-label={isExpanded ? `Свернуть ${section.title}` : `Развернуть ${section.title}`}
+                    >
+                      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+                        {isExpanded ? (
+                          <ChevronDown size={14} className="text-slate-500" />
+                        ) : (
+                          <ChevronRight size={14} className="text-slate-500" />
+                        )}
+                      </span>
+                      <span className="truncate">{section.title}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="space-y-0.5 sm:space-y-0.5">
+                        {section.items.map(({ id, label, icon: Icon }) => (
+                          <button
+                            key={id}
+                            onClick={() => handleAdminTab(id)}
+                            className={navSubItemClass(adminTab === id)}
+                            aria-label={label}
+                            aria-selected={adminTab === id}
+                          >
+                            <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                            <span className="font-medium">{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

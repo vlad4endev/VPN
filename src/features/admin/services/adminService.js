@@ -1,4 +1,4 @@
-import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
+import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, query, where } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
@@ -438,6 +438,96 @@ export const adminService = {
       logger.info('Admin', 'Тариф удален', { tariffId })
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
+      throw err
+    }
+  },
+
+  /**
+   * Загрузка промокодов
+   * @returns {Promise<Array>} Список промокодов
+   */
+  async loadPromocodes() {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const coll = collection(db, `artifacts/${APP_ID}/public/data/promocodes`)
+      const snap = await getDocs(coll)
+      const list = []
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }))
+      return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    } catch (err) {
+      logger.error('Admin', 'Ошибка загрузки промокодов', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Создание промокода
+   * @param {Object} data - { code, type: 'percent'|'fixed', value, tariffIds?, active, maxUsages?, validFrom?, validUntil?, description? }
+   */
+  async createPromocode(data, adminId) {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const coll = collection(db, `artifacts/${APP_ID}/public/data/promocodes`)
+      const docData = {
+        code: (data.code || '').trim().toUpperCase(),
+        type: data.type || 'percent',
+        value: Number(data.value) || 0,
+        tariffIds: Array.isArray(data.tariffIds) ? data.tariffIds : null,
+        active: Boolean(data.active !== false),
+        maxUsages: data.maxUsages != null ? Number(data.maxUsages) : null,
+        currentUsages: 0,
+        validFrom: data.validFrom || null,
+        validUntil: data.validUntil || null,
+        description: data.description || null,
+        createdAt: new Date().toISOString(),
+        createdBy: adminId || null,
+      }
+      const ref = await addDoc(coll, docData)
+      return { id: ref.id, ...docData }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка создания промокода', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Обновление промокода
+   */
+  async updatePromocode(promocodeId, data) {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const ref = doc(db, `artifacts/${APP_ID}/public/data/promocodes`, promocodeId)
+      const updates = {
+        ...(data.code != null && { code: String(data.code).trim().toUpperCase() }),
+        ...(data.type != null && { type: data.type }),
+        ...(data.value != null && { value: Number(data.value) }),
+        ...(data.tariffIds !== undefined && { tariffIds: Array.isArray(data.tariffIds) ? data.tariffIds : null }),
+        ...(data.active !== undefined && { active: Boolean(data.active) }),
+        ...(data.maxUsages !== undefined && { maxUsages: data.maxUsages != null ? Number(data.maxUsages) : null }),
+        ...(data.validFrom !== undefined && { validFrom: data.validFrom || null }),
+        ...(data.validUntil !== undefined && { validUntil: data.validUntil || null }),
+        ...(data.description !== undefined && { description: data.description || null }),
+        updatedAt: new Date().toISOString(),
+      }
+      await updateDoc(ref, stripUndefinedForFirestore(updates))
+      return updates
+    } catch (err) {
+      logger.error('Admin', 'Ошибка обновления промокода', { promocodeId }, err)
+      throw err
+    }
+  },
+
+  /**
+   * Удаление промокода
+   */
+  async deletePromocode(promocodeId) {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const ref = doc(db, `artifacts/${APP_ID}/public/data/promocodes`, promocodeId)
+      await deleteDoc(ref)
+      logger.info('Admin', 'Промокод удален', { promocodeId })
+    } catch (err) {
+      logger.error('Admin', 'Ошибка удаления промокода', { promocodeId }, err)
       throw err
     }
   },

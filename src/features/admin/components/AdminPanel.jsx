@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
-import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple } from 'lucide-react'
+import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
@@ -10,10 +10,14 @@ import VirtualizedUserTable from './VirtualizedUserTable.jsx'
 import UserCard from './UserCard.jsx'
 import N8nPanel from './N8nPanel.jsx'
 import YooMoneyPanel from './YooMoneyPanel.jsx'
+import PromocodesPanel from './PromocodesPanel.jsx'
 import ReviewsPanel from './ReviewsPanel.jsx'
 import SupportTicketsPanel from './SupportTicketsPanel.jsx'
 import SystemMonitor from './SystemMonitor.jsx'
+import AdminDashboard from './AdminDashboard.jsx'
+import NotificationsBroadcastPanel from '../../notifications/components/NotificationsBroadcastPanel.jsx'
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
+import { getAdminSectionByTabId } from '../constants/navSections.js'
 import { logError } from '../utils/errorHandler.js'
 
 const AdminPanel = ({
@@ -73,6 +77,8 @@ const AdminPanel = ({
   onHandleTariffSubscriptionLinkChange = () => {},
   settings,
   onHandleAppLinkChange,
+  onSetSuccess = () => {},
+  onSetError = () => {},
 }) => {
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
@@ -83,7 +89,7 @@ const AdminPanel = ({
       onHandleDeleteServer, onHandleTestServerSession, testingServerId, newServerIdRef,
       settingsLoading, tariffs, editingTariff, onSetEditingTariff, onHandleSaveTariff,
       onHandleDeleteTariff, onHandleSaveSettings, formatDate, showLogger, onSetShowLogger,
-      success, error, onHandleServerNameChange, onHandleServerIPChange, onHandleServerPortChange,
+      success, error, onSetSuccess, onSetError, onHandleServerNameChange, onHandleServerIPChange, onHandleServerPortChange,
       onHandleServerProtocolChange, onHandleServerRandomPathChange, onHandleServerRandomPathBlur,
       onHandleServerUsernameChange, onHandleServerPasswordChange, onHandleServerInboundIdChange,
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
@@ -158,6 +164,8 @@ const AdminPanel = ({
   // Состояние для модального окна мониторинга
   const [showMonitoring, setShowMonitoring] = useState(false)
 
+  const sectionInfo = getAdminSectionByTabId(adminTab)
+
   return (
     <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
       <Sidebar
@@ -178,9 +186,26 @@ const AdminPanel = ({
                   <Settings className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                   <span className="truncate">Админ-панель</span>
                 </h1>
-                <p className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-0.5">Управление системой</p>
+                <p className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-0.5">
+                  {sectionInfo ? (
+                    <span><span className="text-slate-500">{sectionInfo.sectionTitle}</span><span className="text-slate-500 mx-1">→</span><span>{sectionInfo.itemLabel}</span></span>
+                  ) : (
+                    'Управление системой'
+                  )}
+                </p>
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto min-w-0 shrink-0">
+                {adminTab !== 'dashboard' && (
+                  <button
+                    onClick={() => onSetAdminTab('dashboard')}
+                    className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
+                    title="На главную дашборда"
+                    aria-label="Дашборд"
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                    <span className="btn-text whitespace-nowrap">Дашборд</span>
+                  </button>
+                )}
                 <button
                   onClick={() => setShowMonitoring(true)}
                   className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
@@ -189,6 +214,15 @@ const AdminPanel = ({
                 >
                   <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="btn-text whitespace-nowrap">Мониторинг</span>
+                </button>
+                <button
+                  onClick={() => onSetAdminTab('tickets')}
+                  className={`btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation ${adminTab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white'}`}
+                  title="Перейти к тикетам"
+                  aria-label="Тикеты"
+                >
+                  <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                  <span className="btn-text whitespace-nowrap">Тикеты</span>
                 </button>
                 <button
                   onClick={() => onSetShowLogger(true)}
@@ -206,6 +240,15 @@ const AdminPanel = ({
         {/* Навигация по разделам — в боковом меню (десктоп) и в нижней панели (мобильные), дубли в контенте убраны */}
 
         {/* Контент табов */}
+        {adminTab === 'dashboard' && (
+          <AdminDashboard
+            users={users}
+            servers={servers}
+            tariffs={tariffs}
+            onSetAdminTab={onSetAdminTab}
+          />
+        )}
+
         {adminTab === 'users' && (
           <>
             <VirtualizedUserTable
@@ -679,6 +722,10 @@ const AdminPanel = ({
           <YooMoneyPanel onSaveSettings={onHandleSaveSettings} />
         )}
 
+        {adminTab === 'promocodes' && (
+          <PromocodesPanel currentUserId={currentUser?.id} />
+        )}
+
         {adminTab === 'tariffs' && (
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
             <div className="mb-4 sm:mb-5 md:mb-6">
@@ -987,6 +1034,14 @@ const AdminPanel = ({
 
         {adminTab === 'tickets' && (
           <SupportTicketsPanel currentUser={currentUser} />
+        )}
+
+        {adminTab === 'notifications' && (
+          <NotificationsBroadcastPanel
+            users={users}
+            onSuccess={onSetSuccess}
+            onError={onSetError}
+          />
         )}
 
         {adminTab === 'n8n' && (

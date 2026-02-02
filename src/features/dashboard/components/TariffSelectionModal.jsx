@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { X, Check, Loader2, AlertCircle, Clock } from 'lucide-react'
+import { useState } from 'react'
+import { X, Check, Loader2, AlertCircle, Clock, Tag } from 'lucide-react'
 import logger from '../../../shared/utils/logger.js'
 
 const TariffSelectionModal = ({ 
@@ -16,6 +16,10 @@ const TariffSelectionModal = ({
   const [selectedPeriod, setSelectedPeriod] = useState(1) // Период в месяцах (1, 3, 6, 12)
   const [confirmed, setConfirmed] = useState(false)
   const [paymentMode, setPaymentMode] = useState(null) // 'pay_now' или 'pay_later'
+  const [promoCode, setPromoCode] = useState('')
+  const [promoData, setPromoData] = useState(null) // { valid, discount, discountAmount, promocodeId, message }
+  const [promoLoading, setPromoLoading] = useState(false)
+  const [promoError, setPromoError] = useState(null)
 
   const isSuper = tariff?.name?.toLowerCase() === 'super' || tariff?.plan?.toLowerCase() === 'super'
   const isMulti = tariff?.name?.toLowerCase() === 'multi' || tariff?.plan?.toLowerCase() === 'multi'
@@ -42,9 +46,54 @@ const TariffSelectionModal = ({
   const multiTotalMonthlyPrice = multiBasePrice * selectedPeriod
   
   // Скидка 10% для годовой оплаты (12 месяцев) - для обоих тарифов
-  const discount = selectedPeriod === 12 ? 0.1 : 0
-  const discountAmount = discount > 0 ? (isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice) * discount : 0
-  const totalPrice = (isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice) - discountAmount
+  const basePrice = isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice
+  const periodDiscount = selectedPeriod === 12 ? 0.1 : 0
+  const periodDiscountAmount = periodDiscount > 0 ? basePrice * periodDiscount : 0
+  // Промокод: берём максимальную скидку (период или промо)
+  const promoDiscountAmount = promoData?.valid ? (promoData.discountAmount || 0) : 0
+  const effectiveDiscountAmount = Math.max(periodDiscountAmount, promoDiscountAmount)
+  const discount = basePrice > 0 ? effectiveDiscountAmount / basePrice : 0
+  const totalPrice = basePrice - effectiveDiscountAmount
+  const usedPromo = promoData?.valid && promoDiscountAmount >= periodDiscountAmount
+
+  const handleApplyPromo = async () => {
+    const code = promoCode.trim().toUpperCase()
+    if (!code) {
+      setPromoError('Введите промокод')
+      setPromoData(null)
+      return
+    }
+    setPromoLoading(true)
+    setPromoError(null)
+    setPromoData(null)
+    try {
+      const basePrice = isSuper ? selectedDevices * devicePrice * selectedPeriod : multiBasePrice * selectedPeriod
+      const res = await fetch('/api/promocodes/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, tariffId: tariff?.id, amount: basePrice }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        setPromoData(data)
+        setPromoError(null)
+      } else {
+        setPromoData(null)
+        setPromoError(data.message || 'Промокод не найден')
+      }
+    } catch (err) {
+      setPromoData(null)
+      setPromoError('Ошибка проверки промокода')
+    } finally {
+      setPromoLoading(false)
+    }
+  }
+
+  const handleRemovePromo = () => {
+    setPromoCode('')
+    setPromoData(null)
+    setPromoError(null)
+  }
 
   const handleConfirm = () => {
     logger.debug('TariffSelectionModal', 'handleConfirm вызван', {
@@ -72,13 +121,14 @@ const TariffSelectionModal = ({
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      natrockPort: null,
       totalPrice: totalPrice,
-      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
+      periodMonths: selectedPeriod,
       discount: discount,
-      discountAmount: discountAmount,
-      paymentMode: paymentMode, // 'pay_now' или 'pay_later'
-      testPeriod: paymentMode === 'pay_later', // Тестовый период если оплата позже
+      discountAmount: effectiveDiscountAmount,
+      paymentMode: paymentMode,
+      testPeriod: paymentMode === 'pay_later',
+      promocodeId: usedPromo ? promoData?.promocodeId : null,
     }
 
     logger.debug('TariffSelectionModal', 'Вызов onConfirm с данными', {
@@ -108,17 +158,17 @@ const TariffSelectionModal = ({
   const handlePayLater = () => {
     logger.debug('TariffSelectionModal', 'Выбрана оплата позже (тестовый период)')
     
-    // Формируем данные подписки
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      natrockPort: null,
       totalPrice: totalPrice,
-      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
+      periodMonths: selectedPeriod,
       discount: discount,
-      discountAmount: discountAmount,
+      discountAmount: effectiveDiscountAmount,
       paymentMode: 'pay_later',
       testPeriod: true,
+      promocodeId: usedPromo ? promoData?.promocodeId : null,
     }
 
     logger.debug('TariffSelectionModal', 'Вызов onConfirm (pay_later)', {
@@ -175,17 +225,17 @@ const TariffSelectionModal = ({
   const handlePayNow = () => {
     logger.debug('TariffSelectionModal', 'Выбрана оплата сейчас')
     
-    // Формируем данные подписки
     const subscriptionData = {
       tariff,
       devices: isSuper ? selectedDevices : (tariff?.devices || 1),
-      natrockPort: null, // Для MULTI больше не используется натрек-порт
+      natrockPort: null,
       totalPrice: totalPrice,
-      periodMonths: selectedPeriod, // Для обоих тарифов используется выбранный период
+      periodMonths: selectedPeriod,
       discount: discount,
-      discountAmount: discountAmount,
+      discountAmount: effectiveDiscountAmount,
       paymentMode: 'pay_now',
       testPeriod: false,
+      promocodeId: usedPromo ? promoData?.promocodeId : null,
     }
 
     logger.debug('TariffSelectionModal', 'Формирование данных завершено (pay_now)', {
@@ -282,6 +332,8 @@ const TariffSelectionModal = ({
                         setSelectedDevices(num)
                         setConfirmed(false)
                         setPaymentMode(null)
+                        setPromoData(null)
+                        setPromoError(null)
                       }}
                       disabled={isLoading || confirmed}
                       className={`min-h-[44px] px-2 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.875rem,0.8rem+0.25vw,1.125rem)] sm:text-lg ${
@@ -314,6 +366,8 @@ const TariffSelectionModal = ({
                         setSelectedPeriod(option.months)
                         setConfirmed(false)
                         setPaymentMode(null)
+                        setPromoData(null)
+                        setPromoError(null)
                       }}
                       disabled={isLoading || confirmed}
                       className={`min-h-[44px] px-2 sm:px-3 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm ${
@@ -331,6 +385,41 @@ const TariffSelectionModal = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Промокод */}
+              <div>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">Промокод</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(null) }}
+                    placeholder="Введите код"
+                    disabled={isLoading || confirmed}
+                    className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyPromo}
+                    disabled={isLoading || confirmed || !promoCode.trim()}
+                    className="min-h-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg font-medium text-slate-200 flex items-center gap-2"
+                  >
+                    {promoLoading ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
+                    <span>Применить</span>
+                  </button>
+                  {promoData?.valid && (
+                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label="Убрать промокод">
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                {promoData?.valid && (
+                  <p className="mt-1.5 text-green-400 text-sm">{promoData.message}</p>
+                )}
+                {promoError && (
+                  <p className="mt-1.5 text-red-400 text-sm">{promoError}</p>
+                )}
               </div>
 
               <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
@@ -356,12 +445,10 @@ const TariffSelectionModal = ({
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{totalMonthlyPrice.toFixed(2)} ₽</span>
                 </div>
                 {discount > 0 && (
-                  <>
-                    <div className="flex justify-between items-center text-green-400">
-                      <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
-                      <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{discountAmount.toFixed(2)} ₽</span>
-                    </div>
-                  </>
+                  <div className="flex justify-between items-center text-green-400">
+                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
+                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{effectiveDiscountAmount.toFixed(2)} ₽</span>
+                  </div>
                 )}
                 <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
                   <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Итого:</span>
@@ -377,7 +464,7 @@ const TariffSelectionModal = ({
             </div>
           )}
 
-          {/* Для Multi тарифа: выбор периода оплаты (как в SUPER) */}
+          {/* Для Multi тарифа */}
           {isMulti && (
             <div className="space-y-4">
               <div>
@@ -398,6 +485,8 @@ const TariffSelectionModal = ({
                         setSelectedPeriod(option.months)
                         setConfirmed(false)
                         setPaymentMode(null)
+                        setPromoData(null)
+                        setPromoError(null)
                       }}
                       disabled={isLoading || confirmed}
                       className={`min-h-[44px] px-2 sm:px-3 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm ${
@@ -415,6 +504,37 @@ const TariffSelectionModal = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Промокод для MULTI */}
+              <div>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">Промокод</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(null) }}
+                    placeholder="Введите код"
+                    disabled={isLoading || confirmed}
+                    className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyPromo}
+                    disabled={isLoading || confirmed || !promoCode.trim()}
+                    className="min-h-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg font-medium text-slate-200 flex items-center gap-2"
+                  >
+                    {promoLoading ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
+                    <span>Применить</span>
+                  </button>
+                  {promoData?.valid && (
+                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label="Убрать промокод">
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                {promoData?.valid && <p className="mt-1.5 text-green-400 text-sm">{promoData.message}</p>}
+                {promoError && <p className="mt-1.5 text-red-400 text-sm">{promoError}</p>}
               </div>
 
               <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
@@ -440,12 +560,10 @@ const TariffSelectionModal = ({
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiTotalMonthlyPrice.toFixed(2)} ₽</span>
                 </div>
                 {discount > 0 && (
-                  <>
-                    <div className="flex justify-between items-center text-green-400">
-                      <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
-                      <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{discountAmount.toFixed(2)} ₽</span>
-                    </div>
-                  </>
+                  <div className="flex justify-between items-center text-green-400">
+                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
+                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{effectiveDiscountAmount.toFixed(2)} ₽</span>
+                  </div>
                 )}
                 <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
                   <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Итого:</span>

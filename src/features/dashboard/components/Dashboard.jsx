@@ -1034,7 +1034,8 @@ const Dashboard = ({
         subscriptionData.periodMonths || 1,
         subscriptionData.testPeriod || false,
         subscriptionData.paymentMode || 'pay_now',
-        subscriptionData.discount || 0
+        subscriptionData.discount || 0,
+        subscriptionData.promocodeId || null
       )
       
       logger.info('Dashboard', 'onHandleCreateSubscription вернул результат (ПОСЛЕ await)', {

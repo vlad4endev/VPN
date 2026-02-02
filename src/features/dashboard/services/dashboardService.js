@@ -667,7 +667,7 @@ export const dashboardService = {
    * @param {number} discount - Скидка (0-1)
    * @returns {Promise<Object>} Объект с paymentUrl и orderId
    */
-  async initiatePayment(user, tariff, amount, devices = null, periodMonths = 1, discount = 0) {
+  async initiatePayment(user, tariff, amount, devices = null, periodMonths = 1, discount = 0, promocodeId = null) {
     try {
       logger.info('Dashboard', 'Инициация оплаты через YooMoney', {
         userId: user?.id,
@@ -837,6 +837,7 @@ export const dashboardService = {
           status: 'pending',
           devices: devices || tariff.devices || 1,
           periodMonths: periodMonths || 1,
+          promocodeId: promocodeId || null,
           createdAt: new Date().toISOString(),
         })
 
@@ -1034,7 +1035,7 @@ export const dashboardService = {
    * @param {number} discount - Скидка (0-1)
    * @returns {Promise<Object>} Обновленные данные пользователя с VPN ссылкой или ссылка на оплату
    */
-  async createSubscription(user, tariff, devices = null, natrockPort = null, periodMonths = 1, testPeriod = false, paymentMode = 'pay_now', discount = 0) {
+  async createSubscription(user, tariff, devices = null, natrockPort = null, periodMonths = 1, testPeriod = false, paymentMode = 'pay_now', discount = 0, promocodeId = null) {
     console.log('🎯 dashboardService.createSubscription: Начало функции', {
       userId: user?.id,
       userEmail: user?.email,
@@ -1383,7 +1384,8 @@ export const dashboardService = {
           paymentAmount,
           finalDevices,
           finalPeriodMonths,
-          discount
+          discount,
+          promocodeId
         )
         
         logger.debug('Dashboard', 'Платеж инициирован, получен результат', {

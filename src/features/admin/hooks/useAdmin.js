@@ -29,7 +29,7 @@ export function useAdmin({
   setTariffs,
   setError,
   setSuccess,
-  adminTab = 'users', // Принимаем из пропсов, если передано
+  adminTab = 'dashboard', // Принимаем из пропсов, если передано
   setAdminTab = () => {}, // Принимаем из пропсов, если передано
 }) {
   // Состояние активной вкладки - теперь принимается из пропсов

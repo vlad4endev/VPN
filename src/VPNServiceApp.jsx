@@ -25,6 +25,7 @@ import { copyToClipboard } from './shared/utils/copyToClipboard.js'
 import logger from './shared/utils/logger.js'
 import { canAccessAdmin, canAccessFinances } from './shared/constants/admin.js'
 import { stripUndefinedForFirestore } from './shared/utils/firestoreSafe.js'
+import { useUIStore } from './lib/store/uiStore.js'
 
 // Firebase инициализация вынесена в src/lib/firebase/config.js
 // Используется через хук useFirebase из src/shared/hooks/useFirebase.js
@@ -56,8 +57,18 @@ export default function VPNServiceApp() {
   
   // Используем хук для управления view
   const { view, setView } = useView({ currentUser })
+  const { adminTab, setAdminTab } = useUIStore()
   const [showKeyModal, setShowKeyModal] = useState(false)
   const [showLogger, setShowLogger] = useState(false)
+
+  // При переходе на админ-панель всегда открывать дашборд
+  const prevViewRef = useRef(view)
+  useEffect(() => {
+    if (view === 'admin' && prevViewRef.current !== 'admin') {
+      setAdminTab('dashboard')
+    }
+    prevViewRef.current = view
+  }, [view, setAdminTab])
 
   // Используем хук авторизации
   const authHandlers = useAuth({
@@ -1764,8 +1775,8 @@ export default function VPNServiceApp() {
         <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div></div>}>
           <AdminPanel
         currentUser={currentUser}
-        adminTab={adminHandlers.adminTab}
-        onSetAdminTab={adminHandlers.setAdminTab}
+        adminTab={adminTab}
+        onSetAdminTab={setAdminTab}
         onSetView={setView}
         onHandleLogout={authHandlers.handleLogout}
         users={users}

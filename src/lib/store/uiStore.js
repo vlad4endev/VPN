@@ -16,7 +16,7 @@ export const useUIStore = create(
       setShowLogger: (show) => set({ showLogger }),
 
       // Табы в админ-панели
-      adminTab: 'users',
+      adminTab: 'dashboard',
       setAdminTab: (tab) => set({ adminTab: tab }),
 
       // Табы в dashboard

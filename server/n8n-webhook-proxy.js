@@ -168,7 +168,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-N8N-Webhook-Secret', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-N8N-Webhook-Secret', 'X-App-Id', 'Accept'],
 }
 
 // CORS для обычных API endpoints (frontend)
@@ -276,6 +276,129 @@ async function logN8NEvent(eventType, eventData, status = 'success', errorMessag
     })
   }
 }
+
+/**
+ * Создать уведомление пользователю в Firestore (бэкенд; обходит правила безопасности).
+ * @param {Object} params - { userId, type, title, body, overview?, data? }
+ * @returns {Promise<boolean>} true если создано, false при ошибке или недоступной БД
+ */
+async function createNotification(params) {
+  if (!db) return false
+  const { userId, type, title, body, overview = null, data = null } = params
+  if (!userId || !type || !title || !body) return false
+  try {
+    const appIdForNotifications = process.env.APP_ID || 'skyputh'
+    const coll = db.collection(`artifacts/${appIdForNotifications}/public/data/notifications`)
+    await coll.add({
+      userId: String(userId),
+      type: String(type),
+      title: String(title),
+      body: String(body),
+      overview: overview != null ? String(overview) : null,
+      read: false,
+      createdAt: new Date().toISOString(),
+      data: data && typeof data === 'object' ? data : null
+    })
+    return true
+  } catch (err) {
+    console.error('❌ n8n-webhook-proxy: Ошибка создания уведомления', { userId, type, error: err.message })
+    return false
+  }
+}
+
+const APP_ID = process.env.APP_ID || 'skyputh'
+
+/**
+ * Проверить Firebase ID token и убедиться, что пользователь — админ (claim или роль в Firestore).
+ * Возвращает { ok: true, uid } или отправляет 401/403 и возвращает { ok: false }.
+ */
+async function ensureAdmin(req, res) {
+  if (!admin || !db) {
+    res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return { ok: false }
+  }
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, error: 'Требуется авторизация' })
+    return { ok: false }
+  }
+  const idToken = authHeader.slice(7)
+  let decoded
+  try {
+    decoded = await admin.auth().verifyIdToken(idToken)
+  } catch (err) {
+    res.status(401).json({ success: false, error: 'Неверный или истёкший токен' })
+    return { ok: false }
+  }
+  const uid = decoded.uid
+  if (decoded.admin === true) {
+    return { ok: true, uid }
+  }
+  const clientAppId = (req.headers['x-app-id'] || '').trim() || null
+  const appIdsToTry = [
+    clientAppId,
+    APP_ID,
+    'skyputh',
+    process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
+    'skypathvpn'
+  ].filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i)
+  for (const appId of appIdsToTry) {
+    try {
+      const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
+      const snap = await userRef.get()
+      if (snap.exists) {
+        const role = snap.data().role
+        if (role === 'admin' || (role && String(role).toLowerCase() === 'admin')) {
+          return { ok: true, uid }
+        }
+      }
+    } catch (err) {
+      console.warn('ensureAdmin: ошибка чтения пользователя из Firestore', { uid, appId, error: err.message })
+    }
+  }
+  console.warn('ensureAdmin: доступ запрещён (нет claim admin и нет role: admin в Firestore)', { uid, APP_ID })
+  res.status(403).json({ success: false, error: 'Недостаточно прав' })
+  return { ok: false }
+}
+
+/**
+ * Рассылка уведомлений через бэкенд (обходит Firestore rules).
+ * POST /api/admin/notifications/broadcast
+ * Body: { userIds: string[], type: string, title: string, body: string, overview?: string }
+ * Header: Authorization: Bearer <Firebase ID token>
+ */
+app.post('/api/admin/notifications/broadcast', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  }
+  const { userIds, type, title, body, overview } = req.body || {}
+  if (!Array.isArray(userIds) || userIds.length === 0 || !type || !title || !body) {
+    return res.status(400).json({
+      success: false,
+      error: 'Обязательны: userIds (массив), type, title, body'
+    })
+  }
+  const payload = {
+    type: String(type),
+    title: String(title).trim(),
+    body: String(body).trim(),
+    overview: overview != null ? String(overview).trim() || null : null
+  }
+  let sent = 0
+  let failed = 0
+  for (const uid of userIds) {
+    if (!uid) continue
+    const ok = await createNotification({
+      userId: String(uid),
+      ...payload
+    })
+    if (ok) sent += 1
+    else failed += 1
+  }
+  res.json({ success: true, sent, failed })
+})
 
 /**
  * Проверка и алерты для подписок в проблемном состоянии
@@ -993,6 +1116,249 @@ app.post('/api/vpn/sync-user', async (req, res) => {
       success: false,
       error: error.message || 'Ошибка синхронизации пользователя через n8n',
     })
+  }
+})
+
+/**
+ * Валидация промокода
+ * POST /api/promocodes/validate
+ * Body: { code: string, tariffId: string, amount: number }
+ * Response: { valid: boolean, discount: number, discountAmount: number, message?: string, promocodeId?: string }
+ */
+app.post('/api/promocodes/validate', async (req, res) => {
+  try {
+    const { code, tariffId, amount } = req.body || {}
+    const codeTrimmed = typeof code === 'string' ? code.trim().toUpperCase() : ''
+
+    if (!codeTrimmed) {
+      return res.status(400).json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Введите промокод'
+      })
+    }
+
+    if (!db) {
+      await initFirebaseAdmin()
+    }
+    if (!db) {
+      return res.status(503).json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Сервис временно недоступен'
+      })
+    }
+
+    const promocodesRef = db.collection(`artifacts/${APP_ID}/public/data/promocodes`)
+    const snapshot = await promocodesRef.where('code', '==', codeTrimmed).limit(1).get()
+
+    if (snapshot.empty) {
+      return res.json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Промокод не найден'
+      })
+    }
+
+    const doc = snapshot.docs[0]
+    const promo = { id: doc.id, ...doc.data() }
+
+    if (!promo.active) {
+      return res.json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Промокод неактивен'
+      })
+    }
+
+    const now = new Date()
+    if (promo.validFrom && new Date(promo.validFrom) > now) {
+      return res.json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Промокод ещё не действует'
+      })
+    }
+    if (promo.validUntil && new Date(promo.validUntil) < now) {
+      return res.json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Срок действия промокода истёк'
+      })
+    }
+
+    const maxUsages = promo.maxUsages != null ? Number(promo.maxUsages) : null
+    const currentUsages = Number(promo.currentUsages || 0)
+    if (maxUsages != null && currentUsages >= maxUsages) {
+      return res.json({
+        valid: false,
+        discount: 0,
+        discountAmount: 0,
+        message: 'Промокод исчерпан'
+      })
+    }
+
+    if (tariffId && promo.tariffIds && Array.isArray(promo.tariffIds) && promo.tariffIds.length > 0) {
+      if (!promo.tariffIds.includes(tariffId)) {
+        return res.json({
+          valid: false,
+          discount: 0,
+          discountAmount: 0,
+          message: 'Промокод не действует для выбранного тарифа'
+        })
+      }
+    }
+
+    const baseAmount = Number(amount) || 0
+    let discountAmount = 0
+    let discount = 0
+
+    if (promo.type === 'percent') {
+      const percent = Math.min(100, Math.max(0, Number(promo.value) || 0))
+      discount = percent / 100
+      discountAmount = baseAmount * discount
+    } else if (promo.type === 'fixed') {
+      const fixedValue = Math.max(0, Number(promo.value) || 0)
+      discountAmount = Math.min(fixedValue, baseAmount)
+      discount = baseAmount > 0 ? discountAmount / baseAmount : 0
+    }
+
+    return res.json({
+      valid: true,
+      discount,
+      discountAmount,
+      promocodeId: promo.id,
+      message: promo.type === 'percent'
+        ? `Скидка ${Math.round((promo.value || 0))}%`
+        : `Скидка ${Math.round(discountAmount)} ₽`
+    })
+  } catch (err) {
+    console.error('❌ n8n-webhook-proxy: Ошибка валидации промокода:', err.message)
+    res.status(500).json({
+      valid: false,
+      discount: 0,
+      discountAmount: 0,
+      message: 'Ошибка проверки промокода'
+    })
+  }
+})
+
+/**
+ * API для управления промокодами (только админ, обходит Firestore rules)
+ * Использует Firebase Admin SDK
+ */
+
+/** GET /api/admin/promocodes — список промокодов */
+app.get('/api/admin/promocodes', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  try {
+    const snap = await db.collection(`artifacts/${APP_ID}/public/data/promocodes`).get()
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    res.json({ success: true, promocodes: list })
+  } catch (err) {
+    console.error('❌ GET /api/admin/promocodes:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/promocodes — создать промокод */
+app.post('/api/admin/promocodes', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  try {
+    const data = req.body || {}
+    const docData = {
+      code: (data.code || '').trim().toUpperCase(),
+      type: data.type || 'percent',
+      value: Number(data.value) || 0,
+      tariffIds: Array.isArray(data.tariffIds) ? data.tariffIds : null,
+      active: data.active !== false,
+      maxUsages: data.maxUsages != null ? Number(data.maxUsages) : null,
+      currentUsages: 0,
+      validFrom: data.validFrom || null,
+      validUntil: data.validUntil || null,
+      description: data.description || null,
+      createdAt: new Date().toISOString(),
+      createdBy: adminOk.uid || null,
+    }
+    if (!docData.code) {
+      return res.status(400).json({ success: false, error: 'Код промокода обязателен' })
+    }
+    const ref = await db.collection(`artifacts/${APP_ID}/public/data/promocodes`).add(docData)
+    res.json({ success: true, id: ref.id, ...docData })
+  } catch (err) {
+    console.error('❌ POST /api/admin/promocodes:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** PATCH /api/admin/promocodes/:id — обновить промокод */
+app.patch('/api/admin/promocodes/:id', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  try {
+    const { id } = req.params
+    const data = req.body || {}
+    const ref = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) {
+      return res.status(404).json({ success: false, error: 'Промокод не найден' })
+    }
+    const updates = {}
+    if (data.code != null) updates.code = String(data.code).trim().toUpperCase()
+    if (data.type != null) updates.type = data.type
+    if (data.value != null) updates.value = Number(data.value)
+    if (data.tariffIds !== undefined) updates.tariffIds = Array.isArray(data.tariffIds) ? data.tariffIds : null
+    if (data.active !== undefined) updates.active = Boolean(data.active)
+    if (data.maxUsages !== undefined) updates.maxUsages = data.maxUsages != null ? Number(data.maxUsages) : null
+    if (data.validFrom !== undefined) updates.validFrom = data.validFrom || null
+    if (data.validUntil !== undefined) updates.validUntil = data.validUntil || null
+    if (data.description !== undefined) updates.description = data.description || null
+    updates.updatedAt = new Date().toISOString()
+    await ref.update(updates)
+    res.json({ success: true, id, ...updates })
+  } catch (err) {
+    console.error('❌ PATCH /api/admin/promocodes/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** DELETE /api/admin/promocodes/:id — удалить промокод */
+app.delete('/api/admin/promocodes/:id', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  try {
+    const { id } = req.params
+    const ref = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) {
+      return res.status(404).json({ success: false, error: 'Промокод не найден' })
+    }
+    await ref.delete()
+    res.json({ success: true, id })
+  } catch (err) {
+    console.error('❌ DELETE /api/admin/promocodes/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
   }
 })
 
@@ -2541,6 +2907,37 @@ app.post('/api/payment/verify', async (req, res) => {
         }
       }
 
+      // При успешной оплате: обновляем статус платежа в Firestore (idempotency); при наличии промокода — инкрементируем счётчик
+      if (paymentData?.status === 'completed' && db) {
+        try {
+          const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+          const paymentsSnap = await paymentsRef.where('orderId', '==', orderId).limit(1).get()
+          if (!paymentsSnap.empty) {
+            const paymentDoc = paymentsSnap.docs[0]
+            const paymentDocData = paymentDoc.data()
+            if (paymentDocData.status === 'pending') {
+              await paymentDoc.ref.update({ status: 'completed' })
+              const promocodeId = paymentDocData.promocodeId
+              if (promocodeId) {
+                const promoRef = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${promocodeId}`)
+                const promoSnap = await promoRef.get()
+                if (promoSnap.exists) {
+                  const promoData = promoSnap.data()
+                  const currentUsages = Number(promoData.currentUsages || 0)
+                  await promoRef.update({
+                    currentUsages: currentUsages + 1,
+                    lastUsedAt: new Date().toISOString()
+                  })
+                  console.log('✅ n8n-webhook-proxy: Промокод использован', { promocodeId, orderId })
+                }
+              }
+            }
+          }
+        } catch (updateErr) {
+          console.warn('⚠️ n8n-webhook-proxy: Ошибка обновления платежа/промокода (не критично):', updateErr.message)
+        }
+      }
+
       // Отдаём клиенту тот же массив/объект, из которого собрали paymentData, чтобы фронт мог использовать result, если payment не подошёл
       const responseResult = resultArray != null
         ? resultArray
@@ -3143,6 +3540,16 @@ async function activateSubscriptionAfterPayment(paymentData) {
           await checkSubscriptionAlerts(subscriptionId, {
             ...currentData,
             status: 'active'
+          })
+          // Уведомление пользователю о продлении подписки
+          const tariffName = tariffData.name || 'Подписка'
+          const expiresAtStr = subscriptionExpiresAt ? new Date(subscriptionExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+          await createNotification({
+            userId,
+            type: 'subscription',
+            title: 'Подписка активирована',
+            body: `Ваша подписка «${tariffName}» успешно продлена${expiresAtStr ? ` до ${expiresAtStr}` : ''}.`,
+            data: { subscriptionId, orderId: paymentData.orderId, tariffName, expiresAt: subscriptionExpiresAt }
           })
         } else {
           // Ошибка активации после всех retry попыток

@@ -52,7 +52,7 @@ function buildContextValue(adminHandlers, adminTab, setAdminTab) {
     loadReviews: ensureFunction(adminHandlers.loadReviews, 'loadReviews'),
     handleApproveReview: ensureFunction(adminHandlers.handleApproveReview, 'handleApproveReview'),
     handleRejectReview: ensureFunction(adminHandlers.handleRejectReview, 'handleRejectReview'),
-    adminTab: adminTab ?? 'users',
+    adminTab: adminTab ?? 'dashboard',
     setAdminTab: setAdminTab || (() => {}),
   }
 }
@@ -91,7 +91,7 @@ const FALLBACK_CONTEXT = {
   loadReviews: ensureFunction(null, 'loadReviews', noopAsync),
   handleApproveReview: ensureFunction(null, 'handleApproveReview', noopAsync),
   handleRejectReview: ensureFunction(null, 'handleRejectReview', noopAsync),
-  adminTab: 'users',
+  adminTab: 'dashboard',
   setAdminTab: () => {},
 }
 
@@ -103,7 +103,7 @@ const FALLBACK_CONTEXT = {
 export const AdminProviderWrapper = ({ children, injectHandlers, adminTab, setAdminTab }) => {
   const value =
     injectHandlers != null
-      ? (buildContextValue(injectHandlers, adminTab ?? 'users', setAdminTab || (() => {})) ?? FALLBACK_CONTEXT)
+      ? (buildContextValue(injectHandlers, adminTab ?? 'dashboard', setAdminTab || (() => {})) ?? FALLBACK_CONTEXT)
       : FALLBACK_CONTEXT
   return <AdminContextProvider value={value}>{children}</AdminContextProvider>
 }
