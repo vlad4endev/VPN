@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
-import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS, ADMIN_MOBILE_PRIMARY_IDS, ADMIN_MOBILE_OTHER_ITEMS } from '../../features/admin/constants/navSections.js'
+import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
+
+// Мобильная панель: основные кнопки и «Прочее» (вычисляем здесь, чтобы не зависеть от экспортов navSections)
+const ADMIN_MOBILE_PRIMARY_IDS = ['dashboard', 'users', 'reviews']
+const ADMIN_MOBILE_OTHER_ITEMS = ADMIN_NAV_ITEMS.filter((item) => !ADMIN_MOBILE_PRIMARY_IDS.includes(item.id))
 import NotificationsCenter from '../../features/notifications/components/NotificationsCenter.jsx'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
