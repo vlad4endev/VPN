@@ -25,6 +25,20 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
     
+    // Обновление «очистка подписки»: владелец сбрасывает только поля подписки (uuid, plan, expiresAt и т.д.) в null
+    // Явный список полей, которые разрешено менять при отмене подписки (остальные не трогаем)
+    function isSubscriptionCleanupUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let allowedCleanupKeys = [
+        'uuid', 'plan', 'expiresAt', 'tariffName', 'tariffId', 'devices',
+        'natrockPort', 'periodMonths', 'paymentStatus', 'testPeriodStartDate',
+        'testPeriodEndDate', 'unpaidStartDate', 'discount', 'vpnLink', 'updatedAt'
+      ];
+      // Меняются только поля из списка очистки и updatedAt присутствует
+      return affected.hasOnly(allowedCleanupKeys) &&
+        request.resource.data.updatedAt is string;
+    }
+    
     // Вспомогательная функция для валидации email
     function isValidEmail(email) {
       return email is string && 
@@ -81,21 +95,20 @@ service cloud.firestore {
         (request.auth.token.email == null || request.resource.data.email == request.auth.token.email);
       
       // Обновление: свой документ или админ (claim или роль в Firestore)
-      // ВАЛИДАЦИЯ: Проверяем, что обновляемые данные валидны
-      allow update: if request.auth != null && 
-        (isOwner(userId) || isAdmin() || isAdminFromFirestore()) &&
-        // Валидация обновляемых полей (если они присутствуют)
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email']) || isValidEmail(request.resource.data.email)) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || isValidName(request.resource.data.name)) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || isValidRole(request.resource.data.role)) &&
-        // uuid: либо не меняется, либо валидный UUID, либо null (при отмене подписки)
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uuid']) || isValidUUID(request.resource.data.uuid) || request.resource.data.uuid == null) &&
-        // Запрещаем изменение роли на admin (только через backend)
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || 
-         request.resource.data.role == resource.data.role || 
-         (resource.data.role == 'user' && request.resource.data.role == 'admin' && (isAdmin() || isAdminFromFirestore()))) &&
-        // Обновляем updatedAt при любом изменении
-        request.resource.data.updatedAt is string;
+      // Путь 1: владелец делает только «очистку подписки» (uuid/plan/expiresAt/... → null) — разрешаем без строгой валидации полей
+      // Путь 2: общее правило с валидацией обновляемых полей
+      allow update: if request.auth != null && (
+        (isOwner(userId) && isSubscriptionCleanupUpdate()) ||
+        ((isOwner(userId) || isAdmin() || isAdminFromFirestore()) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email']) || isValidEmail(request.resource.data.email)) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || isValidName(request.resource.data.name)) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || isValidRole(request.resource.data.role)) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uuid']) || isValidUUID(request.resource.data.uuid) || request.resource.data.uuid == null) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+           request.resource.data.role == resource.data.role ||
+           (resource.data.role == 'user' && request.resource.data.role == 'admin' && (isAdmin() || isAdminFromFirestore()))) &&
+          request.resource.data.updatedAt is string)
+      );
       
       // Удаление: админ (claim или роль в Firestore)
       allow delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
