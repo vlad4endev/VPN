@@ -136,9 +136,10 @@ export const authService = {
    * @param {string} email - Email пользователя
    * @param {string} password - Пароль
    * @param {string} name - Имя пользователя
+   * @param {string|null} [referredBy] - UID пригласителя (реферальная система)
    * @returns {Promise<Object>} Данные пользователя
    */
-  async createUserWithEmail(email, password, name) {
+  async createUserWithEmail(email, password, name, referredBy = null) {
     if (!auth || !db) {
       throw new Error('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
     }
@@ -180,6 +181,7 @@ export const authService = {
       photoURL: firebaseUser.photoURL || null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      ...(referredBy && referredBy.trim() ? { referredBy: referredBy.trim() } : {}),
     }
     
     await setDoc(userDocRef, newUserData)

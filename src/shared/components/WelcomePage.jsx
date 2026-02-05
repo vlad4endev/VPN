@@ -145,6 +145,11 @@ export default function WelcomePage({ onSetView, reviews = [] }) {
             <span className="flex items-center gap-2 font-bold">
               <Check className="text-blue-500 shrink-0" size={20} /> {TARIFFS[activeTariff].devices}
             </span>
+            {activeTariff === 'Super' && (
+              <span className="flex items-center gap-2 font-bold">
+                <Check className="text-blue-500 shrink-0" size={20} /> Современное шифрование
+              </span>
+            )}
             <span className="flex items-center gap-2 font-bold text-center sm:text-left">
               <Check className="text-blue-500 shrink-0" size={20} /> Локации: Нидерланды, Россия, США, Швеция
             </span>

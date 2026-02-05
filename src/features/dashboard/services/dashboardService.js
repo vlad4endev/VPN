@@ -1723,7 +1723,7 @@ export const dashboardService = {
       paymentStatus: paymentStatus, // Статус оплаты
       testPeriodStartDate: testPeriodStartDate, // Начало тестового периода
       testPeriodEndDate: testPeriodEndDate, // Конец тестового периода
-      discount: discount || 0, // Скидка
+      discount: 0, // Промокод действует только на 1 оплату — не сохраняем скидку (иначе применится при продлении)
       vpnLink: subscriptionLink, // Ссылка на подписку (для обратной совместимости)
       subscriptionLink: subscriptionLink, // Явная ссылка на подписку
       updatedAt: new Date().toISOString(),
@@ -1785,7 +1785,7 @@ export const dashboardService = {
       paymentStatus: paymentStatus,
       testPeriodStartDate: testPeriodStartDate,
       testPeriodEndDate: testPeriodEndDate,
-      discount: discount || 0,
+      discount: 0, // Промокод действует только на 1 оплату — не возвращаем скидку
       vpnLink: vpnLink, // Ссылка на подписку: https://subs.skypath.fun:3458/vk198/{subId}
       subscriptionLink: subscriptionLink, // Явная ссылка на подписку для ясности
     }

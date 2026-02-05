@@ -362,6 +362,108 @@ async function ensureAdmin(req, res) {
 }
 
 /**
+ * Проверить Firebase ID token (любой пользователь). Возвращает { ok: true, uid } или 401 и { ok: false }.
+ */
+async function verifyIdToken(req, res) {
+  if (!admin) {
+    res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return { ok: false }
+  }
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, error: 'Требуется авторизация' })
+    return { ok: false }
+  }
+  const idToken = authHeader.slice(7)
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    return { ok: true, uid: decoded.uid }
+  } catch (err) {
+    res.status(401).json({ success: false, error: 'Неверный или истёкший токен' })
+    return { ok: false }
+  }
+}
+
+/** Сумма бонуса приглашающему за одного приглашённого (баллы). Переопределяется через REFERRAL_BONUS_AMOUNT. */
+const REFERRAL_BONUS_AMOUNT = Number(process.env.REFERRAL_BONUS_AMOUNT) || 100
+
+/**
+ * Реферальная система: начисление бонуса пригласителю после регистрации приглашённого (один раз на одного).
+ * POST /api/referral/process
+ * Body: { referredUserId: string, inviterId: string }
+ * Header: Authorization: Bearer <Firebase ID token приглашённого>
+ */
+app.post('/api/referral/process', async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult.ok) return
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  }
+  const { referredUserId, inviterId } = req.body || {}
+  if (!referredUserId || !inviterId || referredUserId === inviterId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Обязательны referredUserId и inviterId; приглашённый и пригласитель должны различаться'
+    })
+  }
+  if (authResult.uid !== referredUserId) {
+    return res.status(403).json({
+      success: false,
+      error: 'Токен должен принадлежать приглашённому пользователю'
+    })
+  }
+  const usersCol = `artifacts/${APP_ID}/public/data/users_v4`
+  const rewardsCol = `artifacts/${APP_ID}/public/data/referral_rewards`
+  try {
+    const referredRef = db.doc(`${usersCol}/${referredUserId}`)
+    const referredSnap = await referredRef.get()
+    if (!referredSnap.exists) {
+      return res.status(404).json({ success: false, error: 'Пользователь не найден' })
+    }
+    const referredData = referredSnap.data()
+    if (referredData.referredBy !== inviterId) {
+      return res.status(400).json({
+        success: false,
+        error: 'У пользователя не указан этот пригласитель'
+      })
+    }
+    const rewardDocId = referredUserId
+    const rewardRef = db.doc(`${rewardsCol}/${rewardDocId}`)
+    const rewardSnap = await rewardRef.get()
+    if (rewardSnap.exists) {
+      return res.json({ success: true, message: 'Бонус уже был начислен ранее' })
+    }
+    const inviterRef = db.doc(`${usersCol}/${inviterId}`)
+    const inviterSnap = await inviterRef.get()
+    if (!inviterSnap.exists) {
+      return res.status(400).json({ success: false, error: 'Пригласитель не найден' })
+    }
+    const now = new Date().toISOString()
+    const currentBalance = Number(inviterSnap.data().referralBonusBalance) || 0
+    const newBalance = currentBalance + REFERRAL_BONUS_AMOUNT
+    await rewardRef.set({
+      inviterId,
+      referredUserId,
+      bonusAmount: REFERRAL_BONUS_AMOUNT,
+      bonusGrantedAt: now,
+    })
+    await inviterRef.update({
+      referralBonusBalance: newBalance,
+      updatedAt: now,
+    })
+    console.log('Referral: бонус начислен', { inviterId, referredUserId, bonus: REFERRAL_BONUS_AMOUNT, newBalance })
+    return res.json({
+      success: true,
+      bonusAmount: REFERRAL_BONUS_AMOUNT,
+      referralBonusBalance: newBalance,
+    })
+  } catch (err) {
+    console.error('POST /api/referral/process:', err)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка сервера' })
+  }
+})
+
+/**
  * Рассылка уведомлений через бэкенд (обходит Firestore rules).
  * POST /api/admin/notifications/broadcast
  * Body: { userIds: string[], type: string, title: string, body: string, overview?: string }
@@ -1122,12 +1224,13 @@ app.post('/api/vpn/sync-user', async (req, res) => {
 /**
  * Валидация промокода
  * POST /api/promocodes/validate
- * Body: { code: string, tariffId: string, amount: number }
+ * Body: { code: string, tariffId: string, amount: number, userId?: string }
  * Response: { valid: boolean, discount: number, discountAmount: number, message?: string, promocodeId?: string }
+ * Если userId передан — проверяется, не использовал ли пользователь этот промокод ранее (1 раз на пользователя).
  */
 app.post('/api/promocodes/validate', async (req, res) => {
   try {
-    const { code, tariffId, amount } = req.body || {}
+    const { code, tariffId, amount, userId } = req.body || {}
     const codeTrimmed = typeof code === 'string' ? code.trim().toUpperCase() : ''
 
     if (!codeTrimmed) {
@@ -1202,6 +1305,20 @@ app.post('/api/promocodes/validate', async (req, res) => {
         discountAmount: 0,
         message: 'Промокод исчерпан'
       })
+    }
+
+    // Проверка: пользователь уже использовал этот промокод (1 раз на пользователя)
+    if (userId && typeof userId === 'string' && userId.trim()) {
+      const usedByRef = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${promo.id}/usedBy/${userId.trim()}`)
+      const usedBySnap = await usedByRef.get()
+      if (usedBySnap.exists) {
+        return res.json({
+          valid: false,
+          discount: 0,
+          discountAmount: 0,
+          message: 'Вы уже использовали этот промокод'
+        })
+      }
     }
 
     if (tariffId && promo.tariffIds && Array.isArray(promo.tariffIds) && promo.tariffIds.length > 0) {
@@ -2922,6 +3039,7 @@ app.post('/api/payment/verify', async (req, res) => {
               console.log('✅ n8n-webhook-proxy: Статус платежа обновлён на completed', { orderId })
               // 2) Только при первом переходе в completed: инкремент использования промокода (не при повторе вебхука)
               const promocodeId = paymentDocData.promocodeId
+              const paymentUserId = paymentDocData.userId
               if (promocodeId) {
                 const promoRef = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${promocodeId}`)
                 const promoSnap = await promoRef.get()
@@ -2932,7 +3050,15 @@ app.post('/api/payment/verify', async (req, res) => {
                     currentUsages: currentUsages + 1,
                     lastUsedAt: new Date().toISOString()
                   })
-                  console.log('✅ n8n-webhook-proxy: Промокод использован', { promocodeId, orderId })
+                  // Записываем, что этот пользователь использовал промокод (повторное использование запрещено)
+                  if (paymentUserId && typeof paymentUserId === 'string') {
+                    const usedByRef = db.doc(`artifacts/${APP_ID}/public/data/promocodes/${promocodeId}/usedBy/${paymentUserId}`)
+                    await usedByRef.set({
+                      usedAt: new Date().toISOString(),
+                      orderId: orderId
+                    })
+                  }
+                  console.log('✅ n8n-webhook-proxy: Промокод использован', { promocodeId, orderId, userId: paymentUserId })
                 }
               }
             }
@@ -3461,7 +3587,7 @@ async function activateSubscriptionAfterPayment(paymentData) {
       devices: devices,
       periodMonths: periodMonths,
       paymentStatus: 'paid', // ТОЛЬКО для обратной совместимости (устаревшее поле)
-      discount: discount,
+      discount: 0, // Промокод действует только на 1 оплату — не сохраняем скидку (иначе применится при продлении)
       unpaidStartDate: null, // Очищаем дату начала неоплаченного периода
       updatedAt: new Date().toISOString(),
     }

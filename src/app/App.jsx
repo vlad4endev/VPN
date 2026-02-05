@@ -40,6 +40,7 @@ import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/const
 import { APP_ID } from '../shared/constants/app.js'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
+import { resolveReferralCode, processReferralBonus, saveReferralCodePending, getReferralCodePending, getOrCreateReferralCode } from '../features/referral/services/referralService.js'
 import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
@@ -323,8 +324,19 @@ export default function VPNServiceApp() {
         if (path === '/review' || hash === '#review') return 'review'
       }
       const savedView = localStorage.getItem('vpn_current_view')
-      const savedUser = localStorage.getItem('vpn_current_user')
-      if (savedView && savedUser && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome' && savedView !== 'review') {
+      const savedUserStr = localStorage.getItem('vpn_current_user')
+      // Восстанавливаем login/register после редиректа с Google (на мобильных страница перезагружается — иначе показывался welcome)
+      if (savedView === 'login' || savedView === 'register') {
+        if (!savedUserStr) return savedView
+        try {
+          const savedUser = JSON.parse(savedUserStr)
+          return savedUser?.role === 'admin' ? 'admin' : 'dashboard'
+        } catch {
+          return savedView
+        }
+      }
+      const savedUser = savedUserStr ? (() => { try { return JSON.parse(savedUserStr) } catch { return null } })() : null
+      if (savedView && savedUser && savedView !== 'welcome' && savedView !== 'review') {
         return savedView
       }
     } catch (err) {
@@ -362,17 +374,20 @@ export default function VPNServiceApp() {
   }, [])
 
   // Обертка для setView с сохранением в localStorage
+  // Сохраняем и login/register, чтобы после редиректа с Google (на мобильных страница перезагружается) не возвращаться на welcome
   const setView = useCallback((newView) => {
     setViewState(newView)
-    if (newView && newView !== 'welcome' && newView !== 'login' && newView !== 'register' && newView !== 'review') {
+    if (newView && newView !== 'welcome' && newView !== 'review') {
       try {
         localStorage.setItem('vpn_current_view', newView)
         console.log('💾 View сохранен в localStorage:', newView)
       } catch (err) {
         logger.error('App', 'Ошибка при сохранении view в localStorage', { view: newView }, err)
       }
-    } else {
-      localStorage.removeItem('vpn_current_view')
+    } else if (newView === 'welcome' || newView === 'review') {
+      try {
+        localStorage.removeItem('vpn_current_view')
+      } catch (_) {}
     }
   }, [])
 
@@ -391,6 +406,19 @@ export default function VPNServiceApp() {
   const [welcomeReviews, setWelcomeReviews] = useState([])
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
+  const [referralCodePending, setReferralCodePending] = useState('')
+
+  // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const refCode = params.get('ref')
+    if (refCode && refCode.trim()) {
+      const code = refCode.trim()
+      setReferralCodePending(code)
+      saveReferralCodePending(code)
+    }
+  }, [])
 
   // Обертка для setCurrentUser с сохранением в localStorage (для обратной совместимости)
   const setCurrentUser = useCallback((user) => {
@@ -481,6 +509,16 @@ export default function VPNServiceApp() {
     welcomeReviewsLoadedRef.current = true
     reviewsService.getApprovedReviews().then(setWelcomeReviews).catch(() => setWelcomeReviews([]))
   }, [db])
+
+  // Реферальная система: создаём реферальный код пользователю при первом заходе, если его ещё нет
+  useEffect(() => {
+    if (!db || !currentUser?.id) return
+    const code = currentUser.referralCode && String(currentUser.referralCode).trim()
+    if (code && code.length >= 6) return
+    getOrCreateReferralCode(db, currentUser.id).then((newCode) => {
+      if (newCode) setCurrentUser((prev) => (prev ? { ...prev, referralCode: newCode } : null))
+    }).catch((err) => logger.warn('App', 'Ошибка создания реферального кода', { uid: currentUser.id }, err))
+  }, [db, currentUser?.id])
 
   // Загрузка пользователей из Firestore
   // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
@@ -769,10 +807,17 @@ export default function VPNServiceApp() {
             if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
               // Пользователь вошёл через Google, но документ не создан. Создаём документ и входим.
               try {
+                // Повторно получаем Firestore перед операциями (избегаем doc() error при гонке/другом контексте модуля)
+                const dbForFallback = getDb()
+                if (!dbForFallback) {
+                  logger.warn('Auth', 'Firestore недоступен для fallback-создания пользователя после Google', { uid: firebaseUser.uid })
+                  setCurrentUser(null)
+                  return
+                }
                 logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback после Google)', { uid: firebaseUser.uid, email: firebaseUser.email })
                 const generatedUUID = ThreeXUI.generateUUID()
-                const generatedSubId = await generateUniqueSubId(dbInstance, appId)
-                const userDocRef = doc(dbInstance, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+                const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
+                const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
                 const newUserData = {
                   email: firebaseUser.email || '',
                   name: firebaseUser.displayName || '',
@@ -1275,6 +1320,13 @@ export default function VPNServiceApp() {
       return
     }
 
+    const refCode = referralCodePending || getReferralCodePending(false)
+    let inviterId = null
+    if (refCode && refCode.trim()) {
+      inviterId = await resolveReferralCode(db, refCode.trim())
+      if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке', { inviterId })
+    }
+
     let firebaseUser = null
 
     try {
@@ -1315,10 +1367,25 @@ export default function VPNServiceApp() {
         photoURL: firebaseUser.photoURL || null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        ...(inviterId ? { referredBy: inviterId } : {}),
       }
       
       await setDoc(userDocRef, newUserData)
       logger.info('Firestore', 'Данные пользователя созданы в Firestore', { uid: firebaseUser.uid, email })
+
+      // Реферальный бонус: начисляем пригласителю один раз за этого пользователя (через бэкенд)
+      if (inviterId) {
+        try {
+          const idToken = await firebaseUser.getIdToken()
+          const bonusResult = await processReferralBonus(idToken, firebaseUser.uid, inviterId)
+          if (bonusResult.success) logger.info('Auth', 'Реферальный бонус отправлен на начисление', { inviterId })
+          else logger.warn('Auth', 'Реферальный бонус не начислен', { error: bonusResult.error })
+        } catch (bonusErr) {
+          logger.warn('Auth', 'Ошибка вызова начисления реферального бонуса', { inviterId }, bonusErr)
+        }
+        getReferralCodePending(true)
+        setReferralCodePending('')
+      }
 
       // 4. Устанавливаем currentUser
       const currentUserData = {
@@ -1376,13 +1443,19 @@ export default function VPNServiceApp() {
       
       setError(errorMessage)
     }
-  }, [auth, db, generateUniqueSubId])
+  }, [auth, db, generateUniqueSubId, referralCodePending])
 
   // Общая обработка успешного входа через Google (popup или redirect)
   const processGoogleSignInUser = useCallback(async (firebaseUser) => {
     let userData = await loadUserData(firebaseUser.uid)
       if (!userData) {
         logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { uid: firebaseUser.uid, email: firebaseUser.email })
+        const refCode = referralCodePending || getReferralCodePending(false)
+        let inviterId = null
+        if (refCode && refCode.trim()) {
+          inviterId = await resolveReferralCode(db, refCode.trim())
+          if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке (Google)', { inviterId })
+        }
         const generatedUUID = ThreeXUI.generateUUID()
         const generatedSubId = await generateUniqueSubId(db, appId)
         const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
@@ -1400,9 +1473,22 @@ export default function VPNServiceApp() {
           photoURL: firebaseUser.photoURL || null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          ...(inviterId ? { referredBy: inviterId } : {}),
         }
         await setDoc(userDocRef, newUserData)
         userData = { id: firebaseUser.uid, ...newUserData }
+        if (inviterId) {
+          try {
+            const idToken = await firebaseUser.getIdToken()
+            const bonusResult = await processReferralBonus(idToken, firebaseUser.uid, inviterId)
+            if (bonusResult.success) logger.info('Auth', 'Реферальный бонус отправлен на начисление (Google)', { inviterId })
+            else logger.warn('Auth', 'Реферальный бонус не начислен', { error: bonusResult.error })
+          } catch (bonusErr) {
+            logger.warn('Auth', 'Ошибка вызова начисления реферального бонуса', { inviterId }, bonusErr)
+          }
+          getReferralCodePending(true)
+          setReferralCodePending('')
+        }
       } else {
         if (!userData.subId) {
           const generatedSubId = await generateUniqueSubId(db, appId)
@@ -1449,7 +1535,7 @@ export default function VPNServiceApp() {
         uid: firebaseUser.uid, 
         role: effectiveRole 
       })
-  }, [db, loadUserData, generateUniqueSubId])
+  }, [db, loadUserData, generateUniqueSubId, referralCodePending])
 
   // Вход через Google (popup): auth и provider создаём из того же firebase/auth (избегаем auth/argument-error при дублировании модуля)
   const handleGoogleSignIn = useCallback(async () => {
@@ -2044,7 +2130,8 @@ export default function VPNServiceApp() {
         paymentStatus: finalPaymentStatus, // Используем вычисленный статус оплаты
         testPeriodStartDate: updatedData.testPeriodStartDate || null,
         testPeriodEndDate: updatedData.testPeriodEndDate || null,
-        discount: updatedData.discount || discount || currentUser.discount || 0,
+        // Промокод действует только на 1 оплату — не сохраняем скидку в профиле (иначе она применится при продлении)
+        discount: 0,
         vpnLink: updatedData.vpnLink || currentUser.vpnLink || null,
         updatedAt: new Date().toISOString(),
       }

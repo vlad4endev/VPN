@@ -62,6 +62,18 @@ export const sanitizeUser = (userData) => {
       sanitized.updatedAt = String(userData.updatedAt).substring(0, 50)
     }
 
+    // Реферальная система
+    if (userData.referralCode != null && typeof userData.referralCode === 'string') {
+      sanitized.referralCode = String(userData.referralCode).trim().substring(0, 32)
+    }
+    if (userData.referredBy != null && typeof userData.referredBy === 'string') {
+      sanitized.referredBy = String(userData.referredBy).trim().substring(0, 128)
+    }
+    if (userData.referralBonusBalance != null) {
+      const n = Number(userData.referralBonusBalance)
+      sanitized.referralBonusBalance = Number.isFinite(n) ? n : 0
+    }
+
     // Валидация email формата
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(sanitized.email)) {

@@ -9,7 +9,8 @@ const TariffSelectionModal = ({
   isLoading = false,
   natrockPorts = [],
   settings = null,
-  servers = []
+  servers = [],
+  userId = null
 }) => {
   const [selectedDevices, setSelectedDevices] = useState(1)
   const [selectedPort, setSelectedPort] = useState('')
@@ -71,7 +72,7 @@ const TariffSelectionModal = ({
       const res = await fetch('/api/promocodes/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, tariffId: tariff?.id, amount: basePrice }),
+        body: JSON.stringify({ code, tariffId: tariff?.id, amount: basePrice, userId: userId || undefined }),
       })
       const data = await res.json()
       if (data.valid) {

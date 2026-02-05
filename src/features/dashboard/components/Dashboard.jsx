@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
@@ -2385,6 +2385,63 @@ const Dashboard = ({
               </div>
             )}
 
+            {/* Реферальная программа */}
+            <div className="mt-6 pt-6 border-t border-slate-700/50">
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] font-bold text-white mb-3 flex items-center gap-2">
+                <Gift className="w-5 h-5 text-blue-400" />
+                Пригласи друга
+              </h3>
+              <p className="text-slate-400 text-[clamp(0.8rem,0.75rem+0.25vw,0.875rem)] mb-4">
+                Делитесь ссылкой или кодом. Когда друг зарегистрируется, вы получите бонусные баллы (один раз за каждого приглашённого).
+              </p>
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex-1 flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
+                    <span className="px-3 py-2.5 text-slate-500 text-sm font-mono shrink-0 flex items-center gap-1.5">
+                      <Link2 className="w-4 h-4" /> Ссылка
+                    </span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : '…'}
+                      className="flex-1 min-h-[44px] px-3 py-2.5 bg-transparent text-slate-200 text-sm font-mono border-0 outline-none"
+                      aria-label="Реферальная ссылка"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => currentUser.referralCode && onCopy(`${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}`)}
+                      disabled={!currentUser.referralCode}
+                      className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
+                      aria-label="Копировать ссылку"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-slate-500 text-sm">Код:</span>
+                  <div className="inline-flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
+                    <code className="px-3 py-2 text-slate-200 font-mono text-sm font-bold">
+                      {currentUser.referralCode || '…'}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => currentUser.referralCode && onCopy(currentUser.referralCode)}
+                      disabled={!currentUser.referralCode}
+                      className="min-h-[40px] min-w-[40px] px-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
+                      aria-label="Копировать код"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-slate-300 text-sm">
+                  <Gift className="w-4 h-4 text-green-400 shrink-0" />
+                  <span>Ваш реферальный баланс: <strong className="text-white">{Number(currentUser.referralBonusBalance) || 0}</strong> баллов</span>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -2629,6 +2686,7 @@ const Dashboard = ({
             natrockPorts={settings?.natrockPorts || []}
             settings={settings}
             servers={servers}
+            userId={currentUser?.id}
           />
         )}
 

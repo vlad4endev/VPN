@@ -598,6 +598,158 @@ export const adminService = {
     return deleted
   },
 
+  async loadAccountingIncome() {
+    return this.loadIncome()
+  },
+  async loadAccountingExpenses() {
+    return this.loadExpenses()
+  },
+  async addManualIncome(data, addedBy = '') {
+    return this.addIncome(data.amount, data.date, data.comment || '', addedBy)
+  },
+  async deleteAccountingIncome(id) {
+    if (!db || !id) throw new Error('Не указан ID')
+    const ref = doc(db, `artifacts/${APP_ID}/public/data/income`, id)
+    await deleteDoc(ref)
+    logger.info('Admin', 'Доход удалён', { id })
+  },
+  async deleteAccountingExpense(id) {
+    if (!db || !id) throw new Error('Не указан ID')
+    const ref = doc(db, `artifacts/${APP_ID}/public/data/expenses`, id)
+    await deleteDoc(ref)
+    logger.info('Admin', 'Расход удалён', { id })
+  },
+
+  /**
+   * Загрузка всех записей о доходах
+   * @returns {Promise<Array>}
+   */
+  async loadIncome() {
+    if (!db) throw new Error('База данных недоступна')
+    const col = collection(db, `artifacts/${APP_ID}/public/data/income`)
+    const snap = await getDocs(col)
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    list.sort((a, b) => (toAccountingDate(b) - toAccountingDate(a)))
+    return list
+  },
+
+  /**
+   * Загрузка всех расходов
+   * @returns {Promise<Array>}
+   */
+  async loadExpenses() {
+    if (!db) throw new Error('База данных недоступна')
+    const col = collection(db, `artifacts/${APP_ID}/public/data/expenses`)
+    const snap = await getDocs(col)
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    list.sort((a, b) => (toAccountingDate(b) - toAccountingDate(a)))
+    return list
+  },
+
+  /**
+   * Добавить доход вручную (админ/бухгалтер)
+   * @param {number} amount
+   * @param {string|number} date - ISO или timestamp
+   * @param {string} [note]
+   * @param {string} [createdBy]
+   */
+  async addIncome(amount, date, note = '', createdBy = '') {
+    if (!db) throw new Error('База данных недоступна')
+    const col = collection(db, `artifacts/${APP_ID}/public/data/income`)
+    const ts = date ? (typeof date === 'number' ? date : new Date(date).getTime()) : Date.now()
+    await addDoc(col, {
+      amount: Number(amount) || 0,
+      date: new Date(ts).toISOString(),
+      dateMs: ts,
+      source: 'manual',
+      note: String(note || '').trim(),
+      createdAt: new Date().toISOString(),
+      createdBy: String(createdBy || '').trim(),
+    })
+    logger.info('Admin', 'Доход добавлен', { amount, date: new Date(ts).toISOString() })
+  },
+
+  /**
+   * Добавить доход от оплаты подписки (автоматически при синхронизации)
+   * @param {Object} payment - { id, amount, userId, completedAt, tariffId }
+   */
+  async addIncomeFromPayment(payment) {
+    if (!db || !payment?.id) return
+    const col = collection(db, `artifacts/${APP_ID}/public/data/income`)
+    const amount = Number(payment.amount) || 0
+    if (amount <= 0) return
+    const ts = payment.completedAt ? new Date(payment.completedAt).getTime() : Date.now()
+    await addDoc(col, {
+      amount,
+      date: new Date(ts).toISOString(),
+      dateMs: ts,
+      source: 'payment',
+      paymentId: payment.id,
+      userId: payment.userId || null,
+      tariffId: payment.tariffId || null,
+      note: payment.tariffName ? `Оплата: ${payment.tariffName}` : 'Оплата подписки',
+      createdAt: new Date().toISOString(),
+    })
+    logger.info('Admin', 'Доход от платежа добавлен', { paymentId: payment.id, amount })
+  },
+
+  /**
+   * Синхронизация доходов: добавляет записи для completed-платежей, которых ещё нет в учёте
+   * @param {Array} payments - все платежи
+   * @param {Array} income - все записи доходов
+   * @returns {Promise<number>} количество добавленных
+   */
+  async syncIncomeFromPayments(payments, income) {
+    const completed = payments.filter((p) => (p.status || '').toLowerCase() === 'completed')
+    const existingIds = new Set(income.filter((r) => r.paymentId).map((r) => r.paymentId))
+    let added = 0
+    for (const p of completed) {
+      const amt = Number(p.amount) || 0
+      if (amt > 0 && !existingIds.has(p.id)) {
+        await this.addIncomeFromPayment({
+          id: p.id,
+          amount: p.amount,
+          userId: p.userId,
+          completedAt: p.completedAt || p.createdAt,
+          tariffId: p.tariffId,
+          tariffName: p.tariffName,
+        })
+        existingIds.add(p.id)
+        added++
+      }
+    }
+    return added
+  },
+
+  /**
+   * Добавить расход
+   * @param {number|Object} amount - число или { amount, date, category, comment }
+   * @param {string|number} [date]
+   * @param {string} [category]
+   * @param {string} [note]
+   * @param {string} [createdBy]
+   */
+  async addExpense(amount, date, category = 'other', note = '', createdBy = '') {
+    if (typeof amount === 'object' && amount != null && amount.amount != null) {
+      const d = amount
+      const addedBy = date
+      return this.addExpense(d.amount, d.date, d.category || 'other', d.comment || '', addedBy)
+    }
+    if (!db) throw new Error('База данных недоступна')
+    const col = collection(db, `artifacts/${APP_ID}/public/data/expenses`)
+    const ts = date ? (typeof date === 'number' ? date : new Date(date).getTime()) : Date.now()
+    await addDoc(col, {
+      amount: Number(amount) || 0,
+      date: new Date(ts).toISOString(),
+      dateMs: ts,
+      category: String(category || 'other').trim(),
+      note: String(note || '').trim(),
+      createdAt: new Date().toISOString(),
+      createdBy: String(createdBy || '').trim(),
+    })
+    logger.info('Admin', 'Расход добавлен', { amount, category })
+  },
+
   /**
    * Перегенерация уникальных subId для всех пользователей
    * @returns {Promise<Object>} Результат операции с количеством обновленных пользователей
@@ -744,6 +896,153 @@ export const adminService = {
       }
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления платежей со статусом pending и test', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Загрузка записей ручных доходов (учёт)
+   * @returns {Promise<Array>} Список записей, отсортированных по дате (новые первые)
+   */
+  async loadAccountingIncome() {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const col = collection(db, `artifacts/${APP_ID}/public/data/accounting_income`)
+      const snapshot = await getDocs(col)
+      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      const toMs = (x) => {
+        if (!x || x.date == null) return 0
+        const d = x.date
+        if (typeof d.toMillis === 'function') return d.toMillis()
+        if (typeof d === 'number') return d
+        if (typeof d === 'string') return new Date(d).getTime()
+        return 0
+      }
+      list.sort((a, b) => toMs(b) - toMs(a))
+      return list
+    } catch (err) {
+      logger.error('Admin', 'Ошибка загрузки учёта доходов', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Добавление ручного дохода (админ/бухгалтер)
+   * @param {Object} data - { amount: number, date: string (YYYY-MM-DD) или Date, comment?: string }
+   * @param {string} [addedBy] - ID пользователя (админ/бухгалтер)
+   * @returns {Promise<Object>} Созданная запись с id
+   */
+  async addManualIncome(data, addedBy = null) {
+    if (!db) throw new Error('База данных недоступна')
+    const amount = Number(data.amount)
+    if (Number.isNaN(amount) || amount <= 0) throw new Error('Некорректная сумма дохода')
+    const dateVal = data.date
+    const dateMs = dateVal instanceof Date ? dateVal.getTime() : (typeof dateVal === 'string' ? new Date(dateVal).getTime() : 0)
+    if (!dateMs || Number.isNaN(dateMs)) throw new Error('Некорректная дата')
+    const payload = {
+      amount,
+      date: dateVal,
+      comment: (data.comment || '').trim() || null,
+      addedBy: addedBy || null,
+      createdAt: new Date().toISOString(),
+    }
+    const safe = stripUndefinedForFirestore(payload)
+    try {
+      const col = collection(db, `artifacts/${APP_ID}/public/data/accounting_income`)
+      const ref = await addDoc(col, safe)
+      logger.info('Admin', 'Добавлен ручной доход', { id: ref.id, amount })
+      return { id: ref.id, ...payload }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка добавления ручного дохода', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Загрузка записей расходов (учёт)
+   * @returns {Promise<Array>} Список записей, отсортированных по дате (новые первые)
+   */
+  async loadAccountingExpenses() {
+    if (!db) throw new Error('База данных недоступна')
+    try {
+      const col = collection(db, `artifacts/${APP_ID}/public/data/accounting_expenses`)
+      const snapshot = await getDocs(col)
+      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      const toMs = (x) => {
+        if (!x || x.date == null) return 0
+        const d = x.date
+        if (typeof d.toMillis === 'function') return d.toMillis()
+        if (typeof d === 'number') return d
+        if (typeof d === 'string') return new Date(d).getTime()
+        return 0
+      }
+      list.sort((a, b) => toMs(b) - toMs(a))
+      return list
+    } catch (err) {
+      logger.error('Admin', 'Ошибка загрузки учёта расходов', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Добавление расхода (сервер, домен, возврат и т.д.)
+   * @param {Object} data - { amount: number, date: string|Date, category?: string, comment?: string }
+   * @param {string} [addedBy] - ID пользователя
+   * @returns {Promise<Object>} Созданная запись с id
+   */
+  async addExpense(data, addedBy = null) {
+    if (!db) throw new Error('База данных недоступна')
+    const amount = Number(data.amount)
+    if (Number.isNaN(amount) || amount <= 0) throw new Error('Некорректная сумма расхода')
+    const dateVal = data.date
+    const dateMs = dateVal instanceof Date ? dateVal.getTime() : (typeof dateVal === 'string' ? new Date(dateVal).getTime() : 0)
+    if (!dateMs || Number.isNaN(dateMs)) throw new Error('Некорректная дата')
+    const payload = {
+      amount,
+      date: dateVal,
+      category: (data.category || 'other').trim() || 'other',
+      comment: (data.comment || '').trim() || null,
+      addedBy: addedBy || null,
+      createdAt: new Date().toISOString(),
+    }
+    const safe = stripUndefinedForFirestore(payload)
+    try {
+      const col = collection(db, `artifacts/${APP_ID}/public/data/accounting_expenses`)
+      const ref = await addDoc(col, safe)
+      logger.info('Admin', 'Добавлен расход', { id: ref.id, amount, category: payload.category })
+      return { id: ref.id, ...payload }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка добавления расхода', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Удаление записи ручного дохода
+   * @param {string} id - ID документа
+   */
+  async deleteAccountingIncome(id) {
+    if (!db || !id) throw new Error('База данных недоступна или не указан id')
+    try {
+      await deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/accounting_income`, id))
+      logger.info('Admin', 'Удалена запись дохода', { id })
+    } catch (err) {
+      logger.error('Admin', 'Ошибка удаления записи дохода', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Удаление записи расхода
+   * @param {string} id - ID документа
+   */
+  async deleteAccountingExpense(id) {
+    if (!db || !id) throw new Error('База данных недоступна или не указан id')
+    try {
+      await deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/accounting_expenses`, id))
+      logger.info('Admin', 'Удалена запись расхода', { id })
+    } catch (err) {
+      logger.error('Admin', 'Ошибка удаления записи расхода', null, err)
       throw err
     }
   },

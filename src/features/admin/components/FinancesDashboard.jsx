@@ -11,11 +11,23 @@ import {
   Wallet,
   Target,
   Trash2,
+  Plus,
+  ArrowDownRight,
+  ArrowUpRight,
+  BookOpen,
 } from 'lucide-react'
 import { adminService } from '../services/adminService.js'
 
 /** Роли, которые не считаем в статистике «пользователей» (только обычные клиенты) */
 const STAFF_ROLES = ['admin', 'accountant', 'бухгалтер']
+
+/** Категории расходов для учёта */
+const EXPENSE_CATEGORIES = [
+  { id: 'server', label: 'Сервер' },
+  { id: 'domain', label: 'Домен' },
+  { id: 'refund', label: 'Возврат' },
+  { id: 'other', label: 'Другое' },
+]
 
 const PERIODS = [
   { id: '7d', label: '7 дней', days: 7 },
@@ -53,17 +65,26 @@ function getRange(periodId) {
 /**
  * Дашборд «Финансы» для админа: доходы, успешные оплаты, рост подписчиков, фильтры по периоду и тарифу.
  */
+const FINANCE_TABS = [
+  { id: 'overview', label: 'Обзор', icon: BarChart3 },
+  { id: 'accounting', label: 'Учёт', icon: BookOpen },
+]
+
 const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x != null ? String(x) : '—'), currentUser = null }) => {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [clearing, setClearing] = useState(false)
   const isAdmin = currentUser?.role === 'admin'
+  const [financeTab, setFinanceTab] = useState('overview')
   const [periodId, setPeriodId] = useState('30d')
   const [tariffId, setTariffId] = useState('')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [useCustom, setUseCustom] = useState(false)
+  const [accountingIncome, setAccountingIncome] = useState([])
+  const [accountingExpenses, setAccountingExpenses] = useState([])
+  const [loadingAccounting, setLoadingAccounting] = useState(false)
 
   const loadPayments = useCallback(async () => {
     setLoading(true)
@@ -96,9 +117,80 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
     }
   }, [isAdmin, loadPayments])
 
+  const loadAccounting = useCallback(async () => {
+    setLoadingAccounting(true)
+    setError(null)
+    try {
+      const [inc, exp] = await Promise.all([
+        adminService.loadAccountingIncome(),
+        adminService.loadAccountingExpenses(),
+      ])
+      setAccountingIncome(inc)
+      setAccountingExpenses(exp)
+      return { inc, exp }
+    } catch (err) {
+      setError(err?.message || 'Ошибка загрузки учёта')
+      return null
+    } finally {
+      setLoadingAccounting(false)
+    }
+  }, [])
+
+  const handleDeleteAccountingIncome = useCallback(async (id) => {
+    if (!window.confirm('Удалить запись о доходе?')) return
+    setError(null)
+    try {
+      await adminService.deleteAccountingIncome(id)
+      await loadAccounting()
+    } catch (err) {
+      setError(err?.message || 'Ошибка удаления')
+    }
+  }, [loadAccounting])
+
+  const handleDeleteAccountingExpense = useCallback(async (id) => {
+    if (!window.confirm('Удалить запись о расходе?')) return
+    setError(null)
+    try {
+      await adminService.deleteAccountingExpense(id)
+      await loadAccounting()
+    } catch (err) {
+      setError(err?.message || 'Ошибка удаления')
+    }
+  }, [loadAccounting])
+
+  const handleSyncIncome = useCallback(async () => {
+    setSyncing(true)
+    setError(null)
+    try {
+      const added = await adminService.syncIncomeFromPayments(payments, accountingIncome)
+      if (added > 0) await loadAccounting()
+      if (added > 0) alert(`Добавлено доходов от оплат: ${added}`)
+    } catch (err) {
+      setError(err?.message || 'Ошибка синхронизации')
+    } finally {
+      setSyncing(false)
+    }
+  }, [payments, accountingIncome, loadAccounting])
+
   useEffect(() => {
     loadPayments()
   }, [loadPayments])
+
+  useEffect(() => {
+    if (financeTab === 'accounting') {
+      const run = async () => {
+        const loaded = await loadAccounting()
+        if (!loaded) return
+        try {
+          const added = await adminService.syncIncomeFromPayments(payments, loaded.inc)
+          if (added > 0) await loadAccounting()
+        } catch (e) {
+          // sync errors are non-critical
+        }
+      }
+      run()
+    }
+  }, [financeTab, loadAccounting])
 
   const resolvedRange = useMemo(() => {
     if (useCustom && customFrom && customTo) {
@@ -252,7 +344,7 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-200 flex items-center gap-2">
               <BarChart3 className="w-6 h-6 text-emerald-500" />
@@ -260,15 +352,33 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
             </h2>
             <p className="text-slate-400 mt-1">Доходы и статистика пользователей</p>
           </div>
-          <button
-            onClick={loadPayments}
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
-            aria-label="Обновить данные"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Обновить
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden border border-slate-700">
+              {FINANCE_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setFinanceTab(t.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
+                    financeTab === t.id ? 'bg-slate-700 text-slate-100' : 'bg-slate-800/50 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <t.icon className="w-4 h-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {financeTab === 'overview' && (
+              <button
+                onClick={loadPayments}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                aria-label="Обновить данные"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Обновить
+              </button>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -277,6 +387,31 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
           </div>
         )}
 
+        {financeTab === 'accounting' && (
+          <AccountingSection
+            income={accountingIncome}
+            expenses={accountingExpenses}
+            loading={loadingAccounting}
+            onLoad={loadAccounting}
+            onAddIncome={async (amount, date, comment) => {
+              await adminService.addManualIncome({ amount, date, comment: comment || undefined }, currentUser?.id)
+              await loadAccounting()
+            }}
+            onAddExpense={async (amount, date, category, comment) => {
+              await adminService.addExpense({ amount, date, category, comment: comment || undefined }, currentUser?.id)
+              await loadAccounting()
+            }}
+            onDeleteIncome={isAdmin ? handleDeleteAccountingIncome : null}
+            onDeleteExpense={isAdmin ? handleDeleteAccountingExpense : null}
+            totalRevenueFromSubscriptions={totalRevenue}
+            formatMoney={formatMoney}
+            formatDate={formatDate}
+            expenseCategories={EXPENSE_CATEGORIES}
+          />
+        )}
+
+        {financeTab === 'overview' && (
+          <>
         {/* Фильтры */}
         <div className="flex flex-wrap items-center gap-3 mb-6 p-4 rounded-lg bg-slate-800/50 border border-slate-700/50">
           <Filter className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -486,6 +621,279 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
             </button>
           </div>
         )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AccountingSection({
+  income,
+  expenses,
+  loading,
+  onLoad,
+  onAddIncome,
+  onAddExpense,
+  onDeleteIncome,
+  onDeleteExpense,
+  totalRevenueFromSubscriptions = 0,
+  formatMoney,
+  formatDate,
+  expenseCategories,
+}) {
+  const [incomeAmount, setIncomeAmount] = useState('')
+  const [incomeDate, setIncomeDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [incomeNote, setIncomeNote] = useState('')
+  const [expenseAmount, setExpenseAmount] = useState('')
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [expenseCategory, setExpenseCategory] = useState('server')
+  const [expenseNote, setExpenseNote] = useState('')
+  const [addingIncome, setAddingIncome] = useState(false)
+  const [addingExpense, setAddingExpense] = useState(false)
+
+  const manualIncomeTotal = income.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const totalIncome = (Number(totalRevenueFromSubscriptions) || 0) + manualIncomeTotal
+  const totalExpenses = expenses.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const balance = totalIncome - totalExpenses
+
+  const handleSubmitIncome = async (e) => {
+    e.preventDefault()
+    const amt = parseFloat(incomeAmount)
+    if (isNaN(amt) || amt <= 0) return
+    setAddingIncome(true)
+    try {
+      await onAddIncome(amt, incomeDate, incomeNote)
+      setIncomeAmount('')
+      setIncomeNote('')
+    } finally {
+      setAddingIncome(false)
+    }
+  }
+
+  const handleSubmitExpense = async (e) => {
+    e.preventDefault()
+    const amt = parseFloat(expenseAmount)
+    if (isNaN(amt) || amt <= 0) return
+    setAddingExpense(true)
+    try {
+      await onAddExpense(amt, expenseDate, expenseCategory, expenseNote)
+      setExpenseAmount('')
+      setExpenseNote('')
+    } finally {
+      setAddingExpense(false)
+    }
+  }
+
+  const toDate = (r) => r.date || r.createdAt
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[280px]">
+        <Loader2 className="w-8 h-8 text-slate-500 animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h3 className="text-lg font-semibold text-slate-200">Учёт доходов и расходов</h3>
+        <button
+          onClick={onLoad}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Обновить
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-xl p-4">
+          <div className="text-slate-400 text-sm mb-1">Доходы (подписки + ручные)</div>
+          <div className="text-2xl font-bold text-emerald-400">{formatMoney(totalIncome)}</div>
+        </div>
+        <div className="bg-red-950/30 border border-red-900/50 rounded-xl p-4">
+          <div className="text-slate-400 text-sm mb-1">Расходы</div>
+          <div className="text-2xl font-bold text-red-400">{formatMoney(totalExpenses)}</div>
+        </div>
+        <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+          <div className="text-slate-400 text-sm mb-1">Баланс</div>
+          <div className={`text-2xl font-bold ${balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatMoney(balance)}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-4">
+          <h4 className="text-slate-200 font-medium mb-3 flex items-center gap-2">
+            <ArrowDownRight className="w-4 h-4 text-emerald-500" />
+            Доходы
+          </h4>
+          <p className="text-slate-500 text-sm mb-2">
+            Доход с подписок за период начисляется автоматически: <strong className="text-emerald-400">{formatMoney(totalRevenueFromSubscriptions)}</strong>. Ниже — ручные записи.
+          </p>
+          <form onSubmit={handleSubmitIncome} className="flex flex-wrap gap-2 mb-4">
+            <input
+              type="number"
+              placeholder="Сумма"
+              value={incomeAmount}
+              onChange={(e) => setIncomeAmount(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm w-24"
+              min="0"
+              step="0.01"
+              required
+            />
+            <input
+              type="date"
+              value={incomeDate}
+              onChange={(e) => setIncomeDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm"
+            />
+            <input
+              type="text"
+              placeholder="Комментарий"
+              value={incomeNote}
+              onChange={(e) => setIncomeNote(e.target.value)}
+              className="flex-1 min-w-[120px] px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={addingIncome}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm"
+            >
+              {addingIncome ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Добавить доход
+            </button>
+          </form>
+          <div className="overflow-x-auto max-h-[240px] overflow-y-auto rounded-lg border border-slate-700">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-800/80 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left text-slate-400">Дата</th>
+                  <th className="px-3 py-2 text-left text-slate-400">Сумма</th>
+                  <th className="px-3 py-2 text-left text-slate-400">Комментарий</th>
+                  {onDeleteIncome && <th className="px-3 py-2 text-right text-slate-400" />}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {income.length === 0 ? (
+                  <tr><td colSpan={onDeleteIncome ? 4 : 3} className="px-3 py-4 text-slate-500 text-center">Нет ручных записей</td></tr>
+                ) : (
+                  income.map((r) => (
+                    <tr key={r.id} className="bg-slate-800/30">
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{formatDate(toDate(r))}</td>
+                      <td className="px-3 py-2 font-medium text-emerald-400">{formatMoney(r.amount)}</td>
+                      <td className="px-3 py-2 text-slate-400 truncate max-w-[140px]" title={r.comment || r.note}>{r.comment || r.note || '—'}</td>
+                      {onDeleteIncome && (
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => onDeleteIncome(r.id)}
+                            className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-950/30"
+                            aria-label="Удалить"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-4">
+          <h4 className="text-slate-200 font-medium mb-3 flex items-center gap-2">
+            <ArrowUpRight className="w-4 h-4 text-red-500" />
+            Расходы
+          </h4>
+          <p className="text-slate-500 text-sm mb-2">
+            Сервер, домен, возврат и др. Укажите сумму, дату и категорию.
+          </p>
+          <form onSubmit={handleSubmitExpense} className="flex flex-wrap gap-2 mb-4">
+            <input
+              type="number"
+              placeholder="Сумма"
+              value={expenseAmount}
+              onChange={(e) => setExpenseAmount(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm w-24"
+              min="0"
+              step="0.01"
+              required
+            />
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm"
+            />
+            <select
+              value={expenseCategory}
+              onChange={(e) => setExpenseCategory(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm"
+            >
+              {expenseCategories.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Комментарий"
+              value={expenseNote}
+              onChange={(e) => setExpenseNote(e.target.value)}
+              className="flex-1 min-w-[100px] px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-slate-200 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={addingExpense}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+            >
+              {addingExpense ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Добавить расход
+            </button>
+          </form>
+          <div className="overflow-x-auto max-h-[240px] overflow-y-auto rounded-lg border border-slate-700">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-800/80 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left text-slate-400">Дата</th>
+                  <th className="px-3 py-2 text-left text-slate-400">Сумма</th>
+                  <th className="px-3 py-2 text-left text-slate-400">Категория</th>
+                  {onDeleteExpense && <th className="px-3 py-2 text-right text-slate-400" />}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {expenses.length === 0 ? (
+                  <tr><td colSpan={onDeleteExpense ? 4 : 3} className="px-3 py-4 text-slate-500 text-center">Нет записей</td></tr>
+                ) : (
+                  expenses.map((r) => (
+                    <tr key={r.id} className="bg-slate-800/30">
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{formatDate(toDate(r))}</td>
+                      <td className="px-3 py-2 font-medium text-red-400">{formatMoney(r.amount)}</td>
+                      <td className="px-3 py-2 text-slate-400 truncate max-w-[140px]" title={r.comment || r.note}>
+                        {expenseCategories.find((c) => c.id === r.category)?.label || r.category || '—'}
+                      </td>
+                      {onDeleteExpense && (
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => onDeleteExpense(r.id)}
+                            className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-950/30"
+                            aria-label="Удалить"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   )

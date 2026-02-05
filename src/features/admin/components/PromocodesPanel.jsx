@@ -6,7 +6,7 @@ import logger from '../../../shared/utils/logger.js'
 /**
  * Панель управления промокодами и скидками
  */
-const PromocodesPanel = ({ currentUserId }) => {
+const PromocodesPanel = ({ currentUserId, tariffs = [] }) => {
   const [promocodes, setPromocodes] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -53,6 +53,7 @@ const PromocodesPanel = ({ currentUserId }) => {
   const handleEdit = (promo) => {
     setEditingPromo({
       ...promo,
+      tariffIds: promo.tariffIds && Array.isArray(promo.tariffIds) ? [...promo.tariffIds] : null,
       validFrom: promo.validFrom ? promo.validFrom.slice(0, 16) : '',
       validUntil: promo.validUntil ? promo.validUntil.slice(0, 16) : ''
     })
@@ -73,6 +74,10 @@ const PromocodesPanel = ({ currentUserId }) => {
     }
     if (editingPromo.type === 'fixed' && val < 0) {
       setError('Фиксированная скидка не может быть отрицательной')
+      return
+    }
+    if (Array.isArray(editingPromo.tariffIds) && editingPromo.tariffIds.length === 0) {
+      setError('Выберите хотя бы один тариф или «Все тарифы»')
       return
     }
 
@@ -224,6 +229,51 @@ const PromocodesPanel = ({ currentUserId }) => {
                 className={inputClass}
               />
             </div>
+            <div className="sm:col-span-2">
+              <label className={labelClass}>Действует для тарифов</label>
+              <div className="space-y-2 p-3 bg-slate-900 rounded-lg border border-slate-700">
+                <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="tariffScope"
+                    checked={editingPromo.tariffIds === null || (Array.isArray(editingPromo.tariffIds) && editingPromo.tariffIds.length === 0)}
+                    onChange={() => setEditingPromo({ ...editingPromo, tariffIds: null })}
+                    className="rounded-full border-slate-600 text-blue-500"
+                  />
+                  <span className="font-medium">Все тарифы</span>
+                </label>
+                <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="tariffScope"
+                    checked={editingPromo.tariffIds !== null && Array.isArray(editingPromo.tariffIds)}
+                    onChange={() => setEditingPromo({ ...editingPromo, tariffIds: [] })}
+                    className="rounded-full border-slate-600 text-blue-500"
+                  />
+                  <span className="font-medium">Выбрать тарифы</span>
+                </label>
+                {editingPromo.tariffIds !== null && Array.isArray(editingPromo.tariffIds) && tariffs.length > 0 && (
+                  <div className="ml-6 mt-2 flex flex-wrap gap-3">
+                    {tariffs.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 text-slate-400 cursor-pointer hover:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={editingPromo.tariffIds.includes(t.id)}
+                          onChange={(e) => {
+                            const ids = e.target.checked
+                              ? [...(editingPromo.tariffIds || []), t.id]
+                              : (editingPromo.tariffIds || []).filter((id) => id !== t.id)
+                            setEditingPromo({ ...editingPromo, tariffIds: ids })
+                          }}
+                          className="rounded border-slate-600 text-blue-500"
+                        />
+                        <span>{t.name || t.plan || t.id}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <div>
               <label className={labelClass}>Действует с (необязательно)</label>
               <input
@@ -308,6 +358,7 @@ const PromocodesPanel = ({ currentUserId }) => {
             <thead>
               <tr className="border-b border-slate-700">
                 <th className="py-3 px-2 text-slate-400 font-medium text-sm">Код</th>
+                <th className="py-3 px-2 text-slate-400 font-medium text-sm">Тарифы</th>
                 <th className="py-3 px-2 text-slate-400 font-medium text-sm">Тип</th>
                 <th className="py-3 px-2 text-slate-400 font-medium text-sm">Скидка</th>
                 <th className="py-3 px-2 text-slate-400 font-medium text-sm">Использовано</th>
@@ -319,7 +370,7 @@ const PromocodesPanel = ({ currentUserId }) => {
             <tbody>
               {promocodes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
                     Нет промокодов. Создайте первый.
                   </td>
                 </tr>
@@ -328,6 +379,14 @@ const PromocodesPanel = ({ currentUserId }) => {
                   <tr key={promo.id} className="border-b border-slate-800 hover:bg-slate-800/50">
                     <td className="py-3 px-2">
                       <span className="font-mono font-semibold text-slate-200">{promo.code}</span>
+                    </td>
+                    <td className="py-3 px-2 text-slate-400 text-sm">
+                      {!promo.tariffIds || !promo.tariffIds.length
+                        ? 'Все'
+                        : (promo.tariffIds || [])
+                            .map((id) => tariffs.find((t) => t.id === id)?.name || tariffs.find((t) => t.id === id)?.plan || id)
+                            .filter(Boolean)
+                            .join(', ') || '—'}
                     </td>
                     <td className="py-3 px-2 text-slate-400 text-sm">
                       {promo.type === 'percent' ? 'Процент' : 'Фикс.'}

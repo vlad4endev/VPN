@@ -723,7 +723,7 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'promocodes' && (
-          <PromocodesPanel currentUserId={currentUser?.id} />
+          <PromocodesPanel currentUserId={currentUser?.id} tariffs={tariffs} />
         )}
 
         {adminTab === 'tariffs' && (

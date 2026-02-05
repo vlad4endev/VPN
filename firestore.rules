@@ -20,6 +20,20 @@ service cloud.firestore {
       );
     }
     
+    // Доступ к разделу «Финансы» (учёт доходов/расходов): админ или бухгалтер
+    function isFinancesFromFirestore() {
+      return request.auth != null && (
+        (exists(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'accountant' ||
+          get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'бухгалтер')) ||
+        (exists(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'accountant' ||
+          get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'бухгалтер'))
+      );
+    }
+    
     // Вспомогательная функция для проверки, является ли пользователь владельцем документа
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
@@ -75,7 +89,7 @@ service cloud.firestore {
       );
       
       // Создание: только аутентифицированные пользователи могут создавать свой документ
-      // ВАЛИДАЦИЯ: Проверяем обязательные поля и их формат
+      // ВАЛИДАЦИЯ: Проверяем обязательные поля и их формат. Реферальная система: допускаем опциональное поле referredBy.
       allow create: if request.auth != null && 
         isOwner(userId) &&
         // Валидация обязательных полей
@@ -92,11 +106,13 @@ service cloud.firestore {
         // Запрещаем создание с ролью admin (только через backend)
         request.resource.data.role == 'user' &&
         // Email должен совпадать с email из Firebase Auth (если доступен)
-        (request.auth.token.email == null || request.resource.data.email == request.auth.token.email);
+        (request.auth.token.email == null || request.resource.data.email == request.auth.token.email) &&
+        // Реферальная система: referredBy опционально, если есть — строка
+        (!request.resource.data.keys().hasAny(['referredBy']) || (request.resource.data.referredBy is string && request.resource.data.referredBy.size() > 0 && request.resource.data.referredBy.size() <= 128));
       
       // Обновление: свой документ или админ (claim или роль в Firestore)
       // Путь 1: владелец делает только «очистку подписки» (uuid/plan/expiresAt/... → null) — разрешаем без строгой валидации полей
-      // Путь 2: общее правило с валидацией обновляемых полей
+      // Путь 2: общее правило с валидацией обновляемых полей. referralBonusBalance только через backend (владелец не может менять).
       allow update: if request.auth != null && (
         (isOwner(userId) && isSubscriptionCleanupUpdate()) ||
         ((isOwner(userId) || isAdmin() || isAdminFromFirestore()) &&
@@ -107,6 +123,8 @@ service cloud.firestore {
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
            request.resource.data.role == resource.data.role ||
            (resource.data.role == 'user' && request.resource.data.role == 'admin' && (isAdmin() || isAdminFromFirestore()))) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['referralCode']) || (request.resource.data.referralCode is string && request.resource.data.referralCode.size() >= 6 && request.resource.data.referralCode.size() <= 32)) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['referralBonusBalance']) || (isAdmin() || isAdminFromFirestore())) &&
           request.resource.data.updatedAt is string)
       );
       
@@ -203,6 +221,10 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/promocodes/{promocodeId} {
       allow read, write: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }
+    // История использования промокодов (usedBy) — только сервер (Admin SDK)
+    match /artifacts/{appId}/public/data/promocodes/{promocodeId}/usedBy/{userId} {
+      allow read, write: if false;
+    }
     
     // Отзывы — одобренные читают все (лендинг), свой отзыв пользователь может читать, модерация — админы (claim или роль в Firestore)
     match /artifacts/{appId}/public/data/reviews/{reviewId} {
@@ -219,6 +241,21 @@ service cloud.firestore {
       
       // Обновление и удаление: админ (модерация)
       allow update, delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
+    }
+    
+    // Реферальные награды — только бэкенд (Admin SDK) пишет; клиент не имеет доступа
+    match /artifacts/{appId}/public/data/referral_rewards/{rewardId} {
+      allow read, write: if false;
+    }
+    
+    // Учёт доходов (ручные записи) — только админ или бухгалтер
+    match /artifacts/{appId}/public/data/accounting_income/{entryId} {
+      allow read, write: if request.auth != null && (isAdmin() || isAdminFromFirestore() || isFinancesFromFirestore());
+    }
+    
+    // Учёт расходов — только админ или бухгалтер
+    match /artifacts/{appId}/public/data/accounting_expenses/{entryId} {
+      allow read, write: if request.auth != null && (isAdmin() || isAdminFromFirestore() || isFinancesFromFirestore());
     }
     
     // Уведомления: пользователь читает/обновляет только свои; создавать может админ (claim или роль в Firestore) или бэкенд
