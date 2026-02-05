@@ -64,6 +64,22 @@ export default function Footer() {
                 <span>Обработка персональных данных</span>
               </a>
             </nav>
+            <a
+              href="https://metrika.yandex.ru/stat/?id=106652816&from=informer"
+              target="_blank"
+              rel="nofollow noreferrer"
+              aria-label="Статистика посещаемости сайта в Яндекс.Метрике"
+              className="mt-1"
+            >
+              <img
+                src="https://informer.yandex.ru/informer/106652816/3_0_535353FF_333333FF_1_uniques"
+                style={{ width: 88, height: 31, border: 0 }}
+                alt="Яндекс.Метрика: данные за сегодня (просмотры, визиты и уникальные посетители)"
+                className="ym-advanced-informer"
+                data-cid="106652816"
+                data-lang="ru"
+              />
+            </a>
           </div>
         </div>
       </footer>
