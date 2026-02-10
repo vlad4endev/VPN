@@ -15,6 +15,7 @@ import ReviewsPanel from './ReviewsPanel.jsx'
 import SupportTicketsPanel from './SupportTicketsPanel.jsx'
 import SystemMonitor from './SystemMonitor.jsx'
 import AdminDashboard from './AdminDashboard.jsx'
+import SeoSettingsPanel from './SeoSettingsPanel.jsx'
 import NotificationsBroadcastPanel from '../../notifications/components/NotificationsBroadcastPanel.jsx'
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
 import { getAdminSectionByTabId } from '../constants/navSections.js'
@@ -77,6 +78,7 @@ const AdminPanel = ({
   onHandleTariffSubscriptionLinkChange = () => {},
   settings,
   onHandleAppLinkChange,
+  onHandleSeoChange = () => {},
   onSetSuccess = () => {},
   onSetError = () => {},
 }) => {
@@ -95,7 +97,7 @@ const AdminPanel = ({
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
       onHandleTariffNameChange, onHandleTariffPlanChange, onHandleTariffPriceChange,
       onHandleTariffDevicesChange, onHandleTariffTrafficGBChange, onHandleTariffDurationDaysChange,
-      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, settings, onHandleAppLinkChange
+      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, settings, onHandleAppLinkChange, onHandleSeoChange
       // onHandleSaveUserCard и onGenerateUUID больше не передаются через пропсы - используются из контекста в UserCard
     }, 'prop', 'AdminPanel')
   }
@@ -724,6 +726,15 @@ const AdminPanel = ({
 
         {adminTab === 'promocodes' && (
           <PromocodesPanel currentUserId={currentUser?.id} tariffs={tariffs} />
+        )}
+
+        {adminTab === 'seo' && (
+          <SeoSettingsPanel
+            settings={settings}
+            settingsLoading={settingsLoading}
+            onChange={onHandleSeoChange}
+            onSave={onHandleSaveSettings}
+          />
         )}
 
         {adminTab === 'tariffs' && (

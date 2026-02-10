@@ -13,7 +13,7 @@ export const AdminPanelPropTypes = {
   }).isRequired,
   
   // Состояние вкладок
-  adminTab: PropTypes.oneOf(['dashboard', 'users', 'tickets', 'notifications', 'settings', 'tariffs', 'payments', 'reviews', 'promocodes', 'n8n']).isRequired,
+  adminTab: PropTypes.oneOf(['dashboard', 'users', 'tickets', 'notifications', 'settings', 'tariffs', 'payments', 'reviews', 'promocodes', 'n8n', 'seo']).isRequired,
   onSetAdminTab: PropTypes.func.isRequired,
   
   // Навигация
@@ -64,8 +64,19 @@ export const AdminPanelPropTypes = {
       macos: PropTypes.string,
       windows: PropTypes.string,
     }),
+    seo: PropTypes.shape({
+      metaTitle: PropTypes.string,
+      metaDescription: PropTypes.string,
+      keywords: PropTypes.string,
+      canonicalUrl: PropTypes.string,
+      robots: PropTypes.string,
+      ogTitle: PropTypes.string,
+      ogDescription: PropTypes.string,
+      ogImage: PropTypes.string,
+    }),
   }),
   onHandleAppLinkChange: PropTypes.func.isRequired,
+  onHandleSeoChange: PropTypes.func,
   
   // Тарифы
   tariffs: PropTypes.arrayOf(PropTypes.object).isRequired,

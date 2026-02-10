@@ -1,4 +1,4 @@
-import { Users, MessageCircle, Megaphone, Server, DollarSign, CreditCard, Tag, Star, Link2, LayoutDashboard } from 'lucide-react'
+import { Users, MessageCircle, Megaphone, Server, DollarSign, CreditCard, Tag, Star, Link2, LayoutDashboard, Search } from 'lucide-react'
 
 /** Подразделы админ-панели: группа → пункты меню (единый источник правды для Sidebar и AdminPanel) */
 export const ADMIN_NAV_SECTIONS = [
@@ -29,6 +29,12 @@ export const ADMIN_NAV_SECTIONS = [
       { id: 'payments', label: 'Платежи', icon: CreditCard },
       { id: 'promocodes', label: 'Промокоды', icon: Tag },
       { id: 'reviews', label: 'Отзывы', icon: Star },
+    ],
+  },
+  {
+    title: 'Маркетинг и SEO',
+    items: [
+      { id: 'seo', label: 'SEO', icon: Search },
     ],
   },
   {

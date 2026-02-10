@@ -2606,6 +2606,20 @@ export default function VPNServiceApp() {
     })
   }, [])
 
+  // Обработчики для SEO-настроек (глобальный объект settings.seo)
+  const handleSeoChange = useCallback((field, value) => {
+    setSettings(prev => {
+      if (!prev) return null
+      return {
+        ...prev,
+        seo: {
+          ...(prev.seo || {}),
+          [field]: value,
+        },
+      }
+    })
+  }, [])
+
   // Сохранение настроек
   // ВАЖНО: Только админы могут сохранять настройки. Настройки глобальные - применяются ко всем пользователям
   const handleSaveSettings = useCallback(async () => {
@@ -3984,6 +3998,7 @@ export default function VPNServiceApp() {
           onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
           settings={settings}
           onHandleAppLinkChange={handleAppLinkChange}
+          onHandleSeoChange={handleSeoChange}
         />
       </AdminViewWithContext>
     )
