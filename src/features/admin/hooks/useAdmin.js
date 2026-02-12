@@ -148,7 +148,9 @@ export function useAdmin({
     handleSaveUserCard: safeHandleSaveUserCard,
     generateUUID: safeGenerateUUID,
     generateSubId: safeGenerateSubId,
-    
+    createUser: usersHook.createUser,
+    importFromNocoDB: usersHook.importFromNocoDB,
+
     // Тарифы
     editingTariff: tariffsHook.editingTariff,
     setEditingTariff: tariffsHook.setEditingTariff,

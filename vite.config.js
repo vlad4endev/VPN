@@ -55,6 +55,8 @@ export default defineConfig(({ mode }) => {
             }
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
+            if (req.headers.authorization) proxyReq.setHeader('Authorization', req.headers.authorization);
+            if (req.headers['x-app-id']) proxyReq.setHeader('X-App-Id', req.headers['x-app-id']);
             console.log('🔄 API Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {

@@ -83,6 +83,61 @@
     </script>
   </head>
   <body class="min-h-screen min-w-[320px] bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
+    <!-- Telegram Mini App: SDK + перехват запросов (initData в заголовке). Восстановление initData из hash после редиректа Firebase (Google sign-in). -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+    (function() {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      window.__TELEGRAM_INIT_DATA = null;
+
+      if (tg && tg.initData) {
+        tg.ready();
+        window.__TELEGRAM_INIT_DATA = tg.initData;
+        if (tg.expand) tg.expand();
+        try { console.log('TMA detected:', tg.initDataUnsafe); } catch (e) {}
+      }
+
+      // После редиректа с Firebase (Google sign-in) контекст Telegram может быть только в hash или в sessionStorage (если hash перезаписан Firebase)
+      var hash = window.location.hash || '';
+      if (!window.__TELEGRAM_INIT_DATA && hash.indexOf('tgWebAppData=') !== -1) {
+        try {
+          var start = hash.indexOf('tgWebAppData=') + 13;
+          var end = hash.indexOf('&tgWebAppVersion');
+          if (end === -1) end = hash.indexOf('&eventId');
+          if (end === -1) end = hash.length;
+          var raw = hash.substring(start, end);
+          if (raw) {
+            window.__TELEGRAM_INIT_DATA = decodeURIComponent(raw);
+            try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
+            try { console.log('TMA initData restored from hash (post-auth redirect)'); } catch (e) {}
+          }
+        } catch (e) {}
+      }
+      if (!window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
+        try {
+          var stored = sessionStorage.getItem('tg_init_data');
+          if (stored) { window.__TELEGRAM_INIT_DATA = stored; }
+        } catch (e) {}
+      }
+      if (window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
+        try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
+      }
+
+      var originalFetch = window.fetch;
+      window.fetch = function(url, options) {
+        options = options || {};
+        options.headers = options.headers || {};
+        if (window.__TELEGRAM_INIT_DATA) {
+          if (options.headers instanceof Headers) {
+            options.headers.append('X-Telegram-InitData', window.__TELEGRAM_INIT_DATA);
+          } else if (typeof options.headers === 'object' && !Array.isArray(options.headers)) {
+            options.headers['X-Telegram-InitData'] = window.__TELEGRAM_INIT_DATA;
+          }
+        }
+        return originalFetch.call(this, url, options);
+      };
+    })();
+    </script>
     <script>
       (function() {
         var path = (window.location.pathname || '').replace(/\/+$/, '');

@@ -15,9 +15,16 @@ import cors from 'cors'
 import helmet from 'helmet'
 import dotenv from 'dotenv'
 import os from 'os'
+import path from 'path'
+import { readFile } from 'fs/promises'
+import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
+import crypto, { randomUUID } from 'crypto'
+import { sendTelegramMessage, getTelegramBotInfo, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery } from './lib/telegram.js'
 
 dotenv.config()
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Firebase Admin SDK для доступа к Firestore
 let admin = null
@@ -42,17 +49,33 @@ async function initFirebaseAdmin() {
     }
 
     // Приоритет инициализации:
+    // 0. FIREBASE_SERVICE_ACCOUNT_PATH (путь к JSON-файлу)
     // 1. FIREBASE_SERVICE_ACCOUNT_KEY (JSON строка)
     // 2. FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY (отдельные переменные)
-    // 3. Application Default Credentials (для production)
 
     let credential = null
 
-    // Вариант 1: Service Account JSON
+    // Вариант 0: JSON-файл (удобно для ключа с переносами строк)
+    const keyPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    if (keyPath && !credential) {
+      try {
+        const resolvedPath = path.isAbsolute(keyPath) ? keyPath : path.join(__dirname, keyPath)
+        const json = await readFile(resolvedPath, 'utf8')
+        const serviceAccount = JSON.parse(json)
+        if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+        credential = firebaseAdmin.credential.cert(serviceAccount)
+        console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_PATH')
+      } catch (err) {
+        console.log('⚠️ Ошибка чтения FIREBASE_SERVICE_ACCOUNT_PATH:', err.message)
+      }
+    }
+
+    // Вариант 1: Service Account JSON из env
     const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
-    if (serviceAccountKey) {
+    if (serviceAccountKey && !credential) {
       try {
         const serviceAccount = JSON.parse(serviceAccountKey)
+        if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
         credential = firebaseAdmin.credential.cert(serviceAccount)
         console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
       } catch (err) {
@@ -77,26 +100,23 @@ async function initFirebaseAdmin() {
       }
     }
 
-    // Инициализация
+    // Инициализация только при наличии явных учётных данных
     if (credential) {
       firebaseAdmin.initializeApp({
         credential,
         projectId,
       })
+      admin = firebaseAdmin
+      db = admin.firestore()
+      console.log('✅ Firebase Admin SDK инициализирован')
     } else {
-      // Вариант 3: Application Default Credentials (для production)
-      firebaseAdmin.initializeApp({
-        projectId,
-      })
-      console.log('📝 Используются Application Default Credentials')
+      // Нет ключа и нет ADC — не вызываем initializeApp, чтобы не было "Could not load the default credentials"
+      console.log('⚠️ Firebase Admin SDK не настроен: задайте FIREBASE_SERVICE_ACCOUNT_KEY (или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY) в server/.env')
+      console.log('   Админ-API и Telegram будут возвращать 503 до настройки ключа.')
     }
-
-    admin = firebaseAdmin
-    db = admin.firestore()
-    console.log('✅ Firebase Admin SDK инициализирован')
   } catch (err) {
     console.log('⚠️ Firebase Admin SDK недоступен:', err.message)
-    console.log('⚠️ Настройки платежей будут загружаться только из запросов фронтенда')
+    console.log('   Задайте FIREBASE_SERVICE_ACCOUNT_KEY в server/.env (JSON ключа из Firebase Console → Project settings → Service accounts).')
   }
 }
 
@@ -168,7 +188,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-N8N-Webhook-Secret', 'X-App-Id', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-N8N-Webhook-Secret', 'X-App-Id', 'Accept', 'X-Telegram-InitData'],
 }
 
 // CORS для обычных API endpoints (frontend)
@@ -177,6 +197,56 @@ app.use(cors(corsOptions))
 // Парсинг JSON
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// ========== Telegram Mini App: валидация initData (опционально, не ломает старых клиентов) ==========
+const TELEGRAM_BOT_TOKEN_ENV = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
+const TELEGRAM_WEBAPP_SECRET = TELEGRAM_BOT_TOKEN_ENV
+  ? crypto.createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN_ENV).digest()
+  : null
+
+/**
+ * Валидирует initData от Telegram Web App (HMAC-SHA256).
+ * @param {string} initData - строка query string из Telegram.WebApp.initData
+ * @returns {Object|null} - объект с полями (user, auth_date, ...) или null при невалидных данных
+ */
+function validateTelegramInitData(initData) {
+  if (!initData || !TELEGRAM_WEBAPP_SECRET) return null
+  try {
+    const data = new URLSearchParams(initData)
+    const hash = data.get('hash')
+    if (!hash) return null
+    data.delete('hash')
+    const dataCheckString = [...data.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n')
+    const computedHash = crypto.createHmac('sha256', TELEGRAM_WEBAPP_SECRET).update(dataCheckString).digest('hex')
+    if (computedHash !== hash) return null
+    const parsed = Object.fromEntries(data)
+    if (parsed.user && typeof parsed.user === 'string') {
+      try {
+        parsed.user = JSON.parse(parsed.user)
+      } catch (_) {}
+    }
+    return parsed
+  } catch (_) {
+    return null
+  }
+}
+
+app.use((req, res, next) => {
+  const initData = req.headers['x-telegram-initdata'] || req.query.initData || ''
+  if (initData) {
+    const validated = validateTelegramInitData(initData)
+    if (validated) {
+      req.telegramUser = validated
+      if (validated.user && validated.user.id) {
+        console.log('Telegram user:', validated.user.id)
+      }
+    }
+  }
+  next()
+})
 
 // ========== Конфигурация n8n ==========
 
@@ -334,30 +404,81 @@ async function ensureAdmin(req, res) {
   if (decoded.admin === true) {
     return { ok: true, uid }
   }
-  const clientAppId = (req.headers['x-app-id'] || '').trim() || null
+  const clientAppId = (req.headers['x-app-id'] || req.headers['X-App-Id'] || '').trim() || null
   const appIdsToTry = [
     clientAppId,
     APP_ID,
     'skyputh',
+    'skypathvpn',
     process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
-    'skypathvpn'
   ].filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i)
+
+  const isAdminRole = (value) => String(value ?? '').trim().toLowerCase() === 'admin'
+
   for (const appId of appIdsToTry) {
     try {
       const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
       const snap = await userRef.get()
       if (snap.exists) {
-        const role = snap.data().role
-        if (role === 'admin' || (role && String(role).toLowerCase() === 'admin')) {
+        const data = snap.data()
+        const role = data.role
+        if (isAdminRole(role)) {
           return { ok: true, uid }
         }
+        console.warn('ensureAdmin: документ найден, но role не admin', {
+          appId,
+          uid,
+          roleFound: role,
+          roleType: typeof role,
+          email: data.email,
+        })
       }
     } catch (err) {
       console.warn('ensureAdmin: ошибка чтения пользователя из Firestore', { uid, appId, error: err.message })
     }
   }
-  console.warn('ensureAdmin: доступ запрещён (нет claim admin и нет role: admin в Firestore)', { uid, APP_ID })
-  res.status(403).json({ success: false, error: 'Недостаточно прав' })
+  // Запасной вариант: ищем по email в users_v4 (если ID документа не uid, а например uuid)
+  const emailFromToken = (decoded.email || '').trim().toLowerCase()
+  if (emailFromToken) {
+    for (const appId of appIdsToTry) {
+      try {
+        const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+        const snap = await usersRef.where('email', '==', emailFromToken).limit(5).get()
+        for (const doc of snap.docs) {
+          const role = doc.data().role
+          if (isAdminRole(role)) {
+            console.log('ensureAdmin: доступ по email (документ найден по email)', { appId, docId: doc.id, uid })
+            return { ok: true, uid }
+          }
+        }
+      } catch (err) {
+        console.warn('ensureAdmin: поиск по email', { appId, error: err.message })
+      }
+    }
+  }
+  // Опциональный обход: список email из env (если Firestore не нашёл роль)
+  const adminEmailsRaw = process.env.ADMIN_EMAILS || ''
+  if (adminEmailsRaw.trim()) {
+    const email = (decoded.email || '').trim().toLowerCase()
+    const allowed = adminEmailsRaw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+    if (email && allowed.includes(email)) {
+      return { ok: true, uid }
+    }
+  }
+  console.warn('ensureAdmin: доступ запрещён (нет claim admin и нет role: admin в Firestore)', {
+    uid,
+    APP_ID,
+    xAppId: clientAppId || '(не передан)',
+    appIdsTried: appIdsToTry,
+  })
+  const firestorePath = `artifacts/${APP_ID}/public/data/users_v4/${uid}`
+  res.status(403).json({
+    success: false,
+    error: 'Недостаточно прав',
+    firestorePath,
+    uid,
+    hint: `Путь к документу: ${firestorePath}. ID документа должен быть ваш UID из Firebase Authentication (Authentication → Пользователи), не поле uuid. В документе должно быть поле role со значением "admin" (строка). Либо задайте ADMIN_EMAILS в server/.env и перезапустите backend.`,
+  })
   return { ok: false }
 }
 
@@ -962,11 +1083,17 @@ app.post('/api/vpn/add-client', async (req, res) => {
         error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
       })
     }
+
+    // Telegram Mini App: подставляем telegram user id для сохранения в 3x-ui (не меняем текущую логику)
+    const addClientPayload = { ...req.body }
+    if (req.telegramUser && req.telegramUser.user && req.telegramUser.user.id) {
+      addClientPayload.telegramUserId = String(req.telegramUser.user.id)
+    }
     
     // Получаем webhook URL (приоритет: из запроса > из env > дефолтный)
     const webhookUrl = getWebhookUrl('addClient', req)
     console.log('📤 n8n-webhook-proxy: Отправка запроса в n8n webhook:', webhookUrl)
-    const result = await callN8NWebhook(webhookUrl, req.body)
+    const result = await callN8NWebhook(webhookUrl, addClientPayload)
     
     console.log('✅ n8n-webhook-proxy: Получен ответ от n8n:', {
       hasResult: !!result,
@@ -1083,11 +1210,16 @@ app.post('/api/vpn/delete-client', async (req, res) => {
         error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
       })
     }
+
+    const deleteClientPayload = { ...req.body }
+    if (req.telegramUser && req.telegramUser.user && req.telegramUser.user.id) {
+      deleteClientPayload.telegramUserId = String(req.telegramUser.user.id)
+    }
     
     // Получаем webhook URL (приоритет: из запроса > из env > дефолтный)
     const webhookUrl = getWebhookUrl('deleteClient', req)
     console.log('📤 n8n-webhook-proxy: Отправка запроса в n8n webhook:', webhookUrl)
-    const result = await callN8NWebhook(webhookUrl, req.body)
+    const result = await callN8NWebhook(webhookUrl, deleteClientPayload)
     
     console.log('✅ n8n-webhook-proxy: Получен ответ от n8n:', {
       hasResult: !!result,
@@ -1210,8 +1342,14 @@ app.post('/api/vpn/sync-user', async (req, res) => {
       })
     }
 
+    // Telegram Mini App: добавляем telegramUserId в тело для n8n (опционально)
+    const syncPayload = { ...req.body }
+    if (req.telegramUser && req.telegramUser.user && req.telegramUser.user.id) {
+      syncPayload.telegramUserId = String(req.telegramUser.user.id)
+    }
+
     const webhookUrl = getWebhookUrl('syncUser', req)
-    const result = await callN8NWebhook(webhookUrl, req.body)
+    const result = await callN8NWebhook(webhookUrl, syncPayload)
     res.json(result)
   } catch (error) {
     res.status(500).json({
@@ -1363,6 +1501,623 @@ app.post('/api/promocodes/validate', async (req, res) => {
       discountAmount: 0,
       message: 'Ошибка проверки промокода'
     })
+  }
+})
+
+/**
+ * API для управления пользователями (создание через Firebase Admin + Firestore)
+ * Только админ, обходит Firestore rules
+ */
+
+/** Внутренняя функция: создать одного пользователя (Auth + Firestore). Возвращает { user } или бросает. */
+async function createOneUser(adminInst, dbInst, appId, payload) {
+  const rawEmail = typeof payload.email === 'string' ? payload.email.trim() : ''
+  const rawName = typeof payload.name === 'string' ? payload.name.trim() : ''
+  const rawPassword = typeof payload.password === 'string' ? payload.password : ''
+  const rawPhone = typeof payload.phone === 'string' ? payload.phone.trim() : ''
+  const rawRole = typeof payload.role === 'string' ? payload.role.trim() : 'user'
+  const rawPlan = typeof payload.plan === 'string' ? payload.plan.trim() : 'free'
+  const rawTgId = payload.tgId != null ? String(payload.tgId).trim() : ''
+  const rawTariffId = payload.tariffId != null ? String(payload.tariffId).trim() : ''
+  const rawTariffName = payload.tariffName != null ? String(payload.tariffName).trim() : ''
+  const rawExpiresAt = payload.expiresAt
+
+  if (!rawEmail || !rawName || !rawPassword || rawPassword.length < 6) {
+    throw new Error('Email, имя и пароль (≥6 символов) обязательны')
+  }
+
+  const email = rawEmail.toLowerCase()
+  const name = rawName
+  const phone = rawPhone
+  const allowedRoles = ['user', 'admin', 'accountant', 'бухгалтер']
+  const role = allowedRoles.includes(rawRole) ? rawRole : 'user'
+  const plan = rawPlan || 'free'
+
+  let expiresAt = null
+  if (rawExpiresAt !== undefined && rawExpiresAt !== null && rawExpiresAt !== '') {
+    if (typeof rawExpiresAt === 'number') {
+      expiresAt = Number.isFinite(rawExpiresAt) ? rawExpiresAt : null
+    } else if (typeof rawExpiresAt === 'string') {
+      const ms = Date.parse(rawExpiresAt)
+      expiresAt = Number.isFinite(ms) ? ms : null
+    }
+  }
+
+  let createdUid = null
+  const userRecord = await adminInst.auth().createUser({
+    email,
+    password: rawPassword,
+    displayName: name,
+    disabled: false,
+  })
+  createdUid = userRecord.uid
+
+  try {
+    const uuid = randomUUID()
+    const subIdLength = 16
+    const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
+    let subId = ''
+    for (let i = 0; i < subIdLength; i++) {
+      subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+    }
+    const nowIso = new Date().toISOString()
+    const userData = {
+      email,
+      name,
+      phone,
+      role,
+      plan,
+      uuid,
+      subId,
+      expiresAt: expiresAt ?? null,
+      tariffName: rawTariffName || '',
+      tariffId: rawTariffId || '',
+      photoURL: userRecord.photoURL || null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    }
+    if (rawTgId) userData.tgId = rawTgId
+    const userDocRef = dbInst.doc(`artifacts/${appId}/public/data/users_v4/${createdUid}`)
+    await userDocRef.set(userData)
+    return { user: { id: createdUid, ...userData } }
+  } catch (e) {
+    if (createdUid) {
+      try { await adminInst.auth().deleteUser(createdUid) } catch (_) {}
+    }
+    throw e
+  }
+}
+
+/** Извлечь значение из объекта по нескольким возможным ключам (регистронезависимо). */
+function pickFirst(obj, ...keys) {
+  if (!obj || typeof obj !== 'object') return ''
+  const lower = (s) => String(s).toLowerCase()
+  for (const k of keys) {
+    const found = Object.keys(obj).find((key) => lower(key) === lower(k))
+    if (found != null && obj[found] !== undefined && obj[found] !== null) {
+      return String(obj[found]).trim()
+    }
+  }
+  return ''
+}
+
+/** POST /api/admin/users — создать пользователя (Firebase Auth + Firestore users_v4) */
+app.post('/api/admin/users', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!admin || !db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  try {
+    const body = req.body || {}
+    const rawPassword = typeof body.password === 'string' ? body.password : ''
+    if (!rawPassword || rawPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'Пароль обязателен и должен содержать не менее 6 символов' })
+    }
+    const result = await createOneUser(admin, db, APP_ID, {
+      email: body.email,
+      name: body.name,
+      password: body.password,
+      phone: body.phone,
+      role: body.role,
+      plan: body.plan,
+      tgId: body.tgId,
+      tariffId: body.tariffId,
+      tariffName: body.tariffName,
+      expiresAt: body.expiresAt,
+    })
+    return res.status(201).json({ success: true, user: result.user })
+  } catch (err) {
+    if (err.code === 'auth/email-already-exists') {
+      return res.status(400).json({ success: false, error: 'Пользователь с таким email уже существует' })
+    }
+    console.error('❌ POST /api/admin/users:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка создания пользователя' })
+  }
+})
+
+/** POST /api/admin/import-from-nocodb — получить записи из NocoDB и создать пользователей (только админ) */
+app.post('/api/admin/import-from-nocodb', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!admin || !db) {
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+
+  const body = req.body || {}
+  const baseUrl = (body.baseUrl || process.env.NOCODB_BASE_URL || '').toString().trim().replace(/\/+$/, '')
+  const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
+  const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
+  const defaultPassword = (body.defaultPassword || process.env.IMPORT_DEFAULT_PASSWORD || '').toString()
+
+  if (!baseUrl || !apiToken) {
+    return res.status(400).json({
+      success: false,
+      error: 'Укажите baseUrl и apiToken (или задайте NOCODB_BASE_URL и NOCODB_API_TOKEN в .env)',
+    })
+  }
+  if (!tableId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Укажите tableId (или задайте NOCODB_TABLE_ID в .env). Table ID можно взять из URL таблицы в NocoDB (начинается с m).',
+    })
+  }
+
+  const passwordToUse = defaultPassword.length >= 6 ? defaultPassword : null
+  if (!passwordToUse) {
+    return res.status(400).json({
+      success: false,
+      error: 'Задайте пароль по умолчанию для импорта (минимум 6 символов) в поле defaultPassword или IMPORT_DEFAULT_PASSWORD в .env',
+    })
+  }
+
+  try {
+    const listUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+    const limit = 1000
+    const allRows = []
+    let offset = 0
+    let hasMore = true
+    while (hasMore) {
+      const { data } = await axios.get(listUrl, {
+        params: { limit, offset },
+        headers: {
+          'xc-token': apiToken,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+        validateStatus: () => true,
+      })
+      const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
+      if (!Array.isArray(list) || list.length === 0) break
+      allRows.push(...list)
+      offset += list.length
+      if (list.length < limit) hasMore = false
+    }
+
+    const created = []
+    const skipped = []
+    const errors = []
+
+    for (let i = 0; i < allRows.length; i++) {
+      const row = allRows[i]
+      const email = (pickFirst(row, 'email', 'Email', 'mail', 'E-mail') || '').toLowerCase()
+      const name = pickFirst(row, 'name', 'Name', 'full_name', 'FullName', 'Имя')
+      if (!email || !name) {
+        skipped.push({ rowIndex: i + 1, reason: 'Нет email или имени', row: { email, name } })
+        continue
+      }
+
+      const phone = pickFirst(row, 'phone', 'Phone', 'telephone', 'Телефон')
+      const tgId = pickFirst(row, 'tgId', 'tg_id', 'telegram_id', 'TelegramId', 'Telegram ID')
+      const roleRaw = (pickFirst(row, 'role', 'Role', 'роль') || 'user').toLowerCase()
+      const planRaw = (pickFirst(row, 'plan', 'Plan', 'план') || 'free').toLowerCase()
+      const allowedRoles = ['user', 'admin', 'accountant', 'бухгалтер']
+      const role = allowedRoles.includes(roleRaw) ? roleRaw : 'user'
+      const plan = planRaw || 'free'
+
+      try {
+        const result = await createOneUser(admin, db, APP_ID, {
+          email,
+          name,
+          password: passwordToUse,
+          phone,
+          role,
+          plan,
+          tgId: tgId || undefined,
+        })
+        created.push({ email, id: result.user.id })
+      } catch (err) {
+        if (err.code === 'auth/email-already-exists') {
+          skipped.push({ rowIndex: i + 1, email, reason: 'Уже существует' })
+        } else {
+          errors.push({ rowIndex: i + 1, email, error: err.message || String(err) })
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      created: created.length,
+      skipped: skipped.length,
+      errors: errors.length,
+      details: { created, skipped, errors },
+    })
+  } catch (err) {
+    const msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    console.error('❌ POST /api/admin/import-from-nocodb:', msg)
+    return res.status(500).json({
+      success: false,
+      error: msg || 'Ошибка при запросе к NocoDB или создании пользователей',
+    })
+  }
+})
+
+/**
+ * Модуль Telegram: привязка аккаунта, уведомления, напоминания.
+ * Токен: из TELEGRAM_BOT_TOKEN (env) или из Firestore (настройки в админке).
+ */
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || process.env.N8N_WEBHOOK_SECRET || ''
+let telegramTokenCache = { token: null, expiresAt: 0 }
+const TELEGRAM_CACHE_TTL_MS = 60 * 1000
+
+/**
+ * Токен бота: приоритет 1) TELEGRAM_BOT_TOKEN (env), 2) кэш, 3) Firestore (artifacts/APP_ID/public/settings.telegramBotToken).
+ * Используется для webhook привязки, уведомлений об оплате, send-reminders и тестовых сообщений.
+ */
+async function getTelegramToken() {
+  const fromEnv = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
+  if (fromEnv) return fromEnv
+  if (telegramTokenCache.token && Date.now() < telegramTokenCache.expiresAt) {
+    return telegramTokenCache.token
+  }
+  if (!db) return ''
+  try {
+    const snap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
+    const token = (snap.exists && snap.data().telegramBotToken) ? String(snap.data().telegramBotToken).trim() : ''
+    if (token) {
+      telegramTokenCache = { token, expiresAt: Date.now() + TELEGRAM_CACHE_TTL_MS }
+    }
+    return token
+  } catch {
+    return ''
+  }
+}
+
+// ——— Telegram Webhook: проверка secret_token (если задан TELEGRAM_WEBHOOK_SECRET) ———
+const verifyTelegramWebhookSecret = (req, res, next) => {
+  const secret = TELEGRAM_WEBHOOK_SECRET && TELEGRAM_WEBHOOK_SECRET.trim()
+  if (!secret) return next()
+  const received = req.headers['x-telegram-bot-api-secret-token'] || ''
+  if (received !== secret) {
+    console.warn('⚠️ Telegram webhook: неверный secret_token')
+    return res.status(401).send()
+  }
+  next()
+}
+
+/** Базовый URL для кнопки Mini App (без слэша в конце) */
+function getBaseUrlForTelegram() {
+  return (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '') || null
+}
+
+/** Отправить главное меню с кнопкой «Открыть панель» (Web App) */
+async function sendMainMenu(botToken, chatId) {
+  const baseUrl = getBaseUrlForTelegram()
+  const appUrl = baseUrl ? `${baseUrl}/` : null
+  const text = `🚀 <b>VPN Панель</b>\n\n<b>Доступные действия:</b>\n• Создать VPN конфиг\n• Управлять подписками\n• Статистика трафика`
+  const replyMarkup = appUrl
+    ? { inline_keyboard: [[{ text: '🛠️ Открыть панель', web_app: { url: appUrl } }]] }
+    : null
+  await sendTelegramMessage(botToken, chatId, text, { reply_markup: replyMarkup })
+}
+
+/**
+ * Обработка данных из Mini App (message.web_app_data) → при необходимости вызов n8n/3x-ui
+ * data.action: create_vpn | delete_vpn | и т.д.; данные передаются в n8n как есть, с telegramUserId
+ */
+async function handleMiniAppData(botToken, message) {
+  const chatId = message.chat?.id
+  const fromId = String(message.from?.id || '')
+  if (!message.web_app_data?.data) return
+  let data
+  try {
+    data = typeof message.web_app_data.data === 'string'
+      ? JSON.parse(message.web_app_data.data)
+      : message.web_app_data.data
+  } catch (e) {
+    await sendTelegramMessage(botToken, chatId, 'Ошибка формата данных.')
+    return
+  }
+  const action = data.action || data.action_type
+  console.log('📨 Telegram Mini App data:', { fromId, action })
+
+  // Найти userId по tgId (привязка в ЛК)
+  let userId = null
+  if (db) {
+    try {
+      const snap = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+        .where('tgId', '==', fromId)
+        .limit(1)
+        .get()
+      if (!snap.empty) userId = snap.docs[0].id
+    } catch (e) {
+      console.warn('handleMiniAppData: поиск пользователя по tgId', e.message)
+    }
+  }
+
+  const emptyReq = { body: {}, headers: {} }
+  const webhookUrl = getWebhookUrl('addClient', emptyReq)
+  const payload = {
+    ...data,
+    telegramUserId: fromId,
+    userId: userId || undefined,
+  }
+
+  try {
+    if (action === 'create_vpn' || action === 'add_client') {
+      await callN8NWebhook(webhookUrl, { ...payload, operation: 'add_client' })
+      await sendTelegramMessage(botToken, chatId, '✅ Запрос на создание VPN отправлен.')
+    } else if (action === 'delete_vpn' || action === 'delete_client') {
+      const deleteUrl = getWebhookUrl('deleteClient', emptyReq)
+      await callN8NWebhook(deleteUrl, { ...payload, operation: 'delete_client' })
+      await sendTelegramMessage(botToken, chatId, '🗑️ Запрос на удаление конфига отправлен.')
+    } else {
+      // Любой другой action — пробрасываем в n8n для кастомной логики
+      await callN8NWebhook(webhookUrl, payload)
+      await sendTelegramMessage(botToken, chatId, '✅ Данные получены.')
+    }
+  } catch (err) {
+    console.error('❌ handleMiniAppData:', err.message)
+    await sendTelegramMessage(botToken, chatId, `Ошибка: ${err.message || 'Попробуйте позже.'}`)
+  }
+}
+
+/** Обработка callback от inline-кнопок */
+async function handleCallbackQuery(botToken, callbackQuery) {
+  const chatId = callbackQuery.message?.chat?.id
+  const fromId = String(callbackQuery.from?.id || '')
+  const data = callbackQuery.data || ''
+  const id = callbackQuery.id
+  await answerCallbackQuery(botToken, id, { text: 'Ок' })
+  if (data === 'open_panel' || data === 'menu') {
+    await sendMainMenu(botToken, chatId)
+  }
+}
+
+/** POST /api/telegram/webhook — единая точка входа: привязка, команды, Mini App, callback_query */
+app.post('/api/telegram/webhook', verifyTelegramWebhookSecret, express.json(), async (req, res) => {
+  const update = req.body
+  res.status(200).send()
+  if (!update) return
+
+  const botToken = await getTelegramToken()
+  if (!botToken) return
+
+  try {
+    if (update.callback_query) {
+      await handleCallbackQuery(botToken, update.callback_query)
+      return
+    }
+
+    const message = update.message || update.edited_message
+    if (!message || !message.from) return
+
+    const chatId = message.chat?.id
+    const fromId = String(message.from.id)
+    const text = (message.text || '').trim()
+
+    if (message.web_app_data) {
+      await handleMiniAppData(botToken, message)
+      return
+    }
+
+    if (text.startsWith('/start ')) {
+      const token = text.slice(7).trim()
+      if (!token || !db) return
+      try {
+        const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
+        const snap = await bindRef.get()
+        if (!snap.exists) {
+          await sendTelegramMessage(botToken, chatId, 'Ссылка привязки недействительна или истекла. Получите новую в личном кабинете.')
+          return
+        }
+        const { userId, expiresAt } = snap.data()
+        if (expiresAt && Date.now() > expiresAt) {
+          await bindRef.delete()
+          await sendTelegramMessage(botToken, chatId, 'Ссылка привязки истекла. Получите новую в личном кабинете.')
+          return
+        }
+        const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`)
+        await userRef.update({ tgId: fromId, updatedAt: new Date().toISOString() })
+        await bindRef.delete()
+        await sendTelegramMessage(botToken, chatId, '✅ Аккаунт успешно привязан к Telegram. Вы будете получать уведомления об оплате и напоминания о продлении подписки.')
+        console.log('✅ Telegram: пользователь привязан', { userId, tgId: fromId })
+      } catch (err) {
+        console.error('❌ Telegram webhook bind:', err.message)
+        await sendTelegramMessage(botToken, chatId, 'Ошибка привязки. Попробуйте позже или обратитесь в поддержку.')
+      }
+      return
+    }
+
+    if (text === '/start') {
+      await sendMainMenu(botToken, chatId)
+      await sendTelegramMessage(botToken, chatId, 'Чтобы привязать аккаунт SKYFLOW: личный кабинет → Профиль → Telegram → «Привязать».')
+      return
+    }
+
+    if (text === '/menu') {
+      await sendMainMenu(botToken, chatId)
+      return
+    }
+  } catch (err) {
+    console.error('❌ Telegram webhook:', err.message)
+  }
+})
+
+/** GET /api/telegram/bind-link — ссылка для привязки (авторизованный пользователь) */
+app.get('/api/telegram/bind-link', async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const botToken = await getTelegramToken()
+  if (!botToken) return res.status(503).json({ success: false, error: 'Telegram-бот не настроен' })
+  try {
+    const token = randomUUID().replace(/-/g, '').slice(0, 24)
+    const expiresAt = Date.now() + 15 * 60 * 1000
+    const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
+    await bindRef.set({ userId: authResult.uid, expiresAt, createdAt: new Date().toISOString() })
+    const botInfo = await getTelegramBotInfo(botToken)
+    const username = botInfo.username || 'YourBot'
+    res.json({ success: true, link: `https://t.me/${username}?start=${token}`, expiresIn: 900 })
+  } catch (err) {
+    console.error('❌ GET /api/telegram/bind-link:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/telegram/unbind — отвязать Telegram */
+app.post('/api/telegram/unbind', async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  try {
+    const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${authResult.uid}`)
+    await userRef.update({ tgId: null, updatedAt: new Date().toISOString() })
+    res.json({ success: true })
+  } catch (err) {
+    console.error('❌ POST /api/telegram/unbind:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/telegram/send-reminders — напоминания об истечении (cron; секрет в заголовке) */
+app.post('/api/telegram/send-reminders', express.json(), async (req, res) => {
+  const secret = req.headers['x-telegram-secret'] || req.body?.secret || ''
+  if (TELEGRAM_WEBHOOK_SECRET && secret !== TELEGRAM_WEBHOOK_SECRET) {
+    return res.status(401).json({ success: false, error: 'Неверный секрет' })
+  }
+  const botToken = await getTelegramToken()
+  if (!db || !botToken) return res.status(200).json({ success: true, sent: 0, message: 'Telegram не настроен' })
+  try {
+    const now = Date.now()
+    const oneDay = 24 * 60 * 60 * 1000
+    const inSevenDays = now + 7 * oneDay
+    const inOneDay = now + oneDay
+    const usersSnap = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).get()
+    let sent = 0
+    for (const doc of usersSnap.docs) {
+      const u = doc.data()
+      const tgId = u.tgId && String(u.tgId).trim()
+      if (!tgId) continue
+      const exp = u.expiresAt ? (typeof u.expiresAt === 'number' ? u.expiresAt : new Date(u.expiresAt).getTime()) : 0
+      if (exp <= 0 || exp > inSevenDays) continue
+      const tariffName = u.tariffName || 'Подписка'
+      const daysLeft = Math.floor((exp - now) / oneDay)
+      let text
+      if (exp <= now) text = `⚠️ Подписка «${tariffName}» истекла. Оплатите продление в личном кабинете.`
+      else if (exp <= inOneDay) text = `⏰ Подписка «${tariffName}» истекает сегодня! Оплатите продление в личном кабинете.`
+      else text = `📅 Подписка «${tariffName}» истекает через ${daysLeft} дн. Оплатите продление в личном кабинете.`
+      const result = await sendTelegramMessage(botToken, tgId, text)
+      if (result.ok) sent++
+    }
+    res.json({ success: true, sent })
+  } catch (err) {
+    console.error('❌ POST /api/telegram/send-reminders:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/admin/telegram/status — статус (только админ) */
+app.get('/api/admin/telegram/status', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const token = await getTelegramToken()
+  res.json({ success: true, configured: Boolean(token && token.trim()) })
+})
+
+/** PATCH /api/admin/telegram/settings — сохранить токен бота в Firestore (только админ). Быстрая настройка без .env.
+ * Сохранённый токен используется для: webhook привязки, уведомлений об оплате, напоминаний (send-reminders), тестовых сообщений.
+ */
+app.patch('/api/admin/telegram/settings', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const token = (req.body && req.body.token != null) ? String(req.body.token).trim() : ''
+  try {
+    const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+    await settingsRef.set({ telegramBotToken: token || null, telegramBotTokenUpdatedAt: new Date().toISOString() }, { merge: true })
+    telegramTokenCache = { token: null, expiresAt: 0 }
+    if (token) {
+      console.log('✅ Telegram: токен сохранён в Firestore (artifacts/%s/public/settings). Будет использоваться для уведомлений и привязки.', APP_ID)
+    } else {
+      console.log('✅ Telegram: токен удалён из настроек Firestore.')
+    }
+    res.json({ success: true, configured: Boolean(token), savedTo: 'firestore' })
+  } catch (err) {
+    console.error('❌ PATCH /api/admin/telegram/settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/telegram/set-webhook — установить webhook в Telegram (secret_token + allowed_updates) */
+app.post('/api/admin/telegram/set-webhook', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const botToken = await getTelegramToken()
+  if (!botToken) return res.status(400).json({ success: false, error: 'Сначала сохраните токен бота' })
+  const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
+    ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+    : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
+  const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/telegram/webhook`
+  const opts = {
+    allowed_updates: ['message', 'callback_query'],
+    secret_token: TELEGRAM_WEBHOOK_SECRET && TELEGRAM_WEBHOOK_SECRET.trim() ? TELEGRAM_WEBHOOK_SECRET.trim() : undefined,
+  }
+  try {
+    const result = await setTelegramWebhook(botToken, webhookUrl, opts)
+    if (!result.ok) return res.status(400).json({ success: false, error: result.error || 'Ошибка Telegram API' })
+    res.json({ success: true, webhookUrl, secretTokenSet: Boolean(opts.secret_token) })
+  } catch (err) {
+    console.error('❌ POST /api/admin/telegram/set-webhook:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/admin/telegram/webhook-status — информация о текущем webhook (только админ) */
+app.get('/api/admin/telegram/webhook-status', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const botToken = await getTelegramToken()
+  if (!botToken) return res.status(400).json({ success: false, error: 'Токен бота не настроен' })
+  try {
+    const result = await getTelegramWebhookInfo(botToken)
+    if (!result.ok) return res.status(400).json({ success: false, error: result.error })
+    res.json({ success: true, webhookInfo: result.result })
+  } catch (err) {
+    console.error('❌ GET /api/admin/telegram/webhook-status:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/telegram/send-test — отправить тестовое уведомление на указанный Telegram ID (только админ) */
+app.post('/api/admin/telegram/send-test', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const botToken = await getTelegramToken()
+  if (!botToken) return res.status(400).json({ success: false, error: 'Сначала сохраните токен бота' })
+  const chatId = (req.body && req.body.chatId != null) ? String(req.body.chatId).trim() : ''
+  if (!chatId) return res.status(400).json({ success: false, error: 'Укажите chatId (Telegram ID получателя)' })
+  try {
+    const result = await sendTelegramMessage(
+      botToken,
+      chatId,
+      '🔔 Тестовое уведомление от SKYFLOW. Интеграция Telegram работает.',
+    )
+    if (!result.ok) return res.status(400).json({ success: false, error: result.error || 'Ошибка отправки' })
+    res.json({ success: true, message: 'Тестовое сообщение отправлено' })
+  } catch (err) {
+    console.error('❌ POST /api/admin/telegram/send-test:', err.message)
+    res.status(500).json({ success: false, error: err.message })
   }
 })
 
@@ -3681,6 +4436,15 @@ async function activateSubscriptionAfterPayment(paymentData) {
             body: `Ваша подписка «${tariffName}» успешно продлена${expiresAtStr ? ` до ${expiresAtStr}` : ''}.`,
             data: { subscriptionId, orderId: paymentData.orderId, tariffName, expiresAt: subscriptionExpiresAt }
           })
+          if (userData.tgId) {
+            getTelegramToken().then((botToken) => {
+              if (!botToken) return
+              const msg = `✅ Оплата принята.\n\nПодписка «${tariffName}» активирована${expiresAtStr ? ` до ${expiresAtStr}` : ''}.`
+              sendTelegramMessage(botToken, String(userData.tgId).trim(), msg).then((r) => {
+                if (!r.ok) console.warn('⚠️ Telegram: не удалось отправить уведомление об оплате', { userId, error: r.error })
+              }).catch((e) => console.warn('⚠️ Telegram send error:', e.message))
+            })
+          }
         } else {
           // Ошибка активации после всех retry попыток
           // Увеличиваем счетчик попыток для следующего вызова (если будет)

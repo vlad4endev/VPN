@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { collection, onSnapshot } from 'firebase/firestore'
+import { useState, useCallback } from 'react'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import { adminService } from '../services/adminService.js'
+import { usersApiService } from '../services/usersApiService.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
@@ -31,7 +31,6 @@ import { canAccessFinances } from '../../../shared/constants/admin.js'
 export function useUsers(currentUser, users, setUsers, setCurrentUser, settings, setError, setSuccess) {
   const [editingUser, setEditingUser] = useState(null)
   const [loading, setLoading] = useState(false)
-  const unsubscribeRef = useRef(null)
 
   // Нормализация дат пользователя из Firestore
   // Firestore может возвращать даты как Timestamp объекты, ISO строки или числа
@@ -142,95 +141,9 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     }
   }, [currentUser, setUsers, setError])
 
-  // Real-time listener для автоматического обновления списка пользователей
-  useEffect(() => {
-    // Проверка прав доступа - только админы могут подписываться на изменения
-    if (!currentUser || currentUser.role !== 'admin' || !db) {
-      return
-    }
-
-    logger.info('Admin', 'Подписка на real-time обновления пользователей', { adminId: currentUser.id })
-
-    try {
-      const usersCollection = collection(db, `artifacts/${APP_ID}/public/data/users_v4`)
-      
-      // Подписываемся на изменения в коллекции пользователей
-      const unsubscribe = onSnapshot(
-        usersCollection,
-        (snapshot) => {
-          const usersList = []
-          snapshot.forEach((docSnapshot) => {
-            usersList.push({
-              id: docSnapshot.id,
-              ...docSnapshot.data(),
-            })
-          })
-          
-          // Нормализуем даты для всех пользователей
-          const normalizedUsers = usersList.map(normalizeUserDates)
-          
-          // Обновляем состояние только если данные действительно изменились
-          setUsers(prevUsers => {
-            // Сравниваем по ID и ключевым полям для более точного определения изменений
-            const prevUsersMap = new Map(prevUsers.map(u => [u.id, u]))
-            const hasRealChanges = normalizedUsers.some(newUser => {
-              const prevUser = prevUsersMap.get(newUser.id)
-              if (!prevUser) return true // Новый пользователь
-              
-              // Сравниваем ключевые поля, которые могут измениться
-              return (
-                prevUser.paymentStatus !== newUser.paymentStatus ||
-                prevUser.expiresAt !== newUser.expiresAt ||
-                prevUser.tariffId !== newUser.tariffId ||
-                prevUser.plan !== newUser.plan ||
-                prevUser.subId !== newUser.subId ||
-                prevUser.uuid !== newUser.uuid ||
-                prevUser.name !== newUser.name ||
-                prevUser.email !== newUser.email ||
-                prevUser.devices !== newUser.devices ||
-                prevUser.trafficGB !== newUser.trafficGB
-              )
-            })
-            
-            // Также проверяем, изменилось ли количество пользователей
-            const countChanged = prevUsers.length !== normalizedUsers.length
-            
-            if (hasRealChanges || countChanged) {
-              logger.info('Admin', '🔄 Обнаружены изменения в данных пользователей (real-time), обновление списка', { 
-                count: normalizedUsers.length,
-                prevCount: prevUsers.length,
-                hasRealChanges,
-                countChanged
-              })
-              return normalizedUsers
-            }
-            
-            // Если изменений нет, возвращаем предыдущее состояние
-            return prevUsers
-          })
-        },
-        (error) => {
-          logger.error('Admin', 'Ошибка real-time подписки на пользователей', { adminId: currentUser.id }, error)
-          setError('Ошибка обновления списка пользователей')
-        }
-      )
-
-      // Сохраняем функцию отписки
-      unsubscribeRef.current = unsubscribe
-
-      // Очистка при размонтировании или изменении пользователя
-      return () => {
-        if (unsubscribeRef.current) {
-          logger.info('Admin', 'Отписка от real-time обновлений пользователей', { adminId: currentUser.id })
-          unsubscribeRef.current()
-          unsubscribeRef.current = null
-        }
-      }
-    } catch (err) {
-      logger.error('Admin', 'Ошибка настройки real-time подписки на пользователей', { adminId: currentUser.id }, err)
-      setError('Ошибка настройки обновления списка пользователей')
-    }
-  }, [currentUser, db, setUsers, setError])
+  // Список пользователей загружается через loadUsers() (getDocs) при открытии админки и после действий (создание, импорт, обновление, удаление).
+  // onSnapshot для этой коллекции отключён из-за бага Firestore SDK 12.x: "INTERNAL ASSERTION FAILED: Unexpected state" в watch stream
+  // (см. https://github.com/firebase/firebase-js-sdk/issues/9267). Для обновления списка используйте кнопку обновления или повторное открытие вкладки.
 
   // Обновление пользователя с валидацией
   const handleUpdateUser = useCallback(async (userId, updates) => {
@@ -454,6 +367,83 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     }
   }, [currentUser, users, setUsers, setError, setSuccess])
 
+  // Создание пользователя администратором через backend (Firebase Admin + Firestore)
+  const createUser = useCallback(async (newUserData) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      const err = new Error('Недостаточно прав')
+      logError('Admin', 'createUser', err, { currentUserId: currentUser?.id })
+      setError('Недостаточно прав')
+      throw err
+    }
+
+    try {
+      const payload = {
+        email: (newUserData.email || '').trim(),
+        password: newUserData.password || '',
+        name: (newUserData.name || '').trim(),
+        phone: newUserData.phone || '',
+        role: newUserData.role || 'user',
+        plan: newUserData.plan || 'free',
+        tgId: newUserData.tgId || '',
+        tariffId: newUserData.tariffId || '',
+        tariffName: newUserData.tariffName || '',
+        expiresAt: newUserData.expiresAt ?? null,
+      }
+
+      if (!payload.email || !payload.password || !payload.name) {
+        const err = new Error('Email, имя и пароль обязательны')
+        logError('Admin', 'createUser', err, { payloadKeys: Object.keys(payload) })
+        setError(err.message)
+        throw err
+      }
+
+      const createdUser = await usersApiService.createUser(payload)
+
+      // Обновляем локальное состояние
+      setUsers((prev) => [...prev, createdUser])
+
+      setSuccess('Пользователь создан')
+      setTimeout(() => setSuccess(''), 3000)
+
+      logger.info('Admin', 'Пользователь создан администратором через backend', {
+        userId: createdUser.id,
+        email: createdUser.email,
+      })
+
+      return createdUser
+    } catch (err) {
+      const errorMessage = handleFirestoreError(err)
+      logError('Admin', 'createUser', err)
+      setError(errorMessage)
+      throw err
+    }
+  }, [currentUser, setUsers, setError, setSuccess])
+
+  // Импорт пользователей из NocoDB (только админ)
+  const importFromNocoDB = useCallback(async (params) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      const err = new Error('Недостаточно прав')
+      logError('Admin', 'importFromNocoDB', err, { currentUserId: currentUser?.id })
+      setError('Недостаточно прав')
+      throw err
+    }
+    try {
+      const result = await usersApiService.importFromNocoDB(params)
+      await loadUsers()
+      setSuccess(
+        `Импорт: создано ${result.created}, пропущено ${result.skipped}, ошибок ${result.errors}`,
+      )
+      setTimeout(() => setSuccess(''), 5000)
+      logger.info('Admin', 'Импорт из NocoDB выполнен', result)
+      return result
+    } catch (err) {
+      const errorMessage = handleFirestoreError(err)
+      logError('Admin', 'importFromNocoDB', err)
+      setError(errorMessage)
+      throw err
+    }
+  }, [currentUser, loadUsers, setError, setSuccess])
+
   return {
     editingUser,
     loading,
@@ -464,6 +454,8 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     handleSaveUserCard,
     generateUUID,
     generateSubId,
+    createUser,
+    importFromNocoDB,
   }
 }
 

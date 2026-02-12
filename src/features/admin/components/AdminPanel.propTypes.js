@@ -13,7 +13,7 @@ export const AdminPanelPropTypes = {
   }).isRequired,
   
   // Состояние вкладок
-  adminTab: PropTypes.oneOf(['dashboard', 'users', 'tickets', 'notifications', 'settings', 'tariffs', 'payments', 'reviews', 'promocodes', 'n8n', 'seo']).isRequired,
+  adminTab: PropTypes.oneOf(['dashboard', 'users', 'tickets', 'notifications', 'settings', 'tariffs', 'payments', 'reviews', 'promocodes', 'n8n', 'telegram', 'seo']).isRequired,
   onSetAdminTab: PropTypes.func.isRequired,
   
   // Навигация

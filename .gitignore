@@ -20,6 +20,9 @@ server/.env.local
 server/.env.*.local
 !server/.env.example
 
+# Firebase service account key (секретный ключ — не коммитить)
+server/firebase-service-account.json
+
 # ========================================
 # 🚨 КРИТИЧНО: Секреты в коде
 # ========================================

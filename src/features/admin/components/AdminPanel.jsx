@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
-import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard } from 'lucide-react'
+import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard, Database, RefreshCw } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
@@ -20,6 +20,9 @@ import NotificationsBroadcastPanel from '../../notifications/components/Notifica
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
 import { getAdminSectionByTabId } from '../constants/navSections.js'
 import { logError } from '../utils/errorHandler.js'
+import CreateUserModal from './CreateUserModal.jsx'
+import ImportFromNocoDBModal from './ImportFromNocoDBModal.jsx'
+import TelegramPanel from './TelegramPanel.jsx'
 
 const AdminPanel = ({
   currentUser,
@@ -109,11 +112,14 @@ const AdminPanel = ({
     loadReviews,
     handleApproveReview,
     handleRejectReview,
+    loadUsers,
   } = adminContext || {}
 
   // Состояние для открытия карточки пользователя
   const [selectedUser, setSelectedUser] = useState(null)
-  
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false)
+  const [showImportNocoDBModal, setShowImportNocoDBModal] = useState(false)
+
   // Обновляем selectedUser при изменении users, чтобы карточка показывала актуальные данные
   useEffect(() => {
     if (selectedUser) {
@@ -253,6 +259,35 @@ const AdminPanel = ({
 
         {adminTab === 'users' && (
           <>
+            <div className="mb-3 sm:mb-4 flex flex-wrap justify-end gap-2">
+              {typeof loadUsers === 'function' && (
+                <button
+                  type="button"
+                  onClick={() => loadUsers()}
+                  className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                  title="Обновить список пользователей"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Обновить
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowImportNocoDBModal(true)}
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+              >
+                <Database className="w-4 h-4" />
+                Импорт из NocoDB
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateUserModal(true)}
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+              >
+                <PlusCircle className="w-4 h-4" />
+                Добавить пользователя
+              </button>
+            </div>
             <VirtualizedUserTable
               users={users}
               editingUser={editingUser}
@@ -277,6 +312,12 @@ const AdminPanel = ({
                 tariffs={tariffs}
                 formatDate={formatDate}
               />
+            )}
+            {showCreateUserModal && (
+              <CreateUserModal onClose={() => setShowCreateUserModal(false)} />
+            )}
+            {showImportNocoDBModal && (
+              <ImportFromNocoDBModal onClose={() => setShowImportNocoDBModal(false)} />
             )}
           </>
         )}
@@ -1057,6 +1098,10 @@ const AdminPanel = ({
 
         {adminTab === 'n8n' && (
           <N8nPanel onSaveSettings={onHandleSaveSettings} />
+        )}
+
+        {adminTab === 'telegram' && (
+          <TelegramPanel />
         )}
 
         {success && (

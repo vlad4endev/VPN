@@ -13,6 +13,7 @@ import logger from '../../../shared/utils/logger.js'
 import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
+import TelegramBindCard from '../../telegram/components/TelegramBindCard.jsx'
 
 const Dashboard = ({
   currentUser,
@@ -2534,6 +2535,14 @@ const Dashboard = ({
                     {currentUser.phone || <span className="text-slate-500">Не указано</span>}
                   </div>
                 )}
+              </div>
+
+              <div className="space-y-4 sm:space-y-5">
+                <TelegramBindCard
+                  currentUser={currentUser}
+                  onBoundChange={onRefreshUserAfterPayment}
+                  onCopy={onCopy}
+                />
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">

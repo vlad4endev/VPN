@@ -50,6 +50,17 @@ class XUIService {
    * @private
    */
   setupInterceptors() {
+    // Telegram Mini App: добавляем initData в заголовок для всех запросов к /api/vpn (прямое открытие t.me/bot/app)
+    this.api.interceptors.request.use(
+      (config) => {
+        if (typeof window !== 'undefined' && window.__TELEGRAM_INIT_DATA) {
+          config.headers = config.headers || {}
+          config.headers['X-Telegram-InitData'] = window.__TELEGRAM_INIT_DATA
+        }
+        return config
+      },
+      (error) => Promise.reject(error)
+    )
     this.api.interceptors.request.use(
       (config) => {
         const interactionId = xuiLogger.logRequest(
