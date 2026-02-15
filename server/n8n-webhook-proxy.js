@@ -398,28 +398,6 @@ if (VAPID_PUBLIC && VAPID_PRIVATE) {
 }
 
 /**
- * Проверить Firebase ID token, вернуть uid. Для push-subscribe (любой авторизованный пользователь).
- */
-async function verifyIdToken(req, res) {
-  if (!admin) {
-    res.status(503).json({ success: false, error: 'Сервис недоступен' })
-    return null
-  }
-  const authHeader = req.headers.authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ success: false, error: 'Требуется авторизация' })
-    return null
-  }
-  try {
-    const decoded = await admin.auth().verifyIdToken(authHeader.slice(7))
-    return decoded.uid
-  } catch (err) {
-    res.status(401).json({ success: false, error: 'Неверный или истёкший токен' })
-    return null
-  }
-}
-
-/**
  * Отправить Web Push всем подпискам пользователя (ответ поддержки). Работает при закрытой вкладке.
  */
 async function sendWebPushToUser(userId, payload) {
@@ -2399,8 +2377,9 @@ app.get('/api/push-vapid-public', (req, res) => {
 
 /** POST /api/push-subscribe — сохранить подписку на push (авторизованный пользователь). Для уведомлений о тикетах в фоне. */
 app.post('/api/push-subscribe', express.json(), async (req, res) => {
-  const uid = await verifyIdToken(req, res)
-  if (uid == null) return
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  const uid = authResult.uid
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   const subscription = req.body?.subscription
   if (!subscription || !subscription.endpoint) {
