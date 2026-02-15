@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Send, CheckCircle2, XCircle, Copy, ExternalLink, RefreshCw, ChevronDown, ChevronUp, MessageSquare, Info } from 'lucide-react'
-import { getTelegramStatus, saveTelegramToken, setTelegramWebhook, sendTestMessage } from '../services/telegramAdminService.js'
+import { Send, CheckCircle2, XCircle, Copy, RefreshCw, ChevronDown, ChevronUp, Bell, Link2 } from 'lucide-react'
+import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage } from '../services/telegramAdminService.js'
 import logger from '../../../shared/utils/logger.js'
 
 /**
- * Панель настроек Telegram: быстрая настройка в 3 шага (токен → сохранить → webhook).
+ * Компактная панель Telegram: текущие настройки, токен, webhook, Chat ID админа, тест.
  */
 const TelegramPanel = () => {
-  const [statusLoading, setStatusLoading] = useState(false)
+  const [statusLoading, setStatusLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [configured, setConfigured] = useState(false)
+  const [adminChatIdSet, setAdminChatIdSet] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [tokenInput, setTokenInput] = useState('')
@@ -21,22 +22,52 @@ const TelegramPanel = () => {
   const [sendingTest, setSendingTest] = useState(false)
   const [testError, setTestError] = useState(null)
   const [testSuccess, setTestSuccess] = useState(null)
+  const [adminChatIdInput, setAdminChatIdInput] = useState('')
+  const [savingAdminChatId, setSavingAdminChatId] = useState(false)
+  const [webhookInfo, setWebhookInfo] = useState(null)
+  const [botUsername, setBotUsername] = useState(null)
+  const [currentAdminChatId, setCurrentAdminChatId] = useState(null)
+  const [chatInfo, setChatInfo] = useState(null)
+  const [chatInfoError, setChatInfoError] = useState(null)
 
   const loadStatus = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     else setStatusLoading(true)
     if (!isRefresh) setError(null)
     try {
-      const { configured: ok } = await getTelegramStatus()
-      setConfigured(ok)
+      const data = await getTelegramStatus()
+      setConfigured(data.configured)
+      setAdminChatIdSet(data.adminChatIdSet ?? false)
+      setBotUsername(data.botUsername != null ? data.botUsername : null)
+      setCurrentAdminChatId(data.adminChatId != null && String(data.adminChatId).trim() ? String(data.adminChatId).trim() : null)
+      setAdminChatIdInput(data.adminChatId != null && String(data.adminChatId).trim() ? String(data.adminChatId).trim() : '')
       if (isRefresh) setError(null)
     } catch (err) {
       logger.error('Admin', 'Telegram status', null, err)
       setError(err.message || 'Ошибка загрузки статуса')
       setConfigured(false)
+      setAdminChatIdSet(false)
+      setBotUsername(null)
+      setCurrentAdminChatId(null)
+      setAdminChatIdInput('')
     } finally {
       setStatusLoading(false)
       setRefreshing(false)
+    }
+  }, [])
+
+  const loadChatInfo = useCallback(async () => {
+    setChatInfoError(null)
+    setChatInfo(null)
+    try {
+      const { chat, error: err } = await getTelegramChatInfo()
+      if (err) {
+        setChatInfoError(err)
+        return
+      }
+      setChatInfo(chat || null)
+    } catch (err) {
+      setChatInfoError(err.message || 'Ошибка загрузки данных аккаунта')
     }
   }, [])
 
@@ -44,16 +75,39 @@ const TelegramPanel = () => {
     loadStatus()
   }, [loadStatus])
 
+  useEffect(() => {
+    if (currentAdminChatId) loadChatInfo()
+    else {
+      setChatInfo(null)
+      setChatInfoError(null)
+    }
+  }, [currentAdminChatId, loadChatInfo])
+
+  const loadWebhookStatus = useCallback(async () => {
+    if (!configured) return
+    try {
+      const { webhookInfo: info } = await getWebhookStatus()
+      setWebhookInfo(info || null)
+    } catch {
+      setWebhookInfo(null)
+    }
+  }, [configured])
+
+  useEffect(() => {
+    if (configured) loadWebhookStatus()
+    else setWebhookInfo(null)
+  }, [configured, loadWebhookStatus])
+
   const handleSaveToken = async () => {
     setError(null)
     setSuccess(null)
     setSaving(true)
     try {
-      const { configured: ok } = await saveTelegramToken(tokenInput)
-      setConfigured(ok)
-      setTokenInput('') // не оставляем токен в поле после сохранения
-      setSuccess('Токен сохранён в базу (Firestore). Он будет использоваться для привязки аккаунта, уведомлений об оплате и напоминаний о продлении. Теперь нажмите «Установить webhook».')
-      setTimeout(() => setSuccess(null), 6000)
+      await saveTelegramToken(tokenInput)
+      setTokenInput('')
+      setSuccess('Токен сохранён. Нажмите «Установить webhook».')
+      setTimeout(() => setSuccess(null), 5000)
+      await loadStatus(true)
     } catch (err) {
       setError(err.message || 'Ошибка сохранения')
     } finally {
@@ -67,8 +121,9 @@ const TelegramPanel = () => {
     setSettingWebhook(true)
     try {
       await setTelegramWebhook()
-      setSuccess('Webhook установлен. Интеграция готова.')
+      setSuccess('Webhook установлен.')
       setTimeout(() => setSuccess(null), 4000)
+      loadWebhookStatus()
     } catch (err) {
       setError(err.message || 'Ошибка установки webhook')
     } finally {
@@ -76,9 +131,7 @@ const TelegramPanel = () => {
     }
   }
 
-  const webhookUrl = typeof window !== 'undefined'
-    ? `${window.location.origin.replace(/\/$/, '')}/api/telegram/webhook`
-    : ''
+  const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin.replace(/\/$/, '')}/api/telegram/webhook` : ''
 
   const handleCopyWebhook = () => {
     if (webhookUrl && navigator.clipboard) {
@@ -94,8 +147,8 @@ const TelegramPanel = () => {
     setSendingTest(true)
     try {
       await sendTestMessage(testChatId)
-      setTestSuccess('Тестовое сообщение отправлено. Проверьте Telegram.')
-      setTimeout(() => setTestSuccess(null), 5000)
+      setTestSuccess('Отправлено. Проверьте Telegram.')
+      setTimeout(() => setTestSuccess(null), 4000)
     } catch (err) {
       setTestError(err.message || 'Ошибка отправки')
     } finally {
@@ -103,194 +156,201 @@ const TelegramPanel = () => {
     }
   }
 
+  const handleSaveAdminChatId = async () => {
+    setError(null)
+    setSuccess(null)
+    setSavingAdminChatId(true)
+    try {
+      await saveTelegramSettings({ adminChatId: adminChatIdInput })
+      setSuccess('Chat ID админа сохранён.')
+      setTimeout(() => setSuccess(null), 4000)
+      await loadStatus(true)
+      await loadChatInfo()
+    } catch (err) {
+      setError(err.message || 'Ошибка сохранения')
+    } finally {
+      setSavingAdminChatId(false)
+    }
+  }
+
   return (
-    <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 overflow-hidden">
-      <div className="p-4 sm:p-6 border-b border-slate-800">
-        <h2 className="text-xl sm:text-2xl font-bold text-slate-200 flex items-center gap-2 sm:gap-3">
-          <Send className="w-5 h-5 sm:w-6 sm:h-6" />
+    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden max-w-2xl">
+      <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+          <Send className="w-5 h-5" />
           Telegram
         </h2>
-        <p className="text-slate-400 text-sm sm:text-base mt-1">
-          Уведомления об оплате, напоминания о продлении и привязка аккаунта. Настройка за 3 шага.
-        </p>
+        <button
+          type="button"
+          onClick={async () => { await loadStatus(true); if (currentAdminChatId) loadChatInfo(); }}
+          disabled={refreshing || statusLoading}
+          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+          title="Обновить данные"
+        >
+          <RefreshCw className={`w-4 h-4 ${(refreshing || statusLoading) ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="p-4 space-y-4">
         {error && (
-          <div className="p-3 sm:p-4 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm space-y-1">
-            <p>{error}</p>
-            {error.includes('404') && (
-              <p className="text-red-400/90 text-xs mt-2">
-                Запрос идёт на backend (порт 3001). Запустите: <code className="bg-slate-800 px-1 rounded">node server/n8n-webhook-proxy.js</code>
-              </p>
-            )}
-          </div>
+          <div className="p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">{error}</div>
         )}
         {success && (
-          <div className="p-3 sm:p-4 bg-green-900/30 border border-green-800 rounded-lg text-green-300 text-sm">
-            {success}
-          </div>
+          <div className="p-3 bg-green-900/30 border border-green-800 rounded-lg text-green-300 text-sm">{success}</div>
         )}
 
-        {/* 3 шага */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 sm:p-5">
-          <h4 className="text-sm font-semibold text-slate-200 mb-3">Быстрая настройка</h4>
-          <ol className="space-y-3 text-sm text-slate-300">
-            <li className="flex gap-2">
-              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 flex items-center justify-center font-bold">1</span>
-              Создайте бота в Telegram: @BotFather → /newbot → скопируйте токен.
-            </li>
-            <li className="flex gap-2">
-              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 flex items-center justify-center font-bold">2</span>
-              Вставьте токен ниже и нажмите «Сохранить токен».
-            </li>
-            <li className="flex gap-2">
-              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600/30 text-blue-300 flex items-center justify-center font-bold">3</span>
-              Нажмите «Установить webhook» — готово.
-            </li>
-          </ol>
-        </div>
+        {/* Текущие настройки — сохранённые данные с сервера */}
+        <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Сохранённые данные</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div>
+              <span className="text-slate-500 block">Токен бота</span>
+              <span className="text-slate-200 font-medium">
+                {statusLoading ? '…' : configured ? 'Задан (скрыт)' : 'Не введён'}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500 block">Бот</span>
+              <span className="text-slate-200 font-medium">
+                {statusLoading ? '…' : botUsername ? `@${botUsername}` : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500 block">Chat ID — сюда приходят уведомления</span>
+              <span className="text-slate-200 font-medium">
+                {statusLoading ? '…' : currentAdminChatId ? currentAdminChatId : 'Не задан'}
+              </span>
+            </div>
+          </div>
+          {currentAdminChatId && (chatInfo || chatInfoError) && (
+            <div className="mt-3 pt-3 border-t border-slate-700">
+              <span className="text-slate-500 block text-xs mb-1">Данные аккаунта Telegram (getChat)</span>
+              {chatInfoError && (
+                <span className="text-amber-400 text-sm">{chatInfoError}</span>
+              )}
+              {chatInfo && !chatInfoError && (
+                <div className="text-slate-200 text-sm space-y-0.5">
+                  {chatInfo.type && <span className="text-slate-400">Тип: {chatInfo.type}</span>}
+                  {(chatInfo.first_name || chatInfo.last_name) && (
+                    <div>Имя: {[chatInfo.first_name, chatInfo.last_name].filter(Boolean).join(' ')}</div>
+                  )}
+                  {chatInfo.username && <div>@{chatInfo.username}</div>}
+                  {chatInfo.title && <div>Название: {chatInfo.title}</div>}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
-        {/* Токен + кнопки */}
-        <div className="space-y-3">
-          <label className="block text-sm font-medium text-slate-300">Токен бота (от @BotFather)</label>
-          <div className="flex flex-col sm:flex-row gap-2">
+        {/* Токен + Webhook в одну строку */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs text-slate-500 mb-1">Токен бота</label>
             <input
               type="password"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="123456789:ABCdef..."
-              className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Токен от @BotFather"
+              className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
             />
-            <button
-              type="button"
-              onClick={handleSaveToken}
-              disabled={saving}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm whitespace-nowrap"
-            >
-              {saving ? 'Сохранение…' : 'Сохранить токен'}
-            </button>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSaveToken}
+            disabled={saving}
+            className="h-[38px] px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+          >
+            {saving ? '…' : 'Сохранить'}
+          </button>
           <button
             type="button"
             onClick={handleSetWebhook}
             disabled={!configured || settingWebhook}
-            className="px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm"
+            className="h-[38px] px-4 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium"
           >
-            {settingWebhook ? 'Установка…' : 'Установить webhook'}
+            {settingWebhook ? '…' : 'Webhook'}
           </button>
+        </div>
+
+        {/* Chat ID админа — сюда поступают уведомления о тикетах */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-xs text-slate-500 mb-1">Chat ID — куда приходят уведомления о тикетах</label>
+            <input
+              type="text"
+              value={adminChatIdInput}
+              onChange={(e) => setAdminChatIdInput(e.target.value)}
+              placeholder="Ваш Telegram ID (из @userinfobot)"
+              className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
           <button
             type="button"
-            onClick={() => loadStatus(true)}
-            disabled={refreshing || statusLoading}
-            className="p-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-            title="Обновить статус"
+            onClick={handleSaveAdminChatId}
+            disabled={savingAdminChatId || !adminChatIdInput.trim()}
+            className="h-[38px] px-4 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
           >
-            <RefreshCw className={`w-4 h-4 text-slate-300 ${(refreshing || statusLoading) ? 'animate-spin' : ''}`} />
+            {savingAdminChatId ? '…' : 'Сохранить'}
           </button>
-        </div>
-
-        {/* Статус */}
-        <div className={`rounded-lg p-4 border-2 ${configured ? 'bg-green-900/20 border-green-700/50' : 'bg-amber-900/20 border-amber-700/50'}`}>
-          <div className="flex items-center gap-2">
-            {configured ? (
-              <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0" />
-            ) : (
-              <XCircle className="w-5 h-5 text-amber-400 flex-shrink-0" />
-            )}
-            <span className={configured ? 'text-green-300 font-medium' : 'text-amber-300 font-medium'}>
-              {configured ? 'Интеграция включена' : 'Сохраните токен, чтобы включить интеграцию'}
-            </span>
+          <div className="flex items-end gap-2 flex-1 min-w-[140px]">
+            <input
+              type="text"
+              value={testChatId}
+              onChange={(e) => { setTestChatId(e.target.value); setTestError(null); setTestSuccess(null); }}
+              placeholder="Тест: Chat ID"
+              className="flex-1 min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={handleSendTest}
+              disabled={sendingTest || !testChatId.trim()}
+              className="h-[38px] px-4 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium whitespace-nowrap"
+            >
+              {sendingTest ? '…' : 'Тест'}
+            </button>
           </div>
         </div>
+        {(testError || testSuccess) && (
+          <p className={`text-sm ${testError ? 'text-red-400' : 'text-green-400'}`}>{testError || testSuccess}</p>
+        )}
 
-        {/* Уведомления и Telegram ID */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 sm:p-5 space-y-4">
-          <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-            <MessageSquare className="w-4 h-4" />
-            Уведомления и получение Telegram ID
-          </h4>
-          <div className="text-sm text-slate-300 space-y-2">
-            <p>
-              <strong>Уведомления:</strong> при успешной оплате подписки пользователю с привязанным Telegram отправляется сообщение.
-              Напоминания об истечении подписки (за 7 дней / 1 день / в день истечения) отправляются по cron на <code className="text-slate-400 bg-slate-900/50 px-1 rounded">POST /api/telegram/send-reminders</code> (с заголовком <code className="text-slate-400 bg-slate-900/50 px-1 rounded">X-Telegram-Secret</code>).
-            </p>
-            <p className="flex items-start gap-2 mt-2">
-              <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-              <span>
-                <strong>Как получить Telegram ID:</strong> пользователь в личном кабинете открывает Профиль → раздел «Telegram» → «Привязать» и переходит по ссылке в бота — ID сохранится автоматически. Либо пользователь может написать боту <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">@userinfobot</a> в Telegram, получить свой ID и сообщить его вам для ручного ввода в карточке пользователя или при создании.
-              </span>
-            </p>
-          </div>
+        {/* Статус одной строкой */}
+        <div className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm ${configured ? 'bg-green-900/20 text-green-300' : 'bg-amber-900/20 text-amber-300'}`}>
+          {configured ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+          <span>{configured ? 'Бот подключён' : 'Сохраните токен'}</span>
           {configured && (
-            <div className="pt-2 border-t border-slate-700">
-              <label className="block text-sm font-medium text-slate-300 mb-2">Тестовое уведомление</label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="text"
-                  value={testChatId}
-                  onChange={(e) => { setTestChatId(e.target.value); setTestError(null); setTestSuccess(null); }}
-                  placeholder="Ваш Telegram ID (chat_id)"
-                  className="flex-1 min-h-[40px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendTest}
-                  disabled={sendingTest || !testChatId.trim()}
-                  className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg font-medium text-sm whitespace-nowrap"
-                >
-                  {sendingTest ? 'Отправка…' : 'Отправить тест'}
-                </button>
-              </div>
-              {testError && <p className="mt-2 text-sm text-red-400">{testError}</p>}
-              {testSuccess && <p className="mt-2 text-sm text-green-400">{testSuccess}</p>}
-            </div>
+            <span className="text-slate-400">•</span>
+          )}
+          {configured && (
+            <span>{adminChatIdSet ? 'Уведомления о тикетах: да' : 'Уведомления о тикетах: укажите Chat ID'}</span>
           )}
         </div>
 
-        {/* Подробнее (сворачиваемо) */}
+        {/* Webhook URL — компактно */}
+        {configured && webhookInfo?.url && (
+          <div className="flex items-center gap-2">
+            <Link2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
+            <code className="flex-1 min-w-0 text-xs text-slate-400 truncate">{webhookInfo.url}</code>
+            <button type="button" onClick={handleCopyWebhook} className="p-1.5 rounded text-slate-400 hover:bg-slate-700" title="Копировать">
+              <Copy className={`w-4 h-4 ${copied ? 'text-green-400' : ''}`} />
+            </button>
+          </div>
+        )}
+
+        {/* Подробнее */}
         <div className="border border-slate-700 rounded-lg overflow-hidden">
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full flex items-center justify-between p-3 sm:p-4 bg-slate-800/50 hover:bg-slate-800 text-slate-300 text-sm font-medium"
+            className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800 text-slate-400 text-sm"
           >
-            Подробнее (webhook URL, переменные окружения)
+            Подробнее (webhook URL, .env)
             {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
           {showAdvanced && (
-            <div className="p-4 space-y-4 border-t border-slate-700">
-              <div>
-                <h4 className="text-sm font-semibold text-slate-300 mb-2">URL webhook</h4>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <code className="flex-1 min-w-0 text-sm font-mono text-slate-200 break-all bg-slate-900/50 px-3 py-2 rounded border border-slate-700">
-                    {webhookUrl}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={handleCopyWebhook}
-                    className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg"
-                    title="Копировать"
-                  >
-                    <Copy className={`w-4 h-4 ${copied ? 'text-green-400' : 'text-slate-300'}`} />
-                  </button>
-                  {webhookUrl && (
-                    <a href={webhookUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg">
-                      <ExternalLink className="w-4 h-4 text-white" />
-                    </a>
-                  )}
-                </div>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-300 mb-1">Переменные окружения (альтернатива)</h4>
-                <p className="text-xs text-slate-500">
-                  Вместо сохранения токена в панели можно задать <code className="text-slate-400">TELEGRAM_BOT_TOKEN</code> на сервере.
-                  Для cron-напоминаний: <code className="text-slate-400">TELEGRAM_WEBHOOK_SECRET</code>, POST /api/telegram/send-reminders.
-                </p>
-              </div>
+            <div className="p-3 border-t border-slate-700 space-y-2 text-xs text-slate-500">
+              <p>Webhook: <code className="text-slate-400 break-all">{webhookUrl}</code></p>
+              <p>Env: TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_CHAT_ID, TELEGRAM_WEBHOOK_SECRET</p>
             </div>
           )}
         </div>

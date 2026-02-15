@@ -72,6 +72,56 @@ export const supportService = {
   },
 
   /**
+   * Создать тикет от имени поддержки (админ → пользователь).
+   * @param {Object} adminUser - { id } — текущий админ
+   * @param {Object} targetUser - { id, email?, name? } — пользователь, которому открывается тикет
+   * @param {string} subject - тема
+   * @param {string} message - первое сообщение от поддержки
+   * @returns {Promise<{ id: string }>}
+   */
+  async createTicketAsAdmin(adminUser, targetUser, subject, message) {
+    if (!db || !adminUser?.id || !targetUser?.id) {
+      throw new Error('База данных недоступна или не указан админ/пользователь')
+    }
+    const trimmedSubject = (subject || '').trim()
+    const trimmedMessage = (message || '').trim()
+    if (!trimmedSubject || !trimmedMessage) {
+      throw new Error('Укажите тему и текст сообщения')
+    }
+
+    try {
+      const ticketsRef = collection(db, TICKETS_PATH)
+      const ticketRef = await addDoc(ticketsRef, {
+        userId: targetUser.id,
+        userEmail: targetUser.email || '',
+        userName: targetUser.name || targetUser.email?.split('@')[0] || 'Пользователь',
+        subject: trimmedSubject,
+        status: 'answered',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      const messagesRef = collection(db, TICKETS_PATH, ticketRef.id, 'messages')
+      await addDoc(messagesRef, {
+        from: 'support',
+        userId: adminUser.id,
+        text: trimmedMessage,
+        createdAt: new Date().toISOString(),
+      })
+
+      logger.info('Support', 'Тикет создан админом', {
+        ticketId: ticketRef.id,
+        targetUserId: targetUser.id,
+        subject: trimmedSubject,
+      })
+      return { id: ticketRef.id }
+    } catch (err) {
+      logger.error('Support', 'Ошибка создания тикета админом', { targetUserId: targetUser.id }, err)
+      throw err
+    }
+  },
+
+  /**
    * Список тикетов пользователя.
    * @param {string} userId
    * @returns {Promise<Array<{ id, ... }>>}

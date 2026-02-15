@@ -20,7 +20,8 @@ import { readFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
 import crypto, { randomUUID } from 'crypto'
-import { sendTelegramMessage, getTelegramBotInfo, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery } from './lib/telegram.js'
+import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery } from './lib/telegram.js'
+import webpush from 'web-push'
 
 dotenv.config()
 
@@ -378,6 +379,78 @@ async function createNotification(params) {
 
 const APP_ID = process.env.APP_ID || 'skyputh'
 
+// Web Push (VAPID) — для уведомлений в фоне (тикеты поддержки)
+const VAPID_PUBLIC = (process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC || '').trim()
+const VAPID_PRIVATE = (process.env.VAPID_PRIVATE_KEY || process.env.VAPID_PRIVATE || '').trim()
+if (VAPID_PUBLIC && VAPID_PRIVATE) {
+  try {
+    webpush.setVapidDetails(
+      process.env.VAPID_MAILTO || 'mailto:support@skypath.fun',
+      VAPID_PUBLIC,
+      VAPID_PRIVATE
+    )
+    console.log('✅ Web Push (VAPID) настроен для уведомлений о тикетах')
+  } catch (e) {
+    console.warn('⚠️ Web Push VAPID не настроен:', e.message)
+  }
+} else {
+  console.warn('⚠️ Web Push: задайте VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY (npx web-push generate-vapid-keys)')
+}
+
+/**
+ * Проверить Firebase ID token, вернуть uid. Для push-subscribe (любой авторизованный пользователь).
+ */
+async function verifyIdToken(req, res) {
+  if (!admin) {
+    res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return null
+  }
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, error: 'Требуется авторизация' })
+    return null
+  }
+  try {
+    const decoded = await admin.auth().verifyIdToken(authHeader.slice(7))
+    return decoded.uid
+  } catch (err) {
+    res.status(401).json({ success: false, error: 'Неверный или истёкший токен' })
+    return null
+  }
+}
+
+/**
+ * Отправить Web Push всем подпискам пользователя (ответ поддержки). Работает при закрытой вкладке.
+ */
+async function sendWebPushToUser(userId, payload) {
+  if (!db || !VAPID_PUBLIC || !VAPID_PRIVATE) return { sent: 0, errors: [] }
+  const uid = String(userId || '').trim()
+  if (!uid) return { sent: 0, errors: [] }
+  const col = db.collection(`artifacts/${APP_ID}/public/data/push_subscriptions`)
+  const snap = await col.where('userId', '==', uid).get()
+  const errors = []
+  let sent = 0
+  for (const doc of snap.docs) {
+    const data = doc.data()
+    const sub = {
+      endpoint: data.endpoint,
+      keys: { p256dh: data.keys?.p256dh || data.p256dh, auth: data.keys?.auth || data.auth },
+      expirationTime: data.expirationTime || null,
+    }
+    if (!sub.endpoint || !sub.keys.p256dh || !sub.keys.auth) continue
+    try {
+      await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 86400 })
+      sent++
+    } catch (err) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        try { await doc.ref.delete() } catch (_) {}
+      }
+      errors.push(err.message || String(err))
+    }
+  }
+  return { sent, errors }
+}
+
 /**
  * Проверить Firebase ID token и убедиться, что пользователь — админ (claim или роль в Firestore).
  * Возвращает { ok: true, uid } или отправляет 401/403 и возвращает { ok: false }.
@@ -609,6 +682,10 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
     body: String(body).trim(),
     overview: overview != null ? String(overview).trim() || null : null
   }
+  const baseUrl = (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'])
+    ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+    : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
+  const linkUrl = baseUrl ? `${baseUrl}/#dashboard` : '/#dashboard'
   let sent = 0
   let failed = 0
   for (const uid of userIds) {
@@ -617,8 +694,20 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       userId: String(uid),
       ...payload
     })
-    if (ok) sent += 1
-    else failed += 1
+    if (ok) {
+      sent += 1
+      const pushPayload = { title: payload.title, body: payload.body.slice(0, 200), url: linkUrl, type: 'notification', notificationType: payload.type }
+      await sendWebPushToUser(String(uid), pushPayload)
+    } else {
+      failed += 1
+    }
+  }
+  if (failed > 0) {
+    notifyAdminError({
+      source: 'broadcast',
+      message: `Рассылка уведомлений: отправлено ${sent}, ошибок ${failed}`,
+      severity: failed === userIds.length ? 'high' : 'medium',
+    }).catch(() => {})
   }
   res.json({ success: true, sent, failed })
 })
@@ -678,11 +767,20 @@ async function checkSubscriptionAlerts(subscriptionId, subscriptionData) {
       }
     }
     
-    // Логируем алерты
+    // Логируем алерты и уведомляем админа (Telegram + панель ошибок)
     if (alerts.length > 0) {
       for (const alert of alerts) {
         await logN8NEvent('subscription_alert', alert, 'warning', alert.message)
         console.warn(`🚨 n8n-webhook-proxy: Алерт: ${alert.message}`, alert)
+        if (alert.severity === 'critical' || alert.severity === 'high') {
+          notifyAdminError({
+            source: 'subscription_alert',
+            message: alert.message,
+            context: alert.lastError || alert.subscriptionId,
+            severity: alert.severity,
+            userId: subscriptionData.userId,
+          }).catch(() => {})
+        }
       }
     }
   } catch (error) {
@@ -2027,12 +2125,26 @@ app.post('/api/telegram/send-reminders', express.json(), async (req, res) => {
   }
 })
 
-/** GET /api/admin/telegram/status — статус (только админ) */
+/** GET /api/admin/telegram/status — текущие настройки (только админ). Токен не возвращаем; отдаём username бота и Chat ID админа для отображения. */
 app.get('/api/admin/telegram/status', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   const token = await getTelegramToken()
-  res.json({ success: true, configured: Boolean(token && token.trim()) })
+  const adminChatId = await getTelegramAdminChatId()
+  let botUsername = null
+  if (token && token.trim()) {
+    try {
+      const info = await getTelegramBotInfo(token)
+      if (info.ok && info.username) botUsername = info.username
+    } catch (_) {}
+  }
+  res.json({
+    success: true,
+    configured: Boolean(token && token.trim()),
+    adminChatIdSet: Boolean(adminChatId && adminChatId.trim()),
+    adminChatId: adminChatId && adminChatId.trim() ? adminChatId.trim() : null,
+    botUsername: botUsername || null,
+  })
 })
 
 /** PATCH /api/admin/telegram/settings — сохранить токен бота в Firestore (только админ). Быстрая настройка без .env.
@@ -2042,17 +2154,30 @@ app.patch('/api/admin/telegram/settings', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-  const token = (req.body && req.body.token != null) ? String(req.body.token).trim() : ''
+  const body = req.body || {}
+  const token = (body.token != null) ? String(body.token).trim() : undefined
+  const adminChatId = (body.adminChatId != null) ? String(body.adminChatId).trim() : undefined
   try {
     const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
-    await settingsRef.set({ telegramBotToken: token || null, telegramBotTokenUpdatedAt: new Date().toISOString() }, { merge: true })
-    telegramTokenCache = { token: null, expiresAt: 0 }
-    if (token) {
-      console.log('✅ Telegram: токен сохранён в Firestore (artifacts/%s/public/settings). Будет использоваться для уведомлений и привязки.', APP_ID)
-    } else {
-      console.log('✅ Telegram: токен удалён из настроек Firestore.')
+    const update = {}
+    if (token !== undefined) {
+      update.telegramBotToken = token || null
+      update.telegramBotTokenUpdatedAt = new Date().toISOString()
+      telegramTokenCache = { token: null, expiresAt: 0 }
     }
-    res.json({ success: true, configured: Boolean(token), savedTo: 'firestore' })
+    if (adminChatId !== undefined) {
+      update.telegramAdminChatId = adminChatId || null
+    }
+    if (Object.keys(update).length) {
+      await settingsRef.set(update, { merge: true })
+      if (token !== undefined) {
+        console.log('✅ Telegram: токен сохранён в Firestore (artifacts/%s/public/settings). Будет использоваться для уведомлений и привязки.', APP_ID)
+      }
+      if (adminChatId !== undefined) {
+        console.log('✅ Telegram: adminChatId для уведомлений о тикетах сохранён в Firestore.')
+      }
+    }
+    res.json({ success: true, configured: Boolean(token !== undefined ? token : (await getTelegramToken())), savedTo: 'firestore' })
   } catch (err) {
     console.error('❌ PATCH /api/admin/telegram/settings:', err.message)
     res.status(500).json({ success: false, error: err.message })
@@ -2099,6 +2224,27 @@ app.get('/api/admin/telegram/webhook-status', async (req, res) => {
   }
 })
 
+/** GET /api/admin/telegram/chat-info — данные чата/аккаунта по сохранённому Chat ID админа (только админ) */
+app.get('/api/admin/telegram/chat-info', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const botToken = await getTelegramToken()
+  const adminChatId = await getTelegramAdminChatId()
+  if (!botToken || !adminChatId || !adminChatId.trim()) {
+    return res.json({ success: true, chat: null, error: null })
+  }
+  try {
+    const result = await getTelegramChat(botToken, adminChatId.trim())
+    if (!result.ok) {
+      return res.json({ success: true, chat: null, error: result.error || 'Не удалось получить данные чата' })
+    }
+    res.json({ success: true, chat: result.chat, error: null })
+  } catch (err) {
+    console.error('❌ GET /api/admin/telegram/chat-info:', err.message)
+    res.json({ success: true, chat: null, error: err.message })
+  }
+})
+
 /** POST /api/admin/telegram/send-test — отправить тестовое уведомление на указанный Telegram ID (только админ) */
 app.post('/api/admin/telegram/send-test', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
@@ -2118,6 +2264,273 @@ app.post('/api/admin/telegram/send-test', express.json(), async (req, res) => {
   } catch (err) {
     console.error('❌ POST /api/admin/telegram/send-test:', err.message)
     res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** Chat ID админа для уведомлений о тикетах: env TELEGRAM_ADMIN_CHAT_ID или Firestore settings.telegramAdminChatId */
+async function getTelegramAdminChatId() {
+  const fromEnv = process.env.TELEGRAM_ADMIN_CHAT_ID && String(process.env.TELEGRAM_ADMIN_CHAT_ID).trim()
+  if (fromEnv) return fromEnv
+  if (!db) return ''
+  try {
+    const snap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
+    const id = (snap.exists && snap.data().telegramAdminChatId) ? String(snap.data().telegramAdminChatId).trim() : ''
+    return id
+  } catch {
+    return ''
+  }
+}
+
+function escapeHtml(s) {
+  if (typeof s !== 'string') return ''
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const ADMIN_ERRORS_LIMIT = 500
+
+/**
+ * Уведомить админа об ошибке: запись в Firestore + Telegram (если настроен).
+ * @param {Object} opts - { source, message, context?, stack?, severity?, userId? }
+ * @returns {Promise<{ id: string, telegramSent: boolean }>}
+ */
+async function notifyAdminError(opts) {
+  const source = String(opts.source || 'server').slice(0, 64)
+  const message = String(opts.message || 'Ошибка').slice(0, 1000)
+  const context = opts.context != null ? String(opts.context).slice(0, 500) : null
+  const stack = opts.stack != null ? String(opts.stack).slice(0, 2000) : null
+  const severity = ['low', 'medium', 'high', 'critical'].includes(opts.severity) ? opts.severity : 'medium'
+  const userId = opts.userId != null ? String(opts.userId).slice(0, 128) : null
+  const id = randomUUID()
+  const createdAt = new Date().toISOString()
+  let telegramSent = false
+
+  if (db) {
+    try {
+      const col = db.collection(`artifacts/${APP_ID}/public/data/admin_errors`)
+      await col.doc(id).set({
+        source,
+        message,
+        context: context || null,
+        stack: stack || null,
+        severity,
+        userId: userId || null,
+        telegramSent: false,
+        createdAt,
+      })
+      const snapshot = await col.orderBy('createdAt', 'desc').get()
+      if (snapshot.docs.length > ADMIN_ERRORS_LIMIT) {
+        const toDelete = snapshot.docs.slice(ADMIN_ERRORS_LIMIT)
+        for (const doc of toDelete) {
+          await doc.ref.delete().catch(() => {})
+        }
+      }
+    } catch (err) {
+      console.error('❌ notifyAdminError: не удалось записать в Firestore', err.message)
+    }
+  }
+
+  const botToken = await getTelegramToken()
+  const adminChatId = await getTelegramAdminChatId()
+  if (botToken && adminChatId) {
+    const ctxLine = context ? `\n📋 ${escapeHtml(context)}` : ''
+    const text = `🚨 <b>Ошибка</b> [${escapeHtml(severity)}]\n\n${escapeHtml(source)}\n\n${escapeHtml(message)}${ctxLine}`
+    const result = await sendTelegramMessage(botToken, adminChatId, text)
+    if (result.ok) {
+      telegramSent = true
+      if (db) {
+        try {
+          await db.doc(`artifacts/${APP_ID}/public/data/admin_errors/${id}`).update({ telegramSent: true })
+        } catch (_) {}
+      }
+      console.log('📨 Уведомление об ошибке отправлено админу в Telegram', { source, id })
+    }
+  }
+
+  return { id, telegramSent }
+}
+
+/**
+ * POST /api/notify/support-ticket — уведомление админу в Telegram (новый тикет или новое сообщение от пользователя).
+ * Вызывается с фронта после createTicket или addMessage(from=user). Без авторизации (CORS + только наш фронт).
+ */
+app.post('/api/notify/support-ticket', express.json(), async (req, res) => {
+  const botToken = await getTelegramToken()
+  const adminChatId = await getTelegramAdminChatId()
+  if (!botToken || !adminChatId) {
+    return res.status(200).json({ success: true, sent: false, reason: 'Telegram не настроен для админа' })
+  }
+  const { type, ticketId, userEmail, userName, subject, text } = req.body || {}
+  const tid = (ticketId ?? '').toString().trim()
+  const uEmail = (userEmail ?? '').toString().trim()
+  const uName = (userName ?? '').toString().trim() || uEmail || 'Пользователь'
+  const subj = (subject ?? '').toString().trim()
+  const msgText = (text ?? '').toString().trim().slice(0, 300)
+  const ticketLine = tid ? `\n🆔 ID: <code>${escapeHtml(tid)}</code>` : ''
+  let telegramText
+  if (type === 'new_ticket') {
+    telegramText = `🆕 <b>Новый тикет</b>${ticketLine}\n\n👤 ${escapeHtml(uName)}${uEmail ? ` (${uEmail})` : ''}\n📌 ${escapeHtml(subj) || '—'}\n\n${escapeHtml(msgText) || '—'}`
+  } else if (type === 'new_message_user') {
+    telegramText = `💬 <b>Новое сообщение в тикете</b>${ticketLine}\n\n👤 ${escapeHtml(uName)}${uEmail ? ` (${uEmail})` : ''}\n📌 ${escapeHtml(subj) || '—'}\n\n${escapeHtml(msgText) || '—'}`
+  } else {
+    return res.status(400).json({ success: false, error: 'Укажите type: new_ticket или new_message_user' })
+  }
+  try {
+    const result = await sendTelegramMessage(botToken, adminChatId, telegramText)
+    if (result.ok) {
+      console.log('📨 Уведомление о тикете отправлено админу в Telegram', { type, ticketId })
+      return res.json({ success: true, sent: true })
+    }
+    return res.status(500).json({ success: false, error: result.error || 'Ошибка Telegram' })
+  } catch (err) {
+    console.error('❌ POST /api/notify/support-ticket:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/push-vapid-public — публичный ключ VAPID для подписки на push (без авторизации). */
+app.get('/api/push-vapid-public', (req, res) => {
+  if (!VAPID_PUBLIC) return res.status(503).json({ success: false, error: 'Web Push не настроен' })
+  res.json({ success: true, publicKey: VAPID_PUBLIC })
+})
+
+/** POST /api/push-subscribe — сохранить подписку на push (авторизованный пользователь). Для уведомлений о тикетах в фоне. */
+app.post('/api/push-subscribe', express.json(), async (req, res) => {
+  const uid = await verifyIdToken(req, res)
+  if (uid == null) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const subscription = req.body?.subscription
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ success: false, error: 'Укажите subscription (endpoint, keys)' })
+  }
+  const keys = subscription.keys || {}
+  const p256dh = (keys.p256dh || keys.p256dh || '').toString().trim()
+  const auth = (keys.auth || '').toString().trim()
+  if (!p256dh || !auth) return res.status(400).json({ success: false, error: 'В subscription должны быть keys.p256dh и keys.auth' })
+  try {
+    const col = db.collection(`artifacts/${APP_ID}/public/data/push_subscriptions`)
+    const id = crypto.createHash('sha256').update(subscription.endpoint + uid).digest('hex').slice(0, 32)
+    await col.doc(id).set({
+      userId: uid,
+      endpoint: subscription.endpoint,
+      expirationTime: subscription.expirationTime || null,
+      keys: { p256dh: p256dh, auth },
+      createdAt: new Date().toISOString(),
+    }, { merge: true })
+    return res.json({ success: true, saved: true })
+  } catch (err) {
+    console.error('❌ POST /api/push-subscribe:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/report-error — принять отчёт об ошибке с фронта или из сервисов, записать и уведомить админа (Telegram). */
+app.post('/api/report-error', express.json(), async (req, res) => {
+  const body = req.body || {}
+  const message = (body.message != null ? String(body.message) : '').trim() || 'Ошибка'
+  const source = (body.source != null ? String(body.source) : 'frontend').slice(0, 64)
+  const context = body.context != null ? String(body.context).slice(0, 500) : null
+  const stack = body.stack != null ? String(body.stack).slice(0, 2000) : null
+  const severity = ['low', 'medium', 'high', 'critical'].includes(body.severity) ? body.severity : 'medium'
+  let userId = null
+  const authHeader = req.headers.authorization
+  if (authHeader && authHeader.startsWith('Bearer ') && admin) {
+    try {
+      const decoded = await admin.auth().verifyIdToken(authHeader.slice(7))
+      userId = decoded.uid
+    } catch (_) {}
+  }
+  try {
+    const result = await notifyAdminError({ source, message, context, stack, severity, userId })
+    return res.status(200).json({ success: true, id: result.id, telegramSent: result.telegramSent })
+  } catch (err) {
+    console.error('❌ POST /api/report-error:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/admin/errors — список последних ошибок для админа (только админ). */
+app.get('/api/admin/errors', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200)
+  try {
+    const snap = await db
+      .collection(`artifacts/${APP_ID}/public/data/admin_errors`)
+      .orderBy('createdAt', 'desc')
+      .limit(limit)
+      .get()
+    const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    return res.json({ success: true, errors: list })
+  } catch (err) {
+    console.error('❌ GET /api/admin/errors:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * POST /api/notify/support-reply — уведомление пользователю об ответе поддержки: Telegram (если привязан) + Web Push (в фоне).
+ * Вызывается с фронта после addMessage(from=support) или createTicketAsAdmin.
+ */
+app.post('/api/notify/support-reply', express.json(), async (req, res) => {
+  const { userId, ticketId, subject, text } = req.body || {}
+  const uid = (userId ?? '').toString().trim()
+  const tid = (ticketId ?? '').toString().trim()
+  if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
+    ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+    : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
+  const appRoot = baseUrl.replace(/\/$/, '')
+  const linkPath = tid ? `/#support?ticket=${encodeURIComponent(tid)}` : '/#support'
+  const linkUrl = `${appRoot}${linkPath}`
+  const subj = (subject ?? '').toString().trim()
+  const msgText = (text ?? '').toString().trim().slice(0, 200)
+  const pushPayload = { title: 'Ответ поддержки', body: msgText || 'Новое сообщение в обращении', url: linkUrl, ticketId: tid, type: 'support-reply' }
+
+  let telegramSent = false
+  let webPushSent = 0
+
+  try {
+    const botToken = await getTelegramToken()
+    const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`).get()
+    const tgId = (userSnap.exists && userSnap.data().tgId) ? String(userSnap.data().tgId).trim() : ''
+
+    if (botToken && tgId) {
+      const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      const telegramText = `📩 <b>Ответ поддержки</b>\n\nТема: ${escapeHtml(subj) || 'Обращение'}\n\n${escapeHtml(msgText) || '—'}\n\n🔗 <a href="${safeHref}">Открыть обращение в личном кабинете</a>`
+      const result = await sendTelegramMessage(botToken, tgId, telegramText)
+      if (result.ok) {
+        telegramSent = true
+        console.log('📨 Уведомление об ответе поддержки отправлено в Telegram', { userId: uid, ticketId: tid })
+      }
+    }
+
+    const pushResult = await sendWebPushToUser(uid, pushPayload)
+    webPushSent = pushResult.sent
+    if (pushResult.sent > 0) {
+      console.log('📨 Web Push отправлен пользователю (тикет)', { userId: uid, ticketId: tid, count: pushResult.sent })
+    }
+    if (pushResult.errors?.length) {
+      pushResult.errors.forEach((e) => console.warn('Web Push ошибка:', e))
+    }
+
+    const sent = telegramSent || webPushSent > 0
+    return res.status(200).json({
+      success: true,
+      sent,
+      telegram: telegramSent,
+      webPush: webPushSent,
+      reason: sent ? null : (tgId ? 'Ошибка Telegram' : 'Включите уведомления в браузере или привяжите Telegram'),
+    })
+  } catch (err) {
+    console.error('❌ POST /api/notify/support-reply:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
   }
 })
 
@@ -4435,6 +4848,14 @@ async function activateSubscriptionAfterPayment(paymentData) {
             title: 'Подписка активирована',
             body: `Ваша подписка «${tariffName}» успешно продлена${expiresAtStr ? ` до ${expiresAtStr}` : ''}.`,
             data: { subscriptionId, orderId: paymentData.orderId, tariffName, expiresAt: subscriptionExpiresAt }
+          })
+          const appBaseUrl = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
+          const subscriptionPushUrl = appBaseUrl ? `${appBaseUrl}/#dashboard` : '/#dashboard'
+          await sendWebPushToUser(userId, {
+            title: 'Подписка активирована',
+            body: `Ваша подписка «${tariffName}» успешно продлена${expiresAtStr ? ` до ${expiresAtStr}` : ''}.`,
+            url: subscriptionPushUrl,
+            type: 'subscription'
           })
           if (userData.tgId) {
             getTelegramToken().then((botToken) => {

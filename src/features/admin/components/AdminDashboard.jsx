@@ -1,10 +1,15 @@
-import { ADMIN_NAV_ITEMS } from '../constants/navSections.js'
-import { Users, Server, DollarSign, Zap, ChevronRight } from 'lucide-react'
+import { ADMIN_NAV_SECTIONS } from '../constants/navSections.js'
+import { Users, Server, DollarSign, Zap, ChevronRight, Clock, UserX } from 'lucide-react'
 
 const now = () => Date.now()
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+/** Секции для быстрых переходов (без «Главная») */
+const LINK_SECTIONS = ADMIN_NAV_SECTIONS.filter((s) => s.title !== 'Главная')
 
 /**
  * Дашборд админ-панели: метрики и быстрые переходы по разделам.
+ * Информативно, удобно, лёгкий визуальный стиль.
  */
 const AdminDashboard = ({
   users = [],
@@ -12,87 +17,101 @@ const AdminDashboard = ({
   tariffs = [],
   onSetAdminTab,
 }) => {
+  const total = users.length
   const activeSubsCount = users.filter(
     (u) => u.expiresAt != null && Number(u.expiresAt) > now()
   ).length
+  const expiringSoonCount = users.filter((u) => {
+    const exp = u.expiresAt != null ? Number(u.expiresAt) : 0
+    return exp > now() && exp <= now() + 7 * ONE_DAY_MS
+  }).length
+  const expiredCount = users.filter(
+    (u) => u.expiresAt != null && Number(u.expiresAt) <= now()
+  ).length
 
-  const quickLinks = ADMIN_NAV_ITEMS.filter((item) => item.id !== 'dashboard')
-
-  const stats = [
-    {
-      label: 'Пользователи',
-      value: users.length,
-      icon: Users,
-      color: 'bg-blue-600/20 text-blue-400 border-blue-500/30',
-    },
-    {
-      label: 'Активных подписок',
-      value: activeSubsCount,
-      icon: Zap,
-      color: 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30',
-    },
-    {
-      label: 'Серверы',
-      value: servers.length,
-      icon: Server,
-      color: 'bg-violet-600/20 text-violet-400 border-violet-500/30',
-    },
-    {
-      label: 'Тарифы',
-      value: tariffs.length,
-      icon: DollarSign,
-      color: 'bg-amber-600/20 text-amber-400 border-amber-500/30',
-    },
-  ]
+  const activePercent = total > 0 ? Math.round((activeSubsCount / total) * 100) : 0
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      {/* Метрики */}
-      <section>
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 sm:mb-4">
-          Обзор
-        </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          {stats.map(({ label, value, icon: Icon, color }) => (
-            <div
-              key={label}
-              className={`rounded-xl border p-4 sm:p-5 bg-slate-900/80 backdrop-blur-sm ${color}`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs sm:text-sm font-medium opacity-90">{label}</p>
-                  <p className="text-2xl sm:text-3xl font-bold mt-1 tabular-nums">{value}</p>
-                </div>
-                <span className="p-2 rounded-lg bg-white/10">
-                  <Icon className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2} />
-                </span>
-              </div>
+      {/* Метрики — компактная строка */}
+      <section className="rounded-2xl bg-slate-800/40 border border-slate-700/50 p-4 sm:p-5">
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+          Сводка
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+          <div className="flex items-start gap-3">
+            <span className="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-400">
+              <Users className="w-4 h-4" strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-2xl font-semibold text-slate-100 tabular-nums">{total}</p>
+              <p className="text-xs text-slate-500 mt-0.5">пользователей</p>
             </div>
-          ))}
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="flex-shrink-0 w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400">
+              <Zap className="w-4 h-4" strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-2xl font-semibold text-slate-100 tabular-nums">{activeSubsCount}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                активных {total > 0 && <span className="text-slate-400">({activePercent}%)</span>}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="flex-shrink-0 w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400">
+              <Clock className="w-4 h-4" strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-2xl font-semibold text-slate-100 tabular-nums">{expiringSoonCount}</p>
+              <p className="text-xs text-slate-500 mt-0.5">истекают в течение 7 дн.</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="flex-shrink-0 w-9 h-9 rounded-xl bg-slate-600/30 flex items-center justify-center text-slate-400">
+              <Server className="w-4 h-4" strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-2xl font-semibold text-slate-100 tabular-nums">{servers.length}</p>
+              <p className="text-xs text-slate-500 mt-0.5">серверов · {tariffs.length} тарифов</p>
+            </div>
+          </div>
         </div>
+        {expiredCount > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-700/50 flex items-center gap-2 text-xs text-slate-500">
+            <UserX className="w-3.5 h-3.5" />
+            <span>Без активной подписки: {expiredCount}</span>
+          </div>
+        )}
       </section>
 
-      {/* Быстрые переходы */}
+      {/* Разделы по группам */}
       <section>
-        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 sm:mb-4">
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
           Разделы
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-          {quickLinks.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onSetAdminTab(id)}
-              className="group flex items-center gap-3 sm:gap-4 p-4 sm:p-5 rounded-xl border border-slate-700/80 bg-slate-900/80 hover:bg-slate-800 hover:border-slate-600 text-left transition-all duration-200 active:scale-[0.98]"
-            >
-              <span className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-700/80 transition-colors">
-                <Icon className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2} />
-              </span>
-              <span className="flex-1 min-w-0 font-medium text-slate-200 truncate">
-                {label}
-              </span>
-              <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-blue-400 flex-shrink-0 transition-colors" />
-            </button>
+        </p>
+        <div className="space-y-4 sm:space-y-5">
+          {LINK_SECTIONS.map((section) => (
+            <div key={section.title} className="rounded-xl bg-slate-800/30 border border-slate-700/40 overflow-hidden">
+              <p className="px-3 sm:px-4 py-2 text-xs font-medium text-slate-500 bg-slate-800/50">
+                {section.title}
+              </p>
+              <div className="p-2 sm:p-3 flex flex-wrap gap-2">
+                {section.items.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onSetAdminTab(id)}
+                    className="group flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-lg bg-slate-800/60 hover:bg-slate-700/70 border border-slate-700/50 hover:border-slate-600 text-slate-300 hover:text-slate-100 text-sm font-medium transition-all duration-150 active:scale-[0.98]"
+                  >
+                    <Icon className="w-4 h-4 text-slate-500 group-hover:text-blue-400 flex-shrink-0" strokeWidth={2} />
+                    <span className="truncate">{label}</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-blue-400 flex-shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>

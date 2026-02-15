@@ -23,6 +23,7 @@ import { logError } from '../utils/errorHandler.js'
 import CreateUserModal from './CreateUserModal.jsx'
 import ImportFromNocoDBModal from './ImportFromNocoDBModal.jsx'
 import TelegramPanel from './TelegramPanel.jsx'
+import ErrorsPanel from './ErrorsPanel.jsx'
 
 const AdminPanel = ({
   currentUser,
@@ -1085,7 +1086,7 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'tickets' && (
-          <SupportTicketsPanel currentUser={currentUser} />
+          <SupportTicketsPanel currentUser={currentUser} users={users} loadUsers={loadUsers} />
         )}
 
         {adminTab === 'notifications' && (
@@ -1102,6 +1103,10 @@ const AdminPanel = ({
 
         {adminTab === 'telegram' && (
           <TelegramPanel />
+        )}
+
+        {adminTab === 'errors' && (
+          <ErrorsPanel />
         )}
 
         {success && (

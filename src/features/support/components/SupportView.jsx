@@ -6,6 +6,9 @@ import { useSupport } from '../hooks/useSupport.js'
 import TicketList from './TicketList.jsx'
 import TicketChat from './TicketChat.jsx'
 import CreateTicketModal from './CreateTicketModal.jsx'
+import notificationService from '../../../shared/services/notificationService.js'
+import { registerAndSubscribe } from '../services/pushSubscribeService.js'
+import { auth } from '../../../lib/firebase/config.js'
 
 const SupportView = ({
   currentUser,
@@ -17,6 +20,8 @@ const SupportView = ({
   onSetAdminTab,
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [pushPromptDismissed, setPushPromptDismissed] = useState(false)
+  const [pushEnabling, setPushEnabling] = useState(false)
 
   const {
     tickets,
@@ -43,6 +48,23 @@ const SupportView = ({
     }
   }
 
+  const showPushPrompt = !isAdmin && currentUser?.id && typeof window !== 'undefined' &&
+    Notification?.permission === 'default' && !pushPromptDismissed
+
+  const handleEnablePush = async () => {
+    setPushEnabling(true)
+    try {
+      const perm = await notificationService.requestPermission()
+      if (perm === 'granted') {
+        const getToken = () => (auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null))
+        await registerAndSubscribe(getToken)
+      }
+      setPushPromptDismissed(true)
+    } finally {
+      setPushEnabling(false)
+    }
+  }
+
   return (
     <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row overflow-x-hidden">
       <Sidebar
@@ -60,6 +82,17 @@ const SupportView = ({
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-3 sm:p-4 lg:p-6 gap-3 sm:gap-4 min-w-0">
           {/* Список тикетов */}
           <section className="lg:w-80 xl:w-96 flex-shrink-0 flex flex-col bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden min-w-0">
+            {showPushPrompt && (
+              <div className="p-3 border-b border-slate-700/50 bg-blue-900/20 flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-slate-300 text-xs flex-1 min-w-0">Уведомления о ответах даже при закрытой вкладке</span>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={handleEnablePush} disabled={pushEnabling} className="px-2 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium disabled:opacity-50">
+                    {pushEnabling ? '…' : 'Включить'}
+                  </button>
+                  <button type="button" onClick={() => setPushPromptDismissed(true)} className="p-1 rounded text-slate-500 hover:bg-slate-700" aria-label="Закрыть">×</button>
+                </div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 sm:p-4 border-b border-slate-700/50">
               <h1 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
                 <MessageCircle size={20} className="sm:w-[22px] sm:h-[22px] flex-shrink-0" />
@@ -104,7 +137,7 @@ const SupportView = ({
                 ticket={ticket}
                 messages={messages}
                 onBack={() => selectTicket(null)}
-                onSendMessage={sendMessage}
+                onSendMessage={(text) => sendMessage(text, ticket)}
                 onUpdateStatus={updateStatus}
                 sending={sending}
                 isAdmin={isAdmin}

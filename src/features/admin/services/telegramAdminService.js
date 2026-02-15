@@ -20,8 +20,8 @@ async function getAuthHeaders() {
 }
 
 /**
- * Статус интеграции Telegram (бот настроен или нет). Только для админа.
- * @returns {Promise<{ configured: boolean }>}
+ * Текущие настройки Telegram (без токена). Только для админа.
+ * @returns {Promise<{ configured: boolean, adminChatIdSet?: boolean, adminChatId?: string | null, botUsername?: string | null }>}
  */
 export async function getTelegramStatus() {
   const url = `${getBaseUrl()}/api/admin/telegram/status`
@@ -39,19 +39,36 @@ export async function getTelegramStatus() {
     }
     throw new Error(json.error || res.statusText || 'Ошибка загрузки статуса')
   }
-  return { configured: Boolean(json.configured) }
+  return {
+    configured: Boolean(json.configured),
+    adminChatIdSet: Boolean(json.adminChatIdSet),
+    adminChatId: json.adminChatId ?? null,
+    botUsername: json.botUsername ?? null,
+  }
 }
 
 /**
- * Сохранить токен бота в настройках (Firestore). Только для админа. Быстрая настройка без .env.
+ * Сохранить токен бота в настройках (Firestore). Только для админа.
  * @param {string} token - токен от @BotFather
  * @returns {Promise<{ configured: boolean }>}
  */
 export async function saveTelegramToken(token) {
+  return saveTelegramSettings({ token: token ? String(token).trim() : '' })
+}
+
+/**
+ * Сохранить настройки Telegram (токен и/или Chat ID админа). Только для админа.
+ * @param {{ token?: string, adminChatId?: string }} opts - token и/или adminChatId (пустая строка = удалить)
+ * @returns {Promise<{ configured: boolean }>}
+ */
+export async function saveTelegramSettings(opts = {}) {
+  const body = {}
+  if (opts.token !== undefined) body.token = opts.token ? String(opts.token).trim() : ''
+  if (opts.adminChatId !== undefined) body.adminChatId = opts.adminChatId ? String(opts.adminChatId).trim() : ''
   const res = await fetch(`${getBaseUrl()}/api/admin/telegram/settings`, {
     method: 'PATCH',
     headers: await getAuthHeaders(),
-    body: JSON.stringify({ token: token ? String(token).trim() : '' }),
+    body: JSON.stringify(body),
   })
   const json = await res.json().catch(() => ({}))
   if (!res.ok || !json.success) {
@@ -80,6 +97,45 @@ export async function setTelegramWebhook() {
     throw new Error(json.error || res.statusText || 'Ошибка установки webhook')
   }
   return { webhookUrl: json.webhookUrl }
+}
+
+/**
+ * Информация о текущем webhook бота. Только для админа.
+ * @returns {Promise<{ webhookInfo?: object }>}
+ */
+export async function getWebhookStatus() {
+  const url = `${getBaseUrl()}/api/admin/telegram/webhook-status`
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok || !json.success) {
+    if (res.status === 403) {
+      throw new Error(json.hint || json.error || 'Доступ запрещён.')
+    }
+    throw new Error(json.error || res.statusText || 'Ошибка загрузки')
+  }
+  return { webhookInfo: json.webhookInfo }
+}
+
+/**
+ * Получить данные чата/аккаунта по сохранённому Chat ID админа (getChat). Только для админа.
+ * @returns {Promise<{ chat: { id, type, title?, username?, first_name?, last_name? } | null, error?: string }>}
+ */
+export async function getTelegramChatInfo() {
+  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/chat-info`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(json.error || res.statusText || 'Ошибка загрузки')
+  }
+  return {
+    chat: json.chat ?? null,
+    error: json.error ?? null,
+  }
 }
 
 /**

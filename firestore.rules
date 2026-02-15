@@ -192,11 +192,13 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         resource.data.userId == request.auth.uid || isAdmin() || isAdminFromFirestore()
       );
-      allow create: if request.auth != null &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.subject is string &&
-        request.resource.data.subject.size() > 0 &&
-        request.resource.data.status == 'open';
+      allow create: if request.auth != null && (
+        (request.resource.data.userId == request.auth.uid &&
+         request.resource.data.subject is string &&
+         request.resource.data.subject.size() > 0 &&
+         request.resource.data.status == 'open') ||
+        (isAdmin() || isAdminFromFirestore())
+      );
       allow update: if request.auth != null && (
         resource.data.userId == request.auth.uid || isAdmin() || isAdminFromFirestore()
       );
@@ -223,6 +225,14 @@ service cloud.firestore {
     }
     // История использования промокодов (usedBy) — только сервер (Admin SDK)
     match /artifacts/{appId}/public/data/promocodes/{promocodeId}/usedBy/{userId} {
+      allow read, write: if false;
+    }
+    // Подписки на Web Push — только сервер (Admin SDK). Клиент регистрирует подписку через API.
+    match /artifacts/{appId}/public/data/push_subscriptions/{subId} {
+      allow read, write: if false;
+    }
+    // Ошибки для админа — только сервер пишет; чтение через API с проверкой админа.
+    match /artifacts/{appId}/public/data/admin_errors/{errorId} {
       allow read, write: if false;
     }
     

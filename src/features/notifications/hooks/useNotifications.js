@@ -1,15 +1,19 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { notificationsService } from '../services/notificationsService.js'
 import notificationService from '../../../shared/services/notificationService.js'
+import { registerAndSubscribe } from '../../support/services/pushSubscribeService.js'
+import { auth } from '../../../lib/firebase/config.js'
 import logger from '../../../shared/utils/logger.js'
 
 /**
  * Хук уведомлений: список, счётчик непрочитанных, пометить прочитанным, реальное время.
  * При появлении нового уведомления показывает браузерное push (если разрешено).
+ * Регистрирует Web Push подписку для доставки рассылок и уведомлений о подписке в фоне (вкладка закрыта).
  */
 export function useNotifications(userId) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
+  const pushSubscribedRef = useRef(false)
 
   const unreadCount = list.filter((n) => !n.read).length
 
@@ -36,6 +40,16 @@ export function useNotifications(userId) {
       setLoading(false)
     })
     return () => unsubscribe()
+  }, [userId])
+
+  // Web Push для фоновых уведомлений (рассылка, подписка активирована). Один раз при наличии userId и разрешения.
+  useEffect(() => {
+    if (!userId || pushSubscribedRef.current) return
+    if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return
+    const getToken = () => (auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null))
+    registerAndSubscribe(getToken).then((ok) => {
+      if (ok) pushSubscribedRef.current = true
+    })
   }, [userId])
 
   // Показывать браузерное уведомление только для новых непрочитанных (появившихся после предыдущего списка)

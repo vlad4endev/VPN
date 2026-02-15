@@ -42,6 +42,42 @@ export async function sendTelegramMessage(botToken, chatId, text, options = {}) 
 }
 
 /**
+ * Получить информацию о чате/пользователе по chat_id (getChat)
+ * @param {string} botToken
+ * @param {string} chatId - Telegram chat_id
+ * @returns {Promise<{ ok: boolean, chat?: { id, type, title?, username?, first_name?, last_name? }, error?: string }>}
+ */
+export async function getTelegramChat(botToken, chatId) {
+  if (!botToken || !chatId) return { ok: false, error: 'botToken и chatId обязательны' }
+  const url = `${TELEGRAM_API_BASE}${botToken}/getChat`
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: String(chatId).trim() }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!data.ok) {
+      return { ok: false, error: data.description || res.statusText }
+    }
+    const chat = data.result || {}
+    return {
+      ok: true,
+      chat: {
+        id: chat.id,
+        type: chat.type || null,
+        title: chat.title || null,
+        username: chat.username || null,
+        first_name: chat.first_name || null,
+        last_name: chat.last_name || null,
+      },
+    }
+  } catch (err) {
+    return { ok: false, error: err.message || 'Ошибка запроса getChat' }
+  }
+}
+
+/**
  * Получить информацию о боте (getMe)
  * @param {string} botToken
  * @returns {Promise<{ ok: boolean, username?: string, error?: string }>}

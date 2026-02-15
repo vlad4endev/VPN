@@ -6,11 +6,14 @@ import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
 import App from './App.jsx'
 import './index.css'
 import logger from '../shared/utils/logger.js'
+import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
 
 logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
   logLevel: logger.getLogLevel(),
 })
+
+initGlobalErrorReporting()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

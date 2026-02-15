@@ -1,10 +1,11 @@
 /**
  * Error Boundary для обработки ошибок загрузки ленивых компонентов
- * Обрабатывает ошибки рендеринга и загрузки компонентов
+ * Обрабатывает ошибки рендеринга и загрузки компонентов. Отправляет отчёт админу.
  */
 
 import { Component } from 'react'
 import { AlertCircle, RefreshCw } from 'lucide-react'
+import { reportErrorToAdmin } from '../services/reportErrorService.js'
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -30,9 +31,13 @@ class ErrorBoundary extends Component {
       error,
       errorInfo
     })
-    
-    // Здесь можно отправить ошибку в систему мониторинга (Sentry, etc.)
-    // logErrorToService(error, errorInfo)
+    reportErrorToAdmin({
+      message: error?.message || String(error),
+      source: 'ErrorBoundary',
+      context: errorInfo?.componentStack?.slice(0, 500),
+      stack: error?.stack,
+      severity: 'high',
+    }).catch(() => {})
   }
 
   handleReload = () => {
