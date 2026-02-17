@@ -75,19 +75,16 @@ else
     echo -e "${GREEN}✅ Зависимости основного проекта установлены${NC}"
 fi
 
-# Проверка и установка зависимостей Backend Proxy
-if [ ! -d "server/node_modules" ]; then
-    echo -e "${GREEN}📦 Установка зависимостей Backend Proxy...${NC}"
-    cd server
-    npm install
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ Ошибка установки зависимостей Backend Proxy${NC}"
-        exit 1
-    fi
-    cd ..
-else
-    echo -e "${GREEN}✅ Зависимости Backend Proxy установлены${NC}"
+# Установка/обновление зависимостей Backend Proxy (после git pull могут появиться новые пакеты)
+echo -e "${GREEN}📦 Проверка зависимостей Backend Proxy...${NC}"
+cd server
+npm install
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Ошибка установки зависимостей Backend Proxy${NC}"
+    exit 1
 fi
+cd ..
+echo -e "${GREEN}✅ Зависимости Backend Proxy готовы${NC}"
 
 # Проверка занятости портов (совместимо с Ubuntu и macOS)
 check_port() {

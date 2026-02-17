@@ -25,8 +25,8 @@ import LoginForm from '../features/auth/components/LoginForm.jsx'
 import SetPasswordPage from '../features/auth/components/SetPasswordPage.jsx'
 import PublicReviewPage from '../features/reviews/components/PublicReviewPage.jsx'
 
-// Lazy load heavy views для уменьшения initial bundle
-const Dashboard = lazy(() => import('../features/dashboard/components/Dashboard.jsx'))
+// Lazy load heavy views (Dashboard — статический импорт, как AdminPanel, из-за дубликата React в lazy-чанке)
+import Dashboard from '../features/dashboard/components/Dashboard.jsx'
 const FinancesDashboard = lazy(() => import('../features/admin/components/FinancesDashboard.jsx'))
 const SupportView = lazy(() => import('../features/support/components/SupportView.jsx'))
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
