@@ -203,6 +203,75 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                 Этот пароль будет установлен всем созданным пользователям.
               </p>
             </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowMapping((v) => !v)}
+                className="text-xs sm:text-sm text-slate-300 hover:text-white underline underline-offset-4"
+              >
+                {showMapping ? 'Скрыть маппинг колонок' : 'Показать маппинг колонок (если автоопределение не сработало)'}
+              </button>
+              {showMapping && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                      Колонка Email
+                    </label>
+                    <input
+                      type="text"
+                      name="emailColumn"
+                      value={form.emailColumn}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Напр. Email или clxxxxxx"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                      Колонка Имя
+                    </label>
+                    <input
+                      type="text"
+                      name="nameColumn"
+                      value={form.nameColumn}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Напр. Name или clxxxxxx"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                      Колонка Phone (опционально)
+                    </label>
+                    <input
+                      type="text"
+                      name="phoneColumn"
+                      value={form.phoneColumn}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Напр. Phone или clxxxxxx"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                      Колонка tgId (опционально)
+                    </label>
+                    <input
+                      type="text"
+                      name="tgIdColumn"
+                      value={form.tgIdColumn}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Напр. tgId или clxxxxxx"
+                    />
+                  </div>
+                  <p className="sm:col-span-2 text-[11px] text-slate-500">
+                    Подсказка: после импорта смотрите строку «Колонки в таблице: ...» и копируйте нужные названия сюда.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 pt-3 border-t border-slate-800">

@@ -205,46 +205,92 @@ const TELEGRAM_WEBAPP_SECRET = TELEGRAM_BOT_TOKEN_ENV
   ? crypto.createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN_ENV).digest()
   : null
 
+/** Максимальный возраст initData (мс). Telegram рекомендует проверять; по умолчанию 24 часа. */
+const TELEGRAM_INIT_DATA_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
 /**
  * Валидирует initData от Telegram Web App (HMAC-SHA256).
  * @param {string} initData - строка query string из Telegram.WebApp.initData
  * @returns {Object|null} - объект с полями (user, auth_date, ...) или null при невалидных данных
  */
 function validateTelegramInitData(initData) {
-  if (!initData || !TELEGRAM_WEBAPP_SECRET) return null
+  const result = validateTelegramInitDataWithReason(initData)
+  return result.ok ? result.data : null
+}
+
+/**
+ * Валидация initData с причиной ошибки (для ответов API).
+ * @param {string} initData - строка query string из Telegram.WebApp.initData
+ * @param {Buffer|null} [secretOverride] - HMAC-секрет (WebAppData); если передан, используется вместо TELEGRAM_WEBAPP_SECRET (для токена из админки)
+ * @returns {{ ok: true, data: Object } | { ok: false, reason: string, message: string }}
+ */
+function validateTelegramInitDataWithReason(initData, secretOverride) {
+  if (!initData || typeof initData !== 'string') {
+    return { ok: false, reason: 'empty', message: 'initData не передан или пустой' }
+  }
+  const trimmed = initData.trim()
+  if (!trimmed) {
+    return { ok: false, reason: 'empty', message: 'initData пустой' }
+  }
+  const secret = secretOverride != null ? secretOverride : TELEGRAM_WEBAPP_SECRET
+  if (!secret || (Buffer.isBuffer(secret) && secret.length === 0)) {
+    console.warn('Telegram auth: токен бота не задан (ни в .env, ни в настройках Telegram в админ-панели)')
+    return { ok: false, reason: 'no_token', message: 'Сервер не настроен для входа через Telegram. Задайте токен бота в .env или в настройках Telegram в админ-панели.' }
+  }
   try {
-    const data = new URLSearchParams(initData)
+    const data = new URLSearchParams(trimmed)
     const hash = data.get('hash')
-    if (!hash) return null
+    if (!hash) {
+      return { ok: false, reason: 'no_hash', message: 'В данных Telegram отсутствует подпись (hash). Откройте приложение заново из меню бота.' }
+    }
     data.delete('hash')
     const dataCheckString = [...data.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => `${k}=${v}`)
       .join('\n')
-    const computedHash = crypto.createHmac('sha256', TELEGRAM_WEBAPP_SECRET).update(dataCheckString).digest('hex')
-    if (computedHash !== hash) return null
+    const computedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex')
+    if (computedHash !== hash) {
+      console.warn('Telegram auth: неверная подпись initData (проверьте, что TELEGRAM_BOT_TOKEN соответствует боту Mini App)')
+      return { ok: false, reason: 'invalid_hash', message: 'Неверная подпись данных. Убедитесь, что открываете приложение из того же бота, для которого настроен сервер.' }
+    }
     const parsed = Object.fromEntries(data)
     if (parsed.user && typeof parsed.user === 'string') {
       try {
         parsed.user = JSON.parse(parsed.user)
-      } catch (_) {}
+      } catch (_) {
+        return { ok: false, reason: 'parse_error', message: 'Не удалось прочитать данные пользователя Telegram' }
+      }
     }
-    return parsed
-  } catch (_) {
-    return null
+    if (!parsed.user || !parsed.user.id) {
+      return { ok: false, reason: 'no_user', message: 'В данных Telegram нет пользователя' }
+    }
+    const authDate = parsed.auth_date ? parseInt(parsed.auth_date, 10) : 0
+    if (authDate && TELEGRAM_INIT_DATA_MAX_AGE_MS > 0) {
+      const age = Date.now() - authDate * 1000
+      if (age > TELEGRAM_INIT_DATA_MAX_AGE_MS || age < 0) {
+        return { ok: false, reason: 'expired', message: 'Сессия Telegram истекла. Откройте приложение заново из меню бота.' }
+      }
+    }
+    return { ok: true, data: parsed }
+  } catch (e) {
+    console.warn('Telegram auth: ошибка разбора initData', e.message)
+    return { ok: false, reason: 'parse_error', message: 'Ошибка проверки данных Telegram. Попробуйте открыть приложение заново.' }
   }
 }
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   const initData = req.headers['x-telegram-initdata'] || req.query.initData || ''
-  if (initData) {
-    const validated = validateTelegramInitData(initData)
-    if (validated) {
-      req.telegramUser = validated
-      if (validated.user && validated.user.id) {
-        console.log('Telegram user:', validated.user.id)
+  if (!initData) return next()
+  try {
+    const result = await validateTelegramInitDataWithReasonAsync(initData)
+    if (result.ok) {
+      req.telegramUser = result.data
+      if (result.data.user && result.data.user.id) {
+        console.log('Telegram user:', result.data.user.id)
       }
     }
+  } catch (e) {
+    console.warn('Telegram initData middleware:', e.message)
   }
   next()
 })
@@ -257,11 +303,13 @@ app.use((req, res, next) => {
  * иначе создаётся документ users_v4/tg_<id> и токен для uid tg_<id>.
  */
 app.post('/api/telegram/auth', express.json(), async (req, res) => {
-  const initData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
-  const validated = validateTelegramInitData(initData)
-  if (!validated || !validated.user || !validated.user.id) {
-    return res.status(400).json({ success: false, error: 'Невалидные данные Telegram (initData)' })
+  const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
+  const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
+  const result = await validateTelegramInitDataWithReasonAsync(initData)
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.message, reason: result.reason })
   }
+  const validated = result.data
   if (!admin || !db) {
     try { await initFirebaseAdmin() } catch (_) {}
     if (!admin || !db) {
@@ -1972,6 +2020,20 @@ async function getTelegramToken() {
   } catch {
     return ''
   }
+}
+
+/**
+ * Валидация initData с токеном из env или из настроек Telegram в админ-панели (Firestore).
+ * @param {string} initData - строка query string из Telegram.WebApp.initData
+ * @returns {Promise<{ ok: true, data: Object } | { ok: false, reason: string, message: string }>}
+ */
+async function validateTelegramInitDataWithReasonAsync(initData) {
+  const token = await getTelegramToken()
+  if (!token) {
+    return { ok: false, reason: 'no_token', message: 'Сервер не настроен для входа через Telegram. Задайте токен бота в .env или в настройках Telegram в админ-панели.' }
+  }
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
+  return validateTelegramInitDataWithReason(initData, secret)
 }
 
 // ——— Telegram Webhook: проверка secret_token (если задан TELEGRAM_WEBHOOK_SECRET) ———
