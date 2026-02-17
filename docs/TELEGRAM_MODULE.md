@@ -98,3 +98,24 @@ curl -X POST "https://your-domain.com/api/telegram/send-reminders" \
 3. **Прямая ссылка**: открыть `t.me/yourbot/app` — то же поведение: initData передаётся, данные сохраняются с Telegram user.id.
 
 Проверить логи: Frontend console — `TMA detected`; Backend — `Telegram user: <id>`.
+
+---
+
+## Авторизация через Telegram (Mini App)
+
+При открытии в Telegram Mini App пользователь может войти без email/пароля: сессия подтягивается из `initData`.
+
+### Как работает
+
+1. **Авто-вход**: после загрузки приложения, если нет текущего пользователя Firebase и есть `initData`, фронт один раз вызывает `POST /api/telegram/auth` с заголовком `X-Telegram-InitData`. Бэкенд валидирует initData, ищет пользователя в Firestore по полю `tgId` (равному Telegram `user.id`). Если найден — возвращает Firebase **customToken** для этого пользователя; если не найден — создаёт документ в `users_v4` с id `tg_<telegram_user_id>` и возвращает customToken для него. Фронт вызывает `signInWithCustomToken(auth, customToken)` — дальше срабатывает обычный `onAuthStateChanged` и подгрузка данных из Firestore.
+2. **Кнопка «Войти через Telegram»**: на экране приветствия и на форме входа в Mini App показывается кнопка «Войти через Telegram» (только при наличии `initData`). По нажатию выполняется тот же запрос к `/api/telegram/auth` и вход по customToken.
+
+### API
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/api/telegram/auth` | Тело: `{ "initData": "..." }` или заголовок `X-Telegram-InitData`. Ответ: `{ success: true, customToken: "..." }` или `{ success: false, error: "..." }`. |
+
+### Пользователи только из Telegram
+
+Для пользователей, созданных только через Mini App (без email), в Firestore создаётся документ с id `tg_<telegram_user_id>`, email `tg_<id>@telegram.placeholder`, именем из Telegram (`first_name` / `last_name` / `username`). Поле `tgId` заполняется для последующей привязки и уведомлений.

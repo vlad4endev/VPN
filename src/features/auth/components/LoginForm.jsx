@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Send } from 'lucide-react'
 import Footer from '../../../shared/components/Footer.jsx'
 import PrivacyPolicyModal from '../../../shared/components/PrivacyPolicyModal.jsx'
 
@@ -18,7 +18,10 @@ const LoginForm = ({
   onGoogleSignIn,
   onGoogleSignInRedirect,
   googleSignInLoading,
-  onSetView
+  onSetView,
+  onTelegramSignIn,
+  telegramSignInLoading = false,
+  isTelegramApp = false,
 }) => {
   const [consentChecked, setConsentChecked] = useState(false)
   const [consentError, setConsentError] = useState('')
@@ -233,6 +236,21 @@ const LoginForm = ({
           </div>
         </div>
 
+        {onTelegramSignIn && (
+          <button
+            type="button"
+            onClick={onTelegramSignIn}
+            disabled={telegramSignInLoading}
+            className="w-full mt-6 min-h-[48px] bg-[#0088cc] hover:bg-[#0077b5] disabled:opacity-60 text-white py-4 rounded-2xl sm:rounded-3xl font-bold text-base sm:text-lg transition-all shadow-xl active:scale-[0.98] flex items-center justify-center gap-3 touch-manipulation"
+          >
+            {telegramSignInLoading ? (
+              <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Send size={20} />
+            )}
+            {authMode === 'login' ? 'Войти через Telegram' : 'Зарегистрироваться через Telegram'}
+          </button>
+        )}
         <button
           type="button"
           onClick={onGoogleSignIn}

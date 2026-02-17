@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Shield, Globe, Check, Zap, Star, Quote, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Shield, Globe, Check, Zap, Star, Quote, ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import Footer from './Footer.jsx'
 
 /** Порог символов: показывать «Читать далее» для длинных отзывов */
@@ -27,8 +27,11 @@ function getPrices(pricePerMonth) {
  * @param {Object} props
  * @param {Function} props.onSetView - Переключение view ('login', 'register')
  * @param {Array<{ id: string, author: string, rating: number, text: string, date?: string }>} [props.reviews] - Одобренные отзывы
+ * @param {Function} [props.onTelegramSignIn] - Вход через Telegram Mini App
+ * @param {boolean} [props.telegramSignInLoading] - Загрузка при входе через Telegram
+ * @param {boolean} [props.isTelegramApp] - Открыто в Telegram Mini App
  */
-export default function WelcomePage({ onSetView, reviews = [] }) {
+export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn, telegramSignInLoading = false, isTelegramApp = false }) {
   const [activeTariff, setActiveTariff] = useState('Super')
   const [expandedReviewIds, setExpandedReviewIds] = useState(() => new Set())
   const reviewsScrollRef = useRef(null)
@@ -80,6 +83,21 @@ export default function WelcomePage({ onSetView, reviews = [] }) {
               Удобный личный кабинет, простая регистрация и гибкие тарифы. Начните за минуту.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center max-w-sm sm:max-w-none mx-auto sm:mx-0">
+              {isTelegramApp && onTelegramSignIn && (
+                <button
+                  type="button"
+                  onClick={onTelegramSignIn}
+                  disabled={telegramSignInLoading}
+                  className="w-full sm:w-64 min-h-[48px] sm:min-h-[52px] bg-[#0088cc] hover:bg-[#0077b5] active:bg-[#0088cc] disabled:opacity-60 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-[#0088cc]/30 active:scale-[0.98] touch-manipulation inline-flex items-center justify-center gap-2"
+                >
+                  {telegramSignInLoading ? (
+                    <span className="inline-block w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Send size={20} className="flex-shrink-0" />
+                  )}
+                  Войти через Telegram
+                </button>
+              )}
               <button onClick={() => onSetView('register')} className="w-full sm:w-64 min-h-[48px] sm:min-h-[52px] bg-blue-600 hover:bg-blue-500 active:bg-blue-600 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-[0.98] touch-manipulation">
                 Начать работу
               </button>

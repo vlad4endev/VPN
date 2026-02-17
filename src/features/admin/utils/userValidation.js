@@ -130,6 +130,8 @@ export function normalizeUser(user) {
     uuid: user.uuid ? String(user.uuid).trim() : '',
     name: user.name ? String(user.name).trim() : '',
     phone: user.phone ? String(user.phone).trim() : '',
+    // Telegram user.id (из Mini App / привязки). Храним строкой, чтобы избежать проблем с JS number.
+    tgId: user.tgId != null && String(user.tgId).trim() ? String(user.tgId).trim() : null,
     expiresAt: user.expiresAt != null 
       ? (typeof user.expiresAt === 'string' 
           ? new Date(user.expiresAt).getTime() 

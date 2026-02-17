@@ -47,8 +47,8 @@ export const usersApiService = {
 
   /**
    * Импорт пользователей из NocoDB (получить записи таблицы и создать аккаунты).
-   * @param {{ baseUrl?: string, apiToken?: string, tableId?: string, defaultPassword: string }} params
-   * @returns {Promise<{ created: number, skipped: number, errors: number, details: Object }>}
+   * @param {{ baseUrl?: string, apiToken?: string, tableId?: string, defaultPassword: string, emailColumn?: string, nameColumn?: string, phoneColumn?: string, tgIdColumn?: string }} params
+   * @returns {Promise<{ created: number, skipped: number, emptyRows?: number, errors: number, sampleRowKeys?: string[], details: Object }>}
    */
   async importFromNocoDB(params) {
     const res = await fetch(`${getBaseUrl()}/api/admin/import-from-nocodb`, {
@@ -66,7 +66,9 @@ export const usersApiService = {
     return {
       created: json.created ?? 0,
       skipped: json.skipped ?? 0,
+      emptyRows: json.emptyRows ?? 0,
       errors: json.errors ?? 0,
+      sampleRowKeys: Array.isArray(json.sampleRowKeys) ? json.sampleRowKeys : [],
       details: json.details ?? { created: [], skipped: [], errors: [] },
     }
   },

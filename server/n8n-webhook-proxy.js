@@ -249,6 +249,74 @@ app.use((req, res, next) => {
   next()
 })
 
+/**
+ * Авторизация через Telegram Mini App (сессия из initData).
+ * POST /api/telegram/auth
+ * Header: X-Telegram-InitData или body: { initData }
+ * Возвращает Firebase customToken: если есть пользователь с tgId === telegram user id — токен для него;
+ * иначе создаётся документ users_v4/tg_<id> и токен для uid tg_<id>.
+ */
+app.post('/api/telegram/auth', express.json(), async (req, res) => {
+  const initData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
+  const validated = validateTelegramInitData(initData)
+  if (!validated || !validated.user || !validated.user.id) {
+    return res.status(400).json({ success: false, error: 'Невалидные данные Telegram (initData)' })
+  }
+  if (!admin || !db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!admin || !db) {
+      return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    }
+  }
+  const tgId = String(validated.user.id)
+  const appId = process.env.APP_ID || 'skyputh'
+  try {
+    const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+    const byTgId = await usersRef.where('tgId', '==', tgId).limit(1).get()
+    let uid
+    if (!byTgId.empty) {
+      uid = byTgId.docs[0].id
+      const customToken = await admin.auth().createCustomToken(uid)
+      return res.json({ success: true, customToken })
+    }
+    uid = `tg_${tgId}`
+    const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
+    const existing = await userRef.get()
+    if (existing.exists) {
+      const customToken = await admin.auth().createCustomToken(uid)
+      return res.json({ success: true, customToken })
+    }
+    const firstName = validated.user.first_name || ''
+    const lastName = validated.user.last_name || ''
+    const name = [firstName, lastName].filter(Boolean).join(' ') || validated.user.username || `Telegram ${tgId}`
+    const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
+    let subId = ''
+    for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+    const nowIso = new Date().toISOString()
+    await userRef.set({
+      email: `tg_${tgId}@telegram.placeholder`,
+      name,
+      phone: '',
+      role: 'user',
+      plan: 'free',
+      uuid: randomUUID(),
+      subId,
+      tgId,
+      expiresAt: null,
+      tariffName: '',
+      tariffId: '',
+      photoURL: validated.user.photo_url || null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    const customToken = await admin.auth().createCustomToken(uid)
+    return res.json({ success: true, customToken })
+  } catch (err) {
+    console.error('❌ POST /api/telegram/auth:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
+  }
+})
+
 // ========== Конфигурация n8n ==========
 
 const N8N_BASE_URL = process.env.N8N_BASE_URL || 'https://n8n.skypath.fun'
@@ -1677,6 +1745,30 @@ function pickFirst(obj, ...keys) {
   return ''
 }
 
+/**
+ * NocoDB может возвращать ячейки как примитивы или как объекты { value, display_value }.
+ * Приводит запись к плоскому объекту с нижним регистром ключей и строковыми значениями.
+ */
+function normalizeNocoDBRow(rawRow) {
+  if (!rawRow || typeof rawRow !== 'object') return {}
+  const flat = {}
+  for (const key of Object.keys(rawRow)) {
+    const v = rawRow[key]
+    let str = ''
+    if (v === null || v === undefined) {
+      str = ''
+    } else if (typeof v === 'object' && v !== null) {
+      str = (v.value ?? v.display_value ?? v.displayValue ?? v.title ?? '').toString().trim()
+    } else {
+      str = String(v).trim()
+    }
+    const lowerKey = String(key).toLowerCase()
+    flat[lowerKey] = str
+    flat[key] = str
+  }
+  return flat
+}
+
 /** POST /api/admin/users — создать пользователя (Firebase Auth + Firestore users_v4) */
 app.post('/api/admin/users', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
@@ -1725,6 +1817,14 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
   const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
   const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
   const defaultPassword = (body.defaultPassword || process.env.IMPORT_DEFAULT_PASSWORD || '').toString()
+  // Опциональный маппинг колонок: точные названия полей из NocoDB (если автоопределение не срабатывает)
+  const mapEmail = (body.emailColumn || body.email_column || '').toString().trim()
+  const mapName = (body.nameColumn || body.name_column || '').toString().trim()
+  const mapPhone = (body.phoneColumn || body.phone_column || '').toString().trim()
+  const mapTgId = (body.tgIdColumn || body.tgId_column || '').toString().trim()
+  const mapRole = (body.roleColumn || body.role_column || '').toString().trim()
+  const mapPlan = (body.planColumn || body.plan_column || '').toString().trim()
+  const skipEmptyRows = body.skipEmptyRows !== false
 
   if (!baseUrl || !apiToken) {
     return res.status(400).json({
@@ -1773,20 +1873,33 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     const created = []
     const skipped = []
     const errors = []
+    let emptyRows = 0
+    const sampleRowKeys = allRows.length > 0 ? Object.keys(allRows[0]) : []
 
     for (let i = 0; i < allRows.length; i++) {
-      const row = allRows[i]
-      const email = (pickFirst(row, 'email', 'Email', 'mail', 'E-mail') || '').toLowerCase()
-      const name = pickFirst(row, 'name', 'Name', 'full_name', 'FullName', 'Имя')
+      const rawRow = allRows[i]
+      const row = normalizeNocoDBRow(rawRow)
+
+      const email = (mapEmail ? (row[mapEmail] ?? row[mapEmail.toLowerCase()] ?? '') : pickFirst(row, 'email', 'email', 'mail', 'e-mail') || '').toString().trim().toLowerCase()
+      const name = (mapName ? (row[mapName] ?? row[mapName.toLowerCase()] ?? '') : pickFirst(row, 'name', 'name', 'full_name', 'fullname', 'имя') || '').toString().trim()
+
       if (!email || !name) {
-        skipped.push({ rowIndex: i + 1, reason: 'Нет email или имени', row: { email, name } })
+        if (skipEmptyRows && !email && !name) {
+          emptyRows += 1
+        } else {
+          skipped.push({
+            rowIndex: i + 1,
+            reason: !email && !name ? 'Пустая строка' : (!email ? 'Нет email' : 'Нет имени'),
+            row: { email: email || '(пусто)', name: name || '(пусто)' },
+          })
+        }
         continue
       }
 
-      const phone = pickFirst(row, 'phone', 'Phone', 'telephone', 'Телефон')
-      const tgId = pickFirst(row, 'tgId', 'tg_id', 'telegram_id', 'TelegramId', 'Telegram ID')
-      const roleRaw = (pickFirst(row, 'role', 'Role', 'роль') || 'user').toLowerCase()
-      const planRaw = (pickFirst(row, 'plan', 'Plan', 'план') || 'free').toLowerCase()
+      const phone = mapPhone ? (row[mapPhone] ?? row[mapPhone.toLowerCase()] ?? '') : pickFirst(row, 'phone', 'phone', 'telephone', 'телефон')
+      const tgId = mapTgId ? (row[mapTgId] ?? row[mapTgId.toLowerCase()] ?? '') : pickFirst(row, 'tgid', 'tg_id', 'telegram_id', 'telegramid', 'telegram id')
+      const roleRaw = (mapRole ? (row[mapRole] ?? row[mapRole.toLowerCase()] ?? '') : pickFirst(row, 'role', 'role', 'роль') || 'user').toLowerCase()
+      const planRaw = (mapPlan ? (row[mapPlan] ?? row[mapPlan.toLowerCase()] ?? '') : pickFirst(row, 'plan', 'plan', 'план') || 'free').toLowerCase()
       const allowedRoles = ['user', 'admin', 'accountant', 'бухгалтер']
       const role = allowedRoles.includes(roleRaw) ? roleRaw : 'user'
       const plan = planRaw || 'free'
@@ -1796,7 +1909,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
           email,
           name,
           password: passwordToUse,
-          phone,
+          phone: phone || undefined,
           role,
           plan,
           tgId: tgId || undefined,
@@ -1815,7 +1928,9 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
       success: true,
       created: created.length,
       skipped: skipped.length,
+      emptyRows,
       errors: errors.length,
+      sampleRowKeys,
       details: { created, skipped, errors },
     })
   } catch (err) {

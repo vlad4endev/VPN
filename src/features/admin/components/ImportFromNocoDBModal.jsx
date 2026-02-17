@@ -10,7 +10,12 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     apiToken: '',
     tableId: '',
     defaultPassword: '',
+    emailColumn: '',
+    nameColumn: '',
+    phoneColumn: '',
+    tgIdColumn: '',
   })
+  const [showMapping, setShowMapping] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -47,12 +52,17 @@ const ImportFromNocoDBModal = ({ onClose }) => {
 
     setIsSubmitting(true)
     try {
-      const res = await importFromNocoDB({
+      const params = {
         baseUrl,
         apiToken,
         tableId,
         defaultPassword,
-      })
+      }
+      if (form.emailColumn.trim()) params.emailColumn = form.emailColumn.trim()
+      if (form.nameColumn.trim()) params.nameColumn = form.nameColumn.trim()
+      if (form.phoneColumn.trim()) params.phoneColumn = form.phoneColumn.trim()
+      if (form.tgIdColumn.trim()) params.tgIdColumn = form.tgIdColumn.trim()
+      const res = await importFromNocoDB(params)
       setResult(res)
     } catch (err) {
       setError(err.message || 'Ошибка импорта из NocoDB')
@@ -99,10 +109,20 @@ const ImportFromNocoDBModal = ({ onClose }) => {
             </p>
             <p>
               <span className="text-amber-400 font-medium">Пропущено:</span> {result.skipped}
+              {result.emptyRows != null && result.emptyRows > 0 && (
+                <span className="text-slate-500 ml-1">(пустых строк: {result.emptyRows})</span>
+              )}
             </p>
             <p>
               <span className="text-red-400 font-medium">Ошибок:</span> {result.errors}
             </p>
+            {result.sampleRowKeys && result.sampleRowKeys.length > 0 && (
+              <p className="text-slate-400 text-xs mt-2">
+                Колонки в таблице: <code className="bg-slate-800 px-1 rounded">{result.sampleRowKeys.join(', ')}</code>
+                {' '}
+                — если импорт пропустил строки, укажите названия колонок для email и имени ниже и повторите импорт.
+              </p>
+            )}
             {details?.errors?.length > 0 && (
               <div className="mt-2 text-xs text-red-300 max-h-24 overflow-y-auto">
                 {details.errors.slice(0, 10).map((e, idx) => (

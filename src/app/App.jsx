@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
@@ -406,7 +407,10 @@ export default function VPNServiceApp() {
   const [welcomeReviews, setWelcomeReviews] = useState([])
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
+  const telegramAuthTriedRef = useRef(false)
   const [referralCodePending, setReferralCodePending] = useState('')
+  const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
+  const isTelegramApp = typeof window !== 'undefined' && !!window.__TELEGRAM_INIT_DATA
 
   // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
   useEffect(() => {
@@ -952,6 +956,31 @@ export default function VPNServiceApp() {
 
     return () => unsubscribe()
   }, [auth, db, loadUserData, generateUniqueSubId])
+
+  // Telegram Mini App: авто-вход по сессии Telegram (initData) — подтягивание данных без формы
+  useEffect(() => {
+    if (!auth || firebaseUser || authChecking) return
+    if (typeof window === 'undefined' || !window.__TELEGRAM_INIT_DATA || telegramAuthTriedRef.current) return
+    const initData = window.__TELEGRAM_INIT_DATA
+    telegramAuthTriedRef.current = true
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+    fetch(`${base}/api/telegram/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
+      body: JSON.stringify({ initData }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.customToken) {
+          return signInWithCustomToken(auth, data.customToken)
+        }
+        if (!data.success) logger.warn('App', 'Telegram auth: ответ без customToken', { error: data.error })
+      })
+      .then(() => { /* onAuthStateChanged обновит currentUser */ })
+      .catch((err) => {
+        logger.warn('App', 'Ошибка авторизации через Telegram', { message: err?.message }, err)
+      })
+  }, [auth, firebaseUser, authChecking])
 
   // Состояния для админ-панели теперь в useUIStore (adminTab, editingUser, editingServer, editingTariff)
   // settings, tariffs, servers теперь загружаются через React Query
@@ -1631,6 +1660,42 @@ export default function VPNServiceApp() {
   }, [auth, processGoogleSignInUser])
 
   // Обработка выхода
+  const handleTelegramSignIn = useCallback(async () => {
+    if (!auth) return
+    const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : null
+    if (!initData) {
+      const botUsername = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
+        ? String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME).trim().replace(/^@/, '')
+        : ''
+      const telegramHint = botUsername
+        ? `Откройте в Telegram: https://t.me/${botUsername}/app`
+        : 'Откройте бота в Telegram и запустите приложение (кнопка меню или ссылка из бота).'
+      setError(telegramHint)
+      return
+    }
+    setTelegramSignInLoading(true)
+    setError('')
+    try {
+      const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+      const res = await fetch(`${base}/api/telegram/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (data.success && data.customToken) {
+        await signInWithCustomToken(auth, data.customToken)
+      } else {
+        setError(data.error || 'Не удалось войти через Telegram')
+      }
+    } catch (err) {
+      logger.warn('App', 'Ошибка входа через Telegram', { message: err?.message }, err)
+      setError(err?.message || 'Ошибка входа через Telegram')
+    } finally {
+      setTelegramSignInLoading(false)
+    }
+  }, [auth])
+
   const handleLogout = useCallback(async () => {
     const userEmail = currentUser?.email
     logger.info('Auth', 'Выход пользователя', { email: userEmail })
@@ -3825,7 +3890,15 @@ export default function VPNServiceApp() {
         </>
       )
     }
-    return <WelcomePage onSetView={setView} reviews={welcomeReviews} />
+    return (
+      <WelcomePage
+        onSetView={setView}
+        reviews={welcomeReviews}
+        onTelegramSignIn={handleTelegramSignIn}
+        telegramSignInLoading={telegramSignInLoading}
+        isTelegramApp={isTelegramApp}
+      />
+    )
   }
 
   // Для других view показываем ошибку конфигурации
@@ -3864,6 +3937,9 @@ export default function VPNServiceApp() {
         onGoogleSignInRedirect={handleGoogleSignInRedirect}
         googleSignInLoading={googleSignInLoading}
         onSetView={setView}
+        onTelegramSignIn={handleTelegramSignIn}
+        telegramSignInLoading={telegramSignInLoading}
+        isTelegramApp={isTelegramApp}
       />
     )
   }

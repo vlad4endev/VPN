@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
@@ -161,6 +161,7 @@ const UserCard = ({
   const fieldIds = {
     name: `user-card-name-${user.id}`,
     phone: `user-card-phone-${user.id}`,
+    tgId: `user-card-tgid-${user.id}`,
     uuid: `user-card-uuid-${user.id}`,
     tariff: `user-card-tariff-${user.id}`,
     expiresAt: `user-card-expires-at-${user.id}`,
@@ -208,6 +209,13 @@ const UserCard = ({
 
   const handlePhoneChange = useCallback((e) => {
     handleFieldChange('phone', e.target.value)
+  }, [handleFieldChange])
+
+  const handleTgIdChange = useCallback((e) => {
+    const raw = e.target.value || ''
+    // Telegram user.id — число. Храним как строку из цифр (чтобы не ловить проблемы с JS number).
+    const sanitized = String(raw).replace(/[^\d]/g, '')
+    handleFieldChange('tgId', sanitized)
   }, [handleFieldChange])
 
   const handleTariffChange = useCallback((e) => {
@@ -405,13 +413,19 @@ const UserCard = ({
       const normalizedUser = normalizeUser(merged)
       await handleSaveUserCard(normalizedUser)
       setEditingUser(prev => ({ ...prev, ...normalizedUser }))
+      const targetUserId = String(user?.id || editingUser?.id || normalizedUser?.id || '').trim()
+      if (!targetUserId) {
+        throw new Error('Не удалось определить ID пользователя для уведомления')
+      }
       const fromStr = new Date(fromMs).toLocaleDateString()
       const toStr = new Date(toMs).toLocaleDateString()
+      const notifTitle = 'Вам назначена персональная скидка'
+      const notifBody = `Скидка ${percent}% действует с ${fromStr} по ${toStr}. При оплате подписки скидка применится автоматически.`
       await notificationsService.createOne({
-        userId: user.id,
+        userId: targetUserId,
         type: NOTIFICATION_TYPES.personal_discount,
-        title: 'Вам назначена персональная скидка',
-        body: `Скидка ${percent}% действует с ${fromStr} по ${toStr}. При оплате подписки скидка применится автоматически.`,
+        title: notifTitle,
+        body: notifBody,
         overview: `Скидка ${percent}% до ${toStr}`,
       })
       setDiscountNotifyStatus({ success: true })
@@ -532,6 +546,37 @@ const UserCard = ({
                   }`}
                   placeholder="+7 (999) 123-45-67"
                 />
+              </div>
+              <div>
+                <label htmlFor={fieldIds.tgId} className="block text-slate-300 text-sm font-medium mb-2">
+                  Telegram ID
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id={fieldIds.tgId}
+                    name="tgId"
+                    type="text"
+                    inputMode="numeric"
+                    value={editingUser.tgId || ''}
+                    onChange={handleTgIdChange}
+                    className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Напр. 123456789"
+                  />
+                  {editingUser.tgId && (
+                    <button
+                      onClick={() => onCopy?.(String(editingUser.tgId))}
+                      className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
+                      title="Копировать Telegram ID"
+                      type="button"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
+                  <Send className="w-3.5 h-3.5" />
+                  ID из Telegram (поле <span className="font-mono">user.id</span>). Используется для входа через Mini App и уведомлений.
+                </p>
               </div>
               <div>
                 <label htmlFor={fieldIds.uuid} className="block text-slate-300 text-sm font-medium mb-2">
