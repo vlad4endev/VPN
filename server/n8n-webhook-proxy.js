@@ -1900,11 +1900,11 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
   return res.status(status).json({ success: false, error: result.error, code: result.code })
 })
 
-const SUPPORT_AI_SYSTEM_PROMPT = `Ты консультант поддержки VPN-сервиса. Тебе даны: данные пользователя из базы (подписка, тариф, срок действия и т.д.), тема обращения и переписка в тикете.
+const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): лимит трафика, использовано/остаток, срок в панели. Используй эти данные, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
 Задачи:
-1) Проанализировать последний вопрос пользователя и, опираясь на его данные, дать чёткий дружелюбный ответ на русском.
-2) Если в вопросе упоминаются ошибки, логи, сбои подключения, неработающий VPN или ты видишь признаки технической проблемы — в начале ответа напиши ровно одну строку: ESCALATE: <краткая причина>. Затем пустая строка. Затем абзац для пользователя: предупреди, что обращение передано специалисту и он ответит. Затем основной текст ответа.
-Формат ответа: только текст для копирования в ответ пользователю. Если нужна эскалация — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение пользователю, затем ответ. Не упоминай «данные из базы» в ответе пользователю.`
+1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui, дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия), если они есть.
+2) Если в вопросе упоминаются ошибки, логи, сбои подключения, неработающий VPN или ты видишь признаки технической проблемы — в начале ответа напиши ровно одну строку: ESCALATE: <краткая причина>. Затем пустая строка. Затем абзац для пользователя: предупреди, что обращение передано специалисту. Затем основной текст ответа.
+Формат ответа: только текст для ответа пользователю. При эскалации — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение, затем ответ. Не упоминай «данные из базы» или «3x-ui» в ответе пользователю — формулируй по-человечески («по нашим данным», «ваша подписка» и т.д.).`
 
 /**
  * POST /api/ai/support-suggest — предложить ответ по тикету (ИИ анализирует вопрос, данные пользователя, даёт ответ; при признаках проблемы — эскалация админу).
@@ -1959,7 +1959,9 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
     const threadText = messagesList
       .map((m) => `${m.from === 'support' ? 'Поддержка' : 'Пользователь'}: ${(m.text || '').trim()}`)
       .join('\n\n')
-    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы:\n${JSON.stringify(userDataSafe, null, 2)}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+    const uFor3x = userSnap.exists ? userSnap.data() : {}
+    const context3xUi = await fetchOperatorContext3xUi(userId, uFor3x)
+    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
     const settings = await getSettingsCached()
     const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
@@ -2020,11 +2022,88 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
   }
 })
 
-/** Идентификатор и имя агента поддержки (ИИ) в тикетах. */
+/** Идентификатор и имя агента поддержки (ИИ) в тикетах. Оператор Майкл — полноценная запись в системе и в базе. */
 const AI_SUPPORT_USER_ID = 'michael'
 const AI_SUPPORT_DISPLAY_NAME = 'Майкл'
 const AI_TAKE_WORK_MESSAGE = 'Специалист техподдержки Майкл взял обращение в работу.'
 const AI_TAKE_WORK_DELAY_MS = 2000
+
+/** UUID оператора Майкл (системный, не для входа в VPN). */
+const MICHAEL_SYSTEM_UUID = '00000000-0000-0000-0000-000000000001'
+
+/**
+ * Убедиться, что в users_v4 есть документ оператора Майкл (для отображения в системе и в тикетах).
+ * Вызывается при первом использовании автоответа. Firebase Auth пользователя не создаём.
+ */
+async function ensureMichaelOperator() {
+  if (!db) return
+  const operatorRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${AI_SUPPORT_USER_ID}`)
+  const snap = await operatorRef.get()
+  if (snap.exists) return
+  const nowIso = new Date().toISOString()
+  await operatorRef.set({
+    email: 'michael@system.placeholder',
+    login: AI_SUPPORT_USER_ID,
+    name: AI_SUPPORT_DISPLAY_NAME,
+    phone: '',
+    role: 'support_ai',
+    plan: 'free',
+    uuid: MICHAEL_SYSTEM_UUID,
+    subId: 'michael',
+    tgId: '',
+    expiresAt: null,
+    tariffName: '',
+    tariffId: '',
+    devices: 1,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  })
+  console.log('🤖 Оператор Майкл создан в базе (users_v4/michael)')
+}
+
+/**
+ * Получить данные из панели VPN (3x-ui) для контекста оператора: трафик, срок в панели.
+ * @param {string} userId - uid пользователя в Firestore
+ * @param {{ uuid?: string, email?: string, subId?: string }} userData - данные из users_v4
+ * @returns {Promise<string>} Текст для вставки в промпт или "нет данных"
+ */
+async function fetchOperatorContext3xUi(userId, userData) {
+  const uuid = (userData?.uuid ?? '').toString().trim()
+  const email = (userData?.email ?? userData?.login ?? '').toString().trim()
+  if (!uuid && !email) return 'Нет данных (нет uuid/email для запроса в 3x-ui).'
+  const webhookUrl = N8N_WEBHOOKS.getClientStats || getDefaultWebhooks().getClientStats
+  const payload = {
+    operation: 'get_client_stats',
+    category: 'support_operator',
+    timestamp: new Date().toISOString(),
+    userId,
+    email: email || undefined,
+    uuid: uuid || undefined,
+    clientId: uuid || undefined,
+  }
+  try {
+    const result = await callN8NWebhook(webhookUrl, payload)
+    const stats = result?.stats ?? result?.data ?? result
+    if (!stats || typeof stats !== 'object') return 'Запрос в 3x-ui выполнен, данных о клиенте не получено.'
+    const total = stats.total != null ? Number(stats.total) : null
+    const up = stats.up != null ? Number(stats.up) : 0
+    const down = stats.down != null ? Number(stats.down) : 0
+    const usedBytes = up + down
+    const totalGB = total != null ? (total / (1024 ** 3)).toFixed(2) : null
+    const usedGB = (usedBytes / (1024 ** 3)).toFixed(2)
+    const remainingGB = total != null ? Math.max(0, (total - usedBytes) / (1024 ** 3)).toFixed(2) : null
+    const expiryTime = stats.expiryTime != null ? new Date(Number(stats.expiryTime) * 1000).toLocaleDateString('ru-RU') : (stats.expiryTime ?? 'не указано')
+    const parts = []
+    if (totalGB != null) parts.push(`Лимит трафика: ${totalGB} GB`)
+    parts.push(`Использовано: ${usedGB} GB`)
+    if (remainingGB != null) parts.push(`Остаток: ${remainingGB} GB`)
+    parts.push(`Срок в панели VPN: ${expiryTime}`)
+    return parts.join('; ')
+  } catch (err) {
+    console.warn('🤖 Майкл: не удалось получить данные 3x-ui для контекста', err.message)
+    return `Запрос в 3x-ui не выполнен: ${err.message || 'ошибка'}`
+  }
+}
 
 /**
  * POST /api/ai/support-auto-reply — автоматический ответ ИИ по тикету при новом сообщении пользователя.
@@ -2061,6 +2140,8 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
       if (!adminOk?.ok) return
     }
 
+    await ensureMichaelOperator()
+
     // Сообщение «Майкл взял в работу» и пауза 2 секунды перед ответом агента
     const nowIso0 = new Date().toISOString()
     await ticketRef.collection('messages').add({
@@ -2072,110 +2153,124 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
     await ticketRef.update({ updatedAt: nowIso0 })
     await new Promise((r) => setTimeout(r, AI_TAKE_WORK_DELAY_MS))
 
-    const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
-    const hasUserData = userSnap.exists && userSnap.data() && (userSnap.data().name || userSnap.data().email || userSnap.data().login)
-    if (!hasUserData) {
-      const botToken = await getTelegramToken()
-      const adminChatId = await getTelegramAdminChatId()
-      if (botToken && adminChatId) {
-        const text = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: нет данных о пользователе в базе.`
-        await sendTelegramMessage(botToken, adminChatId, text).catch((e) => console.warn('Telegram notify live support:', e.message))
-      }
-      return res.json({ success: true, replied: false, reason: 'no_user_data' })
-    }
+    // Ответ клиенту сразу — анализ и ответ ИИ идут в фоне, сообщение придёт по подписке Firestore
+    res.status(202).json({ success: true, status: 'processing' })
 
-    const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
-    const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-
-    let userDataSafe = {}
-    if (userSnap.exists) {
-      const u = userSnap.data()
-      const exp = u.expiresAt
-      const expiresStr = exp == null ? 'не задано' : (typeof exp === 'string' ? new Date(exp).toLocaleDateString('ru-RU') : (typeof exp === 'number' ? new Date(exp).toLocaleDateString('ru-RU') : String(exp)))
-      userDataSafe = {
-        name: u.name || '',
-        email: u.email || '',
-        login: u.login || '',
-        plan: u.plan || '',
-        tariffName: u.tariffName || '',
-        tariffId: u.tariffId || '',
-        expiresAt: expiresStr,
-        devices: u.devices,
-        role: u.role || 'user',
-      }
-    }
-
-    const threadText = messagesList
-      .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
-      .join('\n\n')
-    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы:\n${JSON.stringify(userDataSafe, null, 2)}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
-
-    const settings = await getSettingsCached()
-    const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
-    const result = await deepseekChat(
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      {
-        apiKey,
-        model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
-        temperature: 0.5,
-        max_tokens: 1024,
-        timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
-      }
-    )
-
-    if (!result.ok) {
-      const status = result.code === 'NO_API_KEY' ? 503 : (result.code === 'TIMEOUT' ? 504 : 502)
-      return res.status(status).json({ success: false, error: result.error, code: result.code })
-    }
-
-    let reply = (result.content || '').trim()
-    let escalate = false
-    let escalateReason = ''
-
-    const escalateMatch = reply.match(/^ESCALATE:\s*(.+?)(\n\n|$)/s)
-    if (escalateMatch) {
-      escalate = true
-      escalateReason = (escalateMatch[1] || '').trim()
-      reply = reply.slice(escalateMatch[0].length).trim()
-      const firstParagraph = reply.split(/\n\n+/)[0] || ''
-      if (firstParagraph.length > 0 && firstParagraph.length < 500) {
-        reply = reply.slice(firstParagraph.length).trim().replace(/^\n+/, '')
-      } else {
-        reply = ''
-      }
-    }
-
-    if (escalate) {
-      const botToken = await getTelegramToken()
-      const adminChatId = await getTelegramAdminChatId()
-      if (botToken && adminChatId) {
-        const escText = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: ${escapeHtml(escalateReason.slice(0, 200))}`
-        await sendTelegramMessage(botToken, adminChatId, escText).catch((e) => console.warn('Telegram notify live support:', e.message))
-      }
-      return res.json({ success: true, replied: false, reason: 'escalate' })
-    }
-
-    const replyText = reply || (result.content || '').trim()
-    if (!replyText) {
-      return res.json({ success: true, replied: false, reason: 'empty_reply' })
-    }
-
-    const nowIso = new Date().toISOString()
-    await ticketRef.collection('messages').add({
-      from: 'support',
-      userId: AI_SUPPORT_USER_ID,
-      text: replyText,
-      createdAt: nowIso,
-    })
-    await ticketRef.update({ status: 'answered', updatedAt: nowIso })
-
-    const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
+    const baseUrlForNotify = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
       ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
-      : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
-    await notifyUserAboutSupportReply(userId, ticketId, ticketData.subject || '', replyText, baseUrl)
+      : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '')
 
-    console.log('🤖 Майкл (ИИ) ответил в тикете', { ticketId, userId })
-    return res.json({ success: true, replied: true })
+    ;(async () => {
+      try {
+        const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
+        const hasUserData = userSnap.exists && userSnap.data() && (userSnap.data().name || userSnap.data().email || userSnap.data().login)
+        if (!hasUserData) {
+          const botToken = await getTelegramToken()
+          const adminChatId = await getTelegramAdminChatId()
+          if (botToken && adminChatId) {
+            const text = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: нет данных о пользователе в базе.`
+            await sendTelegramMessage(botToken, adminChatId, text).catch((e) => console.warn('Telegram notify live support:', e.message))
+          }
+          return
+        }
+
+        const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
+        const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+
+        let userDataSafe = {}
+        if (userSnap.exists) {
+          const u = userSnap.data()
+          const exp = u.expiresAt
+          const expiresStr = exp == null ? 'не задано' : (typeof exp === 'string' ? new Date(exp).toLocaleDateString('ru-RU') : (typeof exp === 'number' ? new Date(exp).toLocaleDateString('ru-RU') : String(exp)))
+          userDataSafe = {
+            name: u.name || '',
+            email: u.email || '',
+            login: u.login || '',
+            plan: u.plan || '',
+            tariffName: u.tariffName || '',
+            tariffId: u.tariffId || '',
+            expiresAt: expiresStr,
+            devices: u.devices,
+            role: u.role || 'user',
+          }
+        }
+
+        const threadText = messagesList
+          .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
+          .join('\n\n')
+        const u = userSnap.data() || {}
+        const context3xUi = await fetchOperatorContext3xUi(userId, u)
+        const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+
+        const settings = await getSettingsCached()
+        const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+        console.log('🤖 Майкл: запрос к DeepSeek...', { ticketId })
+        const result = await deepseekChat(
+          [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+          {
+            apiKey,
+            model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+            temperature: 0.5,
+            max_tokens: 1024,
+            timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
+          }
+        )
+
+        if (!result.ok) {
+          console.error('🤖 Майкл: ошибка DeepSeek', { ticketId, code: result.code, error: result.error })
+          return
+        }
+
+        let reply = (result.content || '').trim()
+        let escalate = false
+        let escalateReason = ''
+
+        const escalateMatch = reply.match(/^ESCALATE:\s*(.+?)(\n\n|$)/s)
+        if (escalateMatch) {
+          escalate = true
+          escalateReason = (escalateMatch[1] || '').trim()
+          reply = reply.slice(escalateMatch[0].length).trim()
+          const firstParagraph = reply.split(/\n\n+/)[0] || ''
+          if (firstParagraph.length > 0 && firstParagraph.length < 500) {
+            reply = reply.slice(firstParagraph.length).trim().replace(/^\n+/, '')
+          } else {
+            reply = ''
+          }
+        }
+
+        if (escalate) {
+          const botToken = await getTelegramToken()
+          const adminChatId = await getTelegramAdminChatId()
+          if (botToken && adminChatId) {
+            const escText = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: ${escapeHtml(escalateReason.slice(0, 200))}`
+            await sendTelegramMessage(botToken, adminChatId, escText).catch((e) => console.warn('Telegram notify live support:', e.message))
+          }
+          return
+        }
+
+        const replyText = reply || (result.content || '').trim()
+        if (!replyText) {
+          console.warn('🤖 Майкл: пустой ответ модели', { ticketId })
+          return
+        }
+
+        const nowIso = new Date().toISOString()
+        await ticketRef.collection('messages').add({
+          from: 'support',
+          userId: AI_SUPPORT_USER_ID,
+          text: replyText,
+          createdAt: nowIso,
+        })
+        await ticketRef.update({ status: 'answered', updatedAt: nowIso })
+
+        await notifyUserAboutSupportReply(userId, ticketId, ticketData.subject || '', replyText, baseUrlForNotify)
+
+        console.log('🤖 Майкл (ИИ) ответил в тикете', { ticketId, userId })
+      } catch (err) {
+        console.error('❌ support-auto-reply (фон):', err.message, err.stack)
+      }
+    })()
+    return
   } catch (err) {
     console.error('❌ POST /api/ai/support-auto-reply:', err.message)
     return res.status(500).json({ success: false, error: err.message || 'Ошибка автоответа ИИ' })
