@@ -10,6 +10,7 @@
  */
 
 import express from 'express'
+import compression from 'compression'
 import axios from 'axios'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -22,8 +23,15 @@ import firebaseAdmin from 'firebase-admin'
 import crypto, { randomUUID } from 'crypto'
 import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery } from './lib/telegram.js'
 import webpush from 'web-push'
+import { getMetrics, metricsMiddleware } from './lib/metrics.js'
+import { chat as deepseekChat } from './lib/deepseek.js'
 
 dotenv.config()
+
+// Webhook-пути для исключения из latency per route (учёт только в metricsWebhook)
+function isWebhookPath(path) {
+  return /\/api\/n8n\/|\/api\/payment\/webhook|webhook/.test(path || '')
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -195,9 +203,15 @@ const corsOptions = {
 // CORS для обычных API endpoints (frontend)
 app.use(cors(corsOptions))
 
+// Gzip compression для JSON и текстовых ответов
+app.use(compression())
+
 // Парсинг JSON
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// Метрики запросов (latency, 4xx/5xx, activeRequests)
+app.use(metricsMiddleware({ isWebhookPath }))
 
 // ========== Telegram Mini App: валидация initData (опционально, не ломает старых клиентов) ==========
 const TELEGRAM_BOT_TOKEN_ENV = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
@@ -295,44 +309,86 @@ app.use(async (req, res, next) => {
   next()
 })
 
+/** Срок действия сессии TMA (мс). По умолчанию 90 дней. */
+const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
+
 /**
- * Авторизация через Telegram Mini App (сессия из initData).
+ * Авторизация через Telegram Mini App.
  * POST /api/telegram/auth
- * Header: X-Telegram-InitData или body: { initData }
- * Возвращает Firebase customToken: если есть пользователь с tgId === telegram user id — токен для него;
- * иначе создаётся документ users_v4/tg_<id> и токен для uid tg_<id>.
+ * 1) По сессии: Header X-Telegram-Session-Token или body.sessionToken — сразу определяет пользователя без initData.
+ * 2) По initData: Header X-Telegram-InitData или body.initData — валидация, поиск/создание по tgId, выдача customToken и sessionToken.
+ * В ответе: { success, customToken [, sessionToken, sessionTokenExpiresAt ] }.
  */
 app.post('/api/telegram/auth', express.json(), async (req, res) => {
-  const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
-  const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
-  const result = await validateTelegramInitDataWithReasonAsync(initData)
-  if (!result.ok) {
-    return res.status(400).json({ success: false, error: result.message, reason: result.reason })
-  }
-  const validated = result.data
   if (!admin || !db) {
     try { await initFirebaseAdmin() } catch (_) {}
     if (!admin || !db) {
       return res.status(503).json({ success: false, error: 'Сервис недоступен' })
     }
   }
-  const tgId = String(validated.user.id)
   const appId = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+
+  const sessionToken = (req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken) || '').toString().trim()
+  if (sessionToken) {
+    try {
+      const bySession = await usersRef.where('telegramSessionToken', '==', sessionToken).limit(1).get()
+      if (!bySession.empty) {
+        const doc = bySession.docs[0]
+        const data = doc.data()
+        const expiresAt = data.telegramSessionTokenExpiresAt
+        const expiresMs = typeof expiresAt === 'string' ? new Date(expiresAt).getTime() : (typeof expiresAt === 'number' ? expiresAt : 0)
+        if (expiresMs > Date.now()) {
+          const uid = doc.id
+          const customToken = await admin.auth().createCustomToken(uid)
+          return res.json({ success: true, customToken })
+        }
+      }
+    } catch (err) {
+      console.warn('Telegram auth by session token:', err.message)
+    }
+  }
+
+  const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
+  const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
+  const result = await validateTelegramInitDataWithReasonAsync(initData)
+  if (!result.ok) {
+    const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
+    return res.status(400).json({ success: false, error: message, reason: result.reason || 'unknown' })
+  }
+  const validated = result.data
+  const tgId = String(validated.user.id)
+  const nowIso = new Date().toISOString()
+  const sessionTokenNew = crypto.randomBytes(32).toString('hex')
+  const sessionExpiresAt = new Date(Date.now() + TELEGRAM_SESSION_TTL_MS).toISOString()
+
   try {
-    const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
     const byTgId = await usersRef.where('tgId', '==', tgId).limit(1).get()
     let uid
+    let userRef
     if (!byTgId.empty) {
-      uid = byTgId.docs[0].id
+      const doc = byTgId.docs[0]
+      uid = doc.id
+      userRef = doc.ref
+      await userRef.update({
+        telegramSessionToken: sessionTokenNew,
+        telegramSessionTokenExpiresAt: sessionExpiresAt,
+        updatedAt: nowIso,
+      })
       const customToken = await admin.auth().createCustomToken(uid)
-      return res.json({ success: true, customToken })
+      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     }
     uid = `tg_${tgId}`
-    const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
+    userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
     const existing = await userRef.get()
     if (existing.exists) {
+      await userRef.update({
+        telegramSessionToken: sessionTokenNew,
+        telegramSessionTokenExpiresAt: sessionExpiresAt,
+        updatedAt: nowIso,
+      })
       const customToken = await admin.auth().createCustomToken(uid)
-      return res.json({ success: true, customToken })
+      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     }
     const firstName = validated.user.first_name || ''
     const lastName = validated.user.last_name || ''
@@ -340,9 +396,9 @@ app.post('/api/telegram/auth', express.json(), async (req, res) => {
     const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
     let subId = ''
     for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
-    const nowIso = new Date().toISOString()
     await userRef.set({
       email: `tg_${tgId}@telegram.placeholder`,
+      login: `tg_${tgId}`,
       name,
       phone: '',
       role: 'user',
@@ -350,6 +406,8 @@ app.post('/api/telegram/auth', express.json(), async (req, res) => {
       uuid: randomUUID(),
       subId,
       tgId,
+      telegramSessionToken: sessionTokenNew,
+      telegramSessionTokenExpiresAt: sessionExpiresAt,
       expiresAt: null,
       tariffName: '',
       tariffId: '',
@@ -358,10 +416,106 @@ app.post('/api/telegram/auth', express.json(), async (req, res) => {
       updatedAt: nowIso,
     })
     const customToken = await admin.auth().createCustomToken(uid)
-    return res.json({ success: true, customToken })
+    return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
   } catch (err) {
     console.error('❌ POST /api/telegram/auth:', err.message)
     return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
+  }
+})
+
+/**
+ * Вход по логину или email: по строке q вернуть email пользователя для signInWithEmailAndPassword.
+ * GET /api/auth/resolve-login?q=loginOrEmail
+ * Ответ: { email } или 404.
+ */
+app.get('/api/auth/resolve-login', async (req, res) => {
+  const q = (req.query.q || '').toString().trim()
+  if (!q) return res.status(400).json({ error: 'Укажите q (логин или email)' })
+  if (!db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!db) return res.status(503).json({ error: 'Сервис недоступен' })
+  }
+  const appId = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+  const qLower = q.toLowerCase()
+  try {
+    const byLogin = await usersRef.where('login', '==', qLower).limit(1).get()
+    if (!byLogin.empty) {
+      const email = byLogin.docs[0].data().email
+      if (email) return res.json({ email })
+    }
+    const byEmail = await usersRef.where('email', '==', qLower).limit(1).get()
+    if (!byEmail.empty) {
+      const email = byEmail.docs[0].data().email
+      if (email) return res.json({ email })
+    }
+    return res.status(404).json({ error: 'Пользователь не найден' })
+  } catch (err) {
+    console.error('❌ GET /api/auth/resolve-login:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+/**
+ * Проверка доступности логина и email при регистрации.
+ * GET /api/auth/check-identifier?login=xxx&email=yyy
+ * Ответ: { loginAvailable: boolean, emailAvailable: boolean }
+ */
+app.get('/api/auth/check-identifier', async (req, res) => {
+  const login = (req.query.login || '').toString().trim().toLowerCase()
+  const email = (req.query.email || '').toString().trim().toLowerCase()
+  if (!db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!db) return res.status(503).json({ error: 'Сервис недоступен' })
+  }
+  const appId = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+  try {
+    let loginAvailable = true
+    let emailAvailable = true
+    if (login) {
+      const snap = await usersRef.where('login', '==', login).limit(1).get()
+      loginAvailable = snap.empty
+    }
+    if (email) {
+      const snap = await usersRef.where('email', '==', email).limit(1).get()
+      emailAvailable = snap.empty
+    }
+    return res.json({ loginAvailable, emailAvailable })
+  } catch (err) {
+    console.error('❌ GET /api/auth/check-identifier:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+/**
+ * Установка пароля по логину (страница по ссылке: ввод логина → создание пароля).
+ * POST /api/auth/set-password-by-login
+ * Body: { login: string, newPassword: string }
+ * Находит пользователя по login в users_v4, обновляет пароль в Firebase Auth.
+ */
+app.post('/api/auth/set-password-by-login', express.json(), async (req, res) => {
+  const login = (req.body.login || '').toString().trim().toLowerCase()
+  const newPassword = (req.body.newPassword || '').toString()
+  if (!login) return res.status(400).json({ error: 'Укажите логин' })
+  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' })
+  if (newPassword.length > 128) return res.status(400).json({ error: 'Пароль слишком длинный' })
+  if (!admin || !db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!admin || !db) return res.status(503).json({ error: 'Сервис недоступен' })
+  }
+  const appId = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+  try {
+    const snap = await usersRef.where('login', '==', login).limit(1).get()
+    if (snap.empty) return res.status(404).json({ error: 'Пользователь с таким логином не найден' })
+    const uid = snap.docs[0].id
+    await admin.auth().updateUser(uid, { password: newPassword })
+    return res.json({ success: true, message: 'Пароль успешно установлен' })
+  } catch (err) {
+    if (err.code === 'auth/weak-password') return res.status(400).json({ error: 'Пароль слишком простой' })
+    console.error('❌ POST /api/auth/set-password-by-login:', err.message)
+    return res.status(500).json({ error: err.message || 'Ошибка установки пароля' })
   }
 })
 
@@ -545,6 +699,10 @@ async function sendWebPushToUser(userId, payload) {
   return { sent, errors }
 }
 
+/** Кэш uid→admin (только положительные результаты, TTL 5 мин). Снижает Firestore reads. */
+const adminCache = new Map() // uid -> { expiresAt: number }
+const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000
+
 /**
  * Проверить Firebase ID token и убедиться, что пользователь — админ (claim или роль в Firestore).
  * Возвращает { ok: true, uid } или отправляет 401/403 и возвращает { ok: false }.
@@ -568,7 +726,12 @@ async function ensureAdmin(req, res) {
     return { ok: false }
   }
   const uid = decoded.uid
+  const cached = adminCache.get(uid)
+  if (cached && Date.now() < cached.expiresAt) {
+    return { ok: true, uid }
+  }
   if (decoded.admin === true) {
+    adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
     return { ok: true, uid }
   }
   const clientAppId = (req.headers['x-app-id'] || req.headers['X-App-Id'] || '').trim() || null
@@ -590,6 +753,7 @@ async function ensureAdmin(req, res) {
         const data = snap.data()
         const role = data.role
         if (isAdminRole(role)) {
+          adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
           return { ok: true, uid }
         }
         console.warn('ensureAdmin: документ найден, но role не admin', {
@@ -615,6 +779,7 @@ async function ensureAdmin(req, res) {
           const role = doc.data().role
           if (isAdminRole(role)) {
             console.log('ensureAdmin: доступ по email (документ найден по email)', { appId, docId: doc.id, uid })
+            adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
             return { ok: true, uid }
           }
         }
@@ -629,6 +794,7 @@ async function ensureAdmin(req, res) {
     const email = (decoded.email || '').trim().toLowerCase()
     const allowed = adminEmailsRaw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
     if (email && allowed.includes(email)) {
+      adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
       return { ok: true, uid }
     }
   }
@@ -1697,13 +1863,334 @@ app.post('/api/promocodes/validate', async (req, res) => {
 })
 
 /**
+ * DeepSeek AI: чат-запрос (только админ). Для автоматизации: ответы в поддержку, суммаризация, классификация.
+ * POST /api/ai/chat
+ * Body: { messages: [{ role: "system"|"user"|"assistant", content: string }], model?, temperature?, max_tokens? }
+ * Ответ: { success: true, content: string, usage? } или { success: false, error: string }
+ */
+app.post('/api/ai/chat', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const apiKey = await getDeepSeekApiKey()
+  if (!apiKey) {
+    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ» или DEEPSEEK_API_KEY в .env' })
+  }
+  const body = req.body || {}
+  const messages = body.messages
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ success: false, error: 'Передайте массив messages (role, content)' })
+  }
+  const normalized = messages.map((m) => ({
+    role: (m.role === 'system' || m.role === 'user' || m.role === 'assistant') ? m.role : 'user',
+    content: typeof m.content === 'string' ? m.content : String(m.content || ''),
+  }))
+  const settings = await getSettingsCached()
+  const opts = {
+    apiKey,
+    model: body.model || settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+    temperature: body.temperature != null ? body.temperature : (settings.deepseekTemperature != null ? settings.deepseekTemperature : undefined),
+    max_tokens: body.max_tokens != null ? body.max_tokens : (settings.deepseekMaxTokens != null ? settings.deepseekMaxTokens : undefined),
+    timeout: body.timeout != null ? body.timeout : (settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : undefined),
+  }
+  const result = await deepseekChat(normalized, opts)
+  if (result.ok) {
+    return res.json({ success: true, content: result.content, usage: result.usage })
+  }
+  const status = result.code === 'NO_API_KEY' ? 503 : (result.code === 'TIMEOUT' ? 504 : 502)
+  return res.status(status).json({ success: false, error: result.error, code: result.code })
+})
+
+const SUPPORT_AI_SYSTEM_PROMPT = `Ты консультант поддержки VPN-сервиса. Тебе даны: данные пользователя из базы (подписка, тариф, срок действия и т.д.), тема обращения и переписка в тикете.
+Задачи:
+1) Проанализировать последний вопрос пользователя и, опираясь на его данные, дать чёткий дружелюбный ответ на русском.
+2) Если в вопросе упоминаются ошибки, логи, сбои подключения, неработающий VPN или ты видишь признаки технической проблемы — в начале ответа напиши ровно одну строку: ESCALATE: <краткая причина>. Затем пустая строка. Затем абзац для пользователя: предупреди, что обращение передано специалисту и он ответит. Затем основной текст ответа.
+Формат ответа: только текст для копирования в ответ пользователю. Если нужна эскалация — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение пользователю, затем ответ. Не упоминай «данные из базы» в ответе пользователю.`
+
+/**
+ * POST /api/ai/support-suggest — предложить ответ по тикету (ИИ анализирует вопрос, данные пользователя, даёт ответ; при признаках проблемы — эскалация админу).
+ * Только админ. Body: { ticketId: string }.
+ * Ответ: { success, reply, escalate?, userWarning?, escalateReason? } или ошибка.
+ */
+app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const apiKey = await getDeepSeekApiKey()
+  if (!apiKey) {
+    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
+  }
+  const ticketId = (req.body?.ticketId ?? '').toString().trim()
+  if (!ticketId) return res.status(400).json({ success: false, error: 'Укажите ticketId' })
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  try {
+    const ticketRef = db.doc(`artifacts/${APP_ID}/public/data/tickets/${ticketId}`)
+    const ticketSnap = await ticketRef.get()
+    if (!ticketSnap.exists) {
+      return res.status(404).json({ success: false, error: 'Тикет не найден' })
+    }
+    const ticketData = ticketSnap.data()
+    const userId = (ticketData.userId ?? '').toString().trim()
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'У тикета не указан userId' })
+    }
+
+    const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
+    const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+
+    let userDataSafe = {}
+    const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
+    if (userSnap.exists) {
+      const u = userSnap.data()
+      const exp = u.expiresAt
+      const expiresStr = exp == null ? 'не задано' : (typeof exp === 'string' ? new Date(exp).toLocaleDateString('ru-RU') : (typeof exp === 'number' ? new Date(exp).toLocaleDateString('ru-RU') : String(exp)))
+      userDataSafe = {
+        name: u.name || '',
+        email: u.email || '',
+        login: u.login || '',
+        plan: u.plan || '',
+        tariffName: u.tariffName || '',
+        tariffId: u.tariffId || '',
+        expiresAt: expiresStr,
+        devices: u.devices,
+        role: u.role || 'user',
+      }
+    }
+
+    const threadText = messagesList
+      .map((m) => `${m.from === 'support' ? 'Поддержка' : 'Пользователь'}: ${(m.text || '').trim()}`)
+      .join('\n\n')
+    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы:\n${JSON.stringify(userDataSafe, null, 2)}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+
+    const settings = await getSettingsCached()
+    const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+    const result = await deepseekChat(
+      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+      {
+        apiKey,
+        model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+        temperature: 0.5,
+        max_tokens: 1024,
+        timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
+      }
+    )
+
+    if (!result.ok) {
+      const status = result.code === 'NO_API_KEY' ? 503 : (result.code === 'TIMEOUT' ? 504 : 502)
+      return res.status(status).json({ success: false, error: result.error, code: result.code })
+    }
+
+    let reply = (result.content || '').trim()
+    let escalate = false
+    let userWarning = ''
+    let escalateReason = ''
+
+    const escalateMatch = reply.match(/^ESCALATE:\s*(.+?)(\n\n|$)/s)
+    if (escalateMatch) {
+      escalate = true
+      escalateReason = (escalateMatch[1] || '').trim()
+      reply = reply.slice(escalateMatch[0].length).trim()
+      const firstParagraph = reply.split(/\n\n+/)[0] || ''
+      if (firstParagraph.length > 0 && firstParagraph.length < 500) {
+        userWarning = firstParagraph
+        reply = reply.slice(firstParagraph.length).trim().replace(/^\n+/, '')
+      } else {
+        userWarning = 'Обнаружена возможная техническая проблема. Мы передали обращение специалисту, ожидайте ответа.'
+      }
+    }
+
+    if (escalate) {
+      const botToken = await getTelegramToken()
+      const adminChatId = await getTelegramAdminChatId()
+      if (botToken && adminChatId) {
+        const escText = `⚠️ <b>ИИ: эскалация по тикету</b>\n🆔 <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: ${escapeHtml(escalateReason.slice(0, 200))}`
+        await sendTelegramMessage(botToken, adminChatId, escText).catch((e) => console.warn('Telegram notify escalate:', e.message))
+      }
+    }
+
+    return res.json({
+      success: true,
+      reply: reply || result.content.trim(),
+      escalate,
+      userWarning: escalate ? userWarning : undefined,
+      escalateReason: escalate ? escalateReason : undefined,
+    })
+  } catch (err) {
+    console.error('❌ POST /api/ai/support-suggest:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка формирования ответа ИИ' })
+  }
+})
+
+/** Идентификатор и имя агента поддержки (ИИ) в тикетах. */
+const AI_SUPPORT_USER_ID = 'michael'
+const AI_SUPPORT_DISPLAY_NAME = 'Майкл'
+const AI_TAKE_WORK_MESSAGE = 'Специалист техподдержки Майкл взял обращение в работу.'
+const AI_TAKE_WORK_DELAY_MS = 2000
+
+/**
+ * POST /api/ai/support-auto-reply — автоматический ответ ИИ по тикету при новом сообщении пользователя.
+ * Вызывается с фронта после отправки сообщения пользователем. Доступ: владелец тикета (по Firebase ID token) или админ.
+ * ИИ сам отвечает пользователю, если есть данные о нём и ответ без эскалации. Иначе — только уведомление админу в Telegram о необходимости живой консультации.
+ * Body: { ticketId: string }.
+ * Ответ: { success: true, replied: boolean, reason?: 'no_user_data'|'escalate' }.
+ */
+app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  const ticketId = (req.body?.ticketId ?? '').toString().trim()
+  if (!ticketId) return res.status(400).json({ success: false, error: 'Укажите ticketId' })
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  const apiKey = await getDeepSeekApiKey()
+  if (!apiKey) {
+    return res.status(503).json({ success: true, replied: false, reason: 'ai_unavailable' })
+  }
+
+  try {
+    const ticketRef = db.doc(`artifacts/${APP_ID}/public/data/tickets/${ticketId}`)
+    const ticketSnap = await ticketRef.get()
+    if (!ticketSnap.exists) {
+      return res.status(404).json({ success: false, error: 'Тикет не найден' })
+    }
+    const ticketData = ticketSnap.data()
+    const userId = (ticketData.userId ?? '').toString().trim()
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'У тикета не указан userId' })
+    }
+    if (userId !== authResult.uid) {
+      const adminOk = await ensureAdmin(req, res)
+      if (!adminOk?.ok) return
+    }
+
+    // Сообщение «Майкл взял в работу» и пауза 2 секунды перед ответом агента
+    const nowIso0 = new Date().toISOString()
+    await ticketRef.collection('messages').add({
+      from: 'support',
+      userId: AI_SUPPORT_USER_ID,
+      text: AI_TAKE_WORK_MESSAGE,
+      createdAt: nowIso0,
+    })
+    await ticketRef.update({ updatedAt: nowIso0 })
+    await new Promise((r) => setTimeout(r, AI_TAKE_WORK_DELAY_MS))
+
+    const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
+    const hasUserData = userSnap.exists && userSnap.data() && (userSnap.data().name || userSnap.data().email || userSnap.data().login)
+    if (!hasUserData) {
+      const botToken = await getTelegramToken()
+      const adminChatId = await getTelegramAdminChatId()
+      if (botToken && adminChatId) {
+        const text = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: нет данных о пользователе в базе.`
+        await sendTelegramMessage(botToken, adminChatId, text).catch((e) => console.warn('Telegram notify live support:', e.message))
+      }
+      return res.json({ success: true, replied: false, reason: 'no_user_data' })
+    }
+
+    const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
+    const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+
+    let userDataSafe = {}
+    if (userSnap.exists) {
+      const u = userSnap.data()
+      const exp = u.expiresAt
+      const expiresStr = exp == null ? 'не задано' : (typeof exp === 'string' ? new Date(exp).toLocaleDateString('ru-RU') : (typeof exp === 'number' ? new Date(exp).toLocaleDateString('ru-RU') : String(exp)))
+      userDataSafe = {
+        name: u.name || '',
+        email: u.email || '',
+        login: u.login || '',
+        plan: u.plan || '',
+        tariffName: u.tariffName || '',
+        tariffId: u.tariffId || '',
+        expiresAt: expiresStr,
+        devices: u.devices,
+        role: u.role || 'user',
+      }
+    }
+
+    const threadText = messagesList
+      .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
+      .join('\n\n')
+    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы:\n${JSON.stringify(userDataSafe, null, 2)}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+
+    const settings = await getSettingsCached()
+    const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+    const result = await deepseekChat(
+      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+      {
+        apiKey,
+        model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+        temperature: 0.5,
+        max_tokens: 1024,
+        timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
+      }
+    )
+
+    if (!result.ok) {
+      const status = result.code === 'NO_API_KEY' ? 503 : (result.code === 'TIMEOUT' ? 504 : 502)
+      return res.status(status).json({ success: false, error: result.error, code: result.code })
+    }
+
+    let reply = (result.content || '').trim()
+    let escalate = false
+    let escalateReason = ''
+
+    const escalateMatch = reply.match(/^ESCALATE:\s*(.+?)(\n\n|$)/s)
+    if (escalateMatch) {
+      escalate = true
+      escalateReason = (escalateMatch[1] || '').trim()
+      reply = reply.slice(escalateMatch[0].length).trim()
+      const firstParagraph = reply.split(/\n\n+/)[0] || ''
+      if (firstParagraph.length > 0 && firstParagraph.length < 500) {
+        reply = reply.slice(firstParagraph.length).trim().replace(/^\n+/, '')
+      } else {
+        reply = ''
+      }
+    }
+
+    if (escalate) {
+      const botToken = await getTelegramToken()
+      const adminChatId = await getTelegramAdminChatId()
+      if (botToken && adminChatId) {
+        const escText = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: ${escapeHtml(escalateReason.slice(0, 200))}`
+        await sendTelegramMessage(botToken, adminChatId, escText).catch((e) => console.warn('Telegram notify live support:', e.message))
+      }
+      return res.json({ success: true, replied: false, reason: 'escalate' })
+    }
+
+    const replyText = reply || (result.content || '').trim()
+    if (!replyText) {
+      return res.json({ success: true, replied: false, reason: 'empty_reply' })
+    }
+
+    const nowIso = new Date().toISOString()
+    await ticketRef.collection('messages').add({
+      from: 'support',
+      userId: AI_SUPPORT_USER_ID,
+      text: replyText,
+      createdAt: nowIso,
+    })
+    await ticketRef.update({ status: 'answered', updatedAt: nowIso })
+
+    const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
+      ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+      : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
+    await notifyUserAboutSupportReply(userId, ticketId, ticketData.subject || '', replyText, baseUrl)
+
+    console.log('🤖 Майкл (ИИ) ответил в тикете', { ticketId, userId })
+    return res.json({ success: true, replied: true })
+  } catch (err) {
+    console.error('❌ POST /api/ai/support-auto-reply:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка автоответа ИИ' })
+  }
+})
+
+/**
  * API для управления пользователями (создание через Firebase Admin + Firestore)
  * Только админ, обходит Firestore rules
  */
 
 /** Внутренняя функция: создать одного пользователя (Auth + Firestore). Возвращает { user } или бросает. */
 async function createOneUser(adminInst, dbInst, appId, payload) {
-  const rawEmail = typeof payload.email === 'string' ? payload.email.trim() : ''
+  let rawEmail = typeof payload.email === 'string' ? payload.email.trim() : ''
+  const rawLogin = typeof payload.login === 'string' ? payload.login.trim() : ''
   const rawName = typeof payload.name === 'string' ? payload.name.trim() : ''
   const rawPassword = typeof payload.password === 'string' ? payload.password : ''
   const rawPhone = typeof payload.phone === 'string' ? payload.phone.trim() : ''
@@ -1713,12 +2200,22 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
   const rawTariffId = payload.tariffId != null ? String(payload.tariffId).trim() : ''
   const rawTariffName = payload.tariffName != null ? String(payload.tariffName).trim() : ''
   const rawExpiresAt = payload.expiresAt
+  const rawSubId = payload.subId != null ? String(payload.subId).trim() : ''
+  const rawUuid = payload.uuid != null ? String(payload.uuid).trim() : ''
+  const rawDevices = payload.devices != null ? (typeof payload.devices === 'number' ? payload.devices : parseInt(String(payload.devices), 10)) : null
 
-  if (!rawEmail || !rawName || !rawPassword || rawPassword.length < 6) {
-    throw new Error('Email, имя и пароль (≥6 символов) обязательны')
+  const login = (rawLogin || rawEmail).trim().toLowerCase()
+  if (!login) throw new Error('Логин обязателен')
+  if (!rawName || !rawPassword || rawPassword.length < 6) {
+    throw new Error('Имя и пароль (≥6 символов) обязательны')
   }
-
+  if (!rawEmail) rawEmail = `${login}@no-email.placeholder`
   const email = rawEmail.toLowerCase()
+
+  const usersRef = dbInst.collection(`artifacts/${appId}/public/data/users_v4`)
+  const existingLogin = await usersRef.where('login', '==', login).limit(1).get()
+  if (!existingLogin.empty) throw new Error('Пользователь с таким логином уже существует')
+
   const name = rawName
   const phone = rawPhone
   const allowedRoles = ['user', 'admin', 'accountant', 'бухгалтер']
@@ -1745,16 +2242,21 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
   createdUid = userRecord.uid
 
   try {
-    const uuid = randomUUID()
+    const uuid = rawUuid.length > 0 ? rawUuid : randomUUID()
     const subIdLength = 16
     const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
-    let subId = ''
-    for (let i = 0; i < subIdLength; i++) {
-      subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+    let subId = rawSubId
+    if (!subId || subId.length < 4) {
+      subId = ''
+      for (let i = 0; i < subIdLength; i++) {
+        subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+      }
     }
+    const devices = (rawDevices != null && Number.isFinite(rawDevices) && rawDevices >= 1) ? Math.min(99, Math.max(1, rawDevices)) : 1
     const nowIso = new Date().toISOString()
     const userData = {
       email,
+      login,
       name,
       phone,
       role,
@@ -1764,6 +2266,7 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
       expiresAt: expiresAt ?? null,
       tariffName: rawTariffName || '',
       tariffId: rawTariffId || '',
+      devices,
       photoURL: userRecord.photoURL || null,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -1791,6 +2294,107 @@ function pickFirst(obj, ...keys) {
     }
   }
   return ''
+}
+
+/**
+ * Сокращает длинные ошибки Firebase/Google (403, PERMISSION_DENIED) для вывода в UI импорта.
+ * Возвращает короткое сообщение и ссылку на настройку прав.
+ */
+function shortenFirebaseErrorForImport(msg) {
+  if (typeof msg !== 'string') return msg
+  const s = msg.trim()
+  if (s.length < 300) return s
+  if (/PERMISSION_DENIED|403|serviceusage\.serviceUsageConsumer|identitytoolkit\.googleapis\.com/i.test(s)) {
+    return 'Ошибка Firebase: у сервисного аккаунта нет прав на создание пользователей. Выдайте роль «Service Usage Consumer» в Google Cloud: https://console.developers.google.com/iam-admin/iam (проект skypathvpn).'
+  }
+  if (/auth\/|Firebase/i.test(s)) return s.slice(0, 200) + '…'
+  return s.slice(0, 200) + (s.length > 200 ? '…' : '')
+}
+
+/** Генерирует случайный пароль (буквы + цифры), длина по умолчанию 12. */
+function generateRandomPassword(length = 12) {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let s = ''
+  const bytes = crypto.randomBytes(length)
+  for (let i = 0; i < length; i++) s += chars[bytes[i] % chars.length]
+  return s
+}
+
+/**
+ * Проверка дубликата пользователя по логину и email (для импорта).
+ * Возвращает { duplicate: true, reason: 'login'|'email' } или { duplicate: false }.
+ * Email не проверяется, если это служебный placeholder (@imported.local, @no-email.placeholder, @telegram.placeholder).
+ */
+/**
+ * Найти пользователя по Telegram ID (для обновления при повторном импорте).
+ * @returns {{ found: boolean, uid?: string }}
+ */
+async function findUserByTgId(dbInst, appId, tgId) {
+  const tgIdStr = (tgId != null && String(tgId).trim() !== '') ? String(tgId).trim() : ''
+  if (!tgIdStr || !dbInst || !appId) return { found: false }
+  const usersRef = dbInst.collection(`artifacts/${appId}/public/data/users_v4`)
+  const snap = await usersRef.where('tgId', '==', tgIdStr).limit(1).get()
+  if (snap.empty) return { found: false }
+  return { found: true, uid: snap.docs[0].id }
+}
+
+/**
+ * Проверка дубликата по логину/email. При duplicate: true возвращает existingUid (id документа users_v4).
+ */
+async function checkImportDuplicate(dbInst, appId, login, email) {
+  const usersRef = dbInst.collection(`artifacts/${appId}/public/data/users_v4`)
+  const loginNorm = (login || '').toString().trim().toLowerCase()
+  const emailNorm = (email || '').toString().trim().toLowerCase()
+  if (loginNorm) {
+    const byLogin = await usersRef.where('login', '==', loginNorm).limit(1).get()
+    if (!byLogin.empty) return { duplicate: true, reason: 'login', existingUid: byLogin.docs[0].id }
+  }
+  const isPlaceholderEmail = /@(imported\.local|no-email\.placeholder|telegram\.placeholder)$/i.test(emailNorm)
+  if (emailNorm && !isPlaceholderEmail) {
+    const byEmail = await usersRef.where('email', '==', emailNorm).limit(1).get()
+    if (!byEmail.empty) return { duplicate: true, reason: 'email', existingUid: byEmail.docs[0].id }
+  }
+  return { duplicate: false }
+}
+
+/**
+ * Обновить существующего пользователя в Firestore данными из строки NocoDB (при повторном импорте).
+ */
+async function updateUserFromNocoDBRow(dbInst, appId, uid, data) {
+  const userRef = dbInst.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
+  const updates = {
+    updatedAt: new Date().toISOString(),
+  }
+  if (data.name != null && String(data.name).trim() !== '') updates.name = String(data.name).trim()
+  if (data.phone !== undefined) updates.phone = data.phone != null ? String(data.phone).trim() : ''
+  if (data.tgId !== undefined) updates.tgId = data.tgId != null ? String(data.tgId).trim() : ''
+  if (data.plan !== undefined) updates.plan = data.plan != null ? String(data.plan).trim() : 'free'
+  if (data.subId !== undefined && String(data.subId).trim() !== '') updates.subId = String(data.subId).trim()
+  if (data.tariffName !== undefined) updates.tariffName = data.tariffName != null ? String(data.tariffName).trim() : ''
+  if (data.uuid !== undefined && String(data.uuid).trim() !== '') updates.uuid = String(data.uuid).trim()
+  if (data.expiresAt !== undefined) updates.expiresAt = data.expiresAt
+  if (data.devices !== undefined && Number.isFinite(data.devices)) updates.devices = Math.min(99, Math.max(1, data.devices))
+  await userRef.update(updates)
+}
+
+/** Парсит дату «действует до» из строки (ISO, DD.MM.YYYY, timestamp) в миллисекунды или null. */
+function parseExpiresAt(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? value : value * 1000
+  }
+  const s = String(value).trim()
+  if (!s) return null
+  const iso = Date.parse(s)
+  if (Number.isFinite(iso)) return iso
+  const ddmmyy = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/)
+  if (ddmmyy) {
+    const [, d, m, y] = ddmmyy
+    const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10)
+    const ms = Date.UTC(year, parseInt(m, 10) - 1, parseInt(d, 10))
+    return Number.isFinite(ms) ? ms : null
+  }
+  return null
 }
 
 /**
@@ -1832,6 +2436,7 @@ app.post('/api/admin/users', async (req, res) => {
     }
     const result = await createOneUser(admin, db, APP_ID, {
       email: body.email,
+      login: body.login != null ? body.login : body.email,
       name: body.name,
       password: body.password,
       phone: body.phone,
@@ -1852,7 +2457,117 @@ app.post('/api/admin/users', async (req, res) => {
   }
 })
 
-/** POST /api/admin/import-from-nocodb — получить записи из NocoDB и создать пользователей (только админ) */
+/** Вернуть сохранённый конфиг импорта NocoDB из Firestore (для автозагрузки и подстановки в форму). */
+async function getSavedNocoDBConfig() {
+  const settings = await getSettingsCached()
+  const config = settings.nocodbImportConfig
+  return config && typeof config === 'object' ? config : null
+}
+
+/** GET /api/admin/import-from-nocodb/saved-config — получить сохранённые настройки импорта (подключение + маппинг). Только админ. */
+app.get('/api/admin/import-from-nocodb/saved-config', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  try {
+    const config = await getSavedNocoDBConfig()
+    return res.json({ success: true, config: config || null })
+  } catch (err) {
+    console.error('❌ GET /api/admin/import-from-nocodb/saved-config:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/import-from-nocodb/save-config — сохранить настройки импорта (подключение + маппинг) для автозагрузки. Body: те же поля, что у импорта. Только админ. */
+app.post('/api/admin/import-from-nocodb/save-config', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const body = req.body || {}
+  const config = {
+    baseUrl: (body.baseUrl || '').toString().trim().replace(/\/+$/, ''),
+    apiToken: (body.apiToken || '').toString().trim(),
+    tableId: (body.tableId || '').toString().trim(),
+    emailColumn: (body.emailColumn || body.email_column || '').toString().trim(),
+    nameColumn: (body.nameColumn || body.name_column || '').toString().trim(),
+    phoneColumn: (body.phoneColumn || body.phone_column || '').toString().trim(),
+    tgIdColumn: (body.tgIdColumn || body.tgId_column || '').toString().trim(),
+    roleColumn: (body.roleColumn || body.role_column || '').toString().trim(),
+    planColumn: (body.planColumn || body.plan_column || '').toString().trim(),
+    subIdColumn: (body.subIdColumn || body.subId_column || '').toString().trim(),
+    tariffNameColumn: (body.tariffNameColumn || body.tariffName_column || body.tariffColumn || '').toString().trim(),
+    expiresAtColumn: (body.expiresAtColumn || body.expiresAt_column || '').toString().trim(),
+    orderIdColumn: (body.orderIdColumn || body.orderId_column || '').toString().trim(),
+    amountColumn: (body.amountColumn || body.amount_column || '').toString().trim(),
+    devicesColumn: (body.devicesColumn || body.devices_column || '').toString().trim(),
+    uuidColumn: (body.uuidColumn || body.uuid_column || '').toString().trim(),
+    writeBackToNocoDB: body.writeBackToNocoDB !== false,
+    updateExistingUsers: body.updateExistingUsers === true || body.updateExisting === true,
+    loginColumn: (body.loginColumn || body.login_column || 'Login').toString().trim() || 'Login',
+    passwordColumn: (body.passwordColumn || body.password_column || 'Password').toString().trim() || 'Password',
+    savedAt: new Date().toISOString(),
+  }
+  if (!config.baseUrl || !config.apiToken || !config.tableId) {
+    return res.status(400).json({ success: false, error: 'Укажите baseUrl, apiToken и tableId для сохранения' })
+  }
+  if (!config.emailColumn || !config.nameColumn) {
+    return res.status(400).json({ success: false, error: 'Укажите колонки для логина и имени' })
+  }
+  try {
+    settingsCache = { data: null, expiresAt: 0 }
+    const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+    await settingsRef.set({ nocodbImportConfig: config }, { merge: true })
+    console.log('✅ NocoDB: настройки импорта сохранены для автозагрузки', { tableId: config.tableId })
+    return res.json({ success: true, message: 'Настройки сохранены. Их можно использовать для ежедневной автозагрузки.' })
+  } catch (err) {
+    console.error('❌ POST /api/admin/import-from-nocodb/save-config:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/import-from-nocodb/preview — только загрузить записи из NocoDB (без создания пользователей). Для окна сопоставления колонок. */
+app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const body = req.body || {}
+  const baseUrl = (body.baseUrl || process.env.NOCODB_BASE_URL || '').toString().trim().replace(/\/+$/, '')
+  const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
+  const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
+  if (!baseUrl || !apiToken) {
+    return res.status(400).json({ success: false, error: 'Укажите baseUrl и apiToken' })
+  }
+  if (!tableId) {
+    return res.status(400).json({ success: false, error: 'Укажите tableId' })
+  }
+  try {
+    const listUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+    const limit = 1000
+    const allRows = []
+    let offset = 0
+    let hasMore = true
+    while (hasMore) {
+      const { data } = await axios.get(listUrl, {
+        params: { limit, offset },
+        headers: { 'xc-token': apiToken, 'Content-Type': 'application/json' },
+        timeout: 30000,
+        validateStatus: () => true,
+      })
+      const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
+      if (!Array.isArray(list) || list.length === 0) break
+      allRows.push(...list)
+      offset += list.length
+      if (list.length < limit) hasMore = false
+    }
+    const columns = allRows.length > 0 ? Object.keys(allRows[0]) : []
+    return res.json({ success: true, list: allRows, columns })
+  } catch (err) {
+    const msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    console.error('❌ POST /api/admin/import-from-nocodb/preview:', msg)
+    return res.status(500).json({ success: false, error: msg || 'Ошибка загрузки данных из NocoDB' })
+  }
+})
+
+/** POST /api/admin/import-from-nocodb — получить записи из NocoDB и создать пользователей (только админ). Поддерживает body.useSavedConfig: true — подставить сохранённый конфиг (для автозагрузки по расписанию). */
 app.post('/api/admin/import-from-nocodb', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
@@ -1860,19 +2575,39 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   }
 
-  const body = req.body || {}
+  let body = req.body || {}
+  if (body.useSavedConfig) {
+    const saved = await getSavedNocoDBConfig()
+    if (!saved || !saved.baseUrl) {
+      return res.status(400).json({ success: false, error: 'Сохранённый конфиг импорта не найден. Сначала выполните сопоставление и нажмите «Сохранить для автозагрузки».' })
+    }
+    body = { ...saved, ...body }
+    delete body.useSavedConfig
+    delete body.savedAt
+  }
   const baseUrl = (body.baseUrl || process.env.NOCODB_BASE_URL || '').toString().trim().replace(/\/+$/, '')
   const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
   const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
   const defaultPassword = (body.defaultPassword || process.env.IMPORT_DEFAULT_PASSWORD || '').toString()
-  // Опциональный маппинг колонок: точные названия полей из NocoDB (если автоопределение не срабатывает)
+  // Маппинг колонок: точные названия полей из NocoDB (задаются в окне сопоставления)
   const mapEmail = (body.emailColumn || body.email_column || '').toString().trim()
   const mapName = (body.nameColumn || body.name_column || '').toString().trim()
   const mapPhone = (body.phoneColumn || body.phone_column || '').toString().trim()
   const mapTgId = (body.tgIdColumn || body.tgId_column || '').toString().trim()
   const mapRole = (body.roleColumn || body.role_column || '').toString().trim()
   const mapPlan = (body.planColumn || body.plan_column || '').toString().trim()
+  const mapSubId = (body.subIdColumn || body.subId_column || '').toString().trim()
+  const mapTariffName = (body.tariffNameColumn || body.tariffName_column || body.tariffColumn || '').toString().trim()
+  const mapExpiresAt = (body.expiresAtColumn || body.expiresAt_column || '').toString().trim()
+  const mapOrderId = (body.orderIdColumn || body.orderId_column || '').toString().trim()
+  const mapAmount = (body.amountColumn || body.amount_column || '').toString().trim()
+  const mapDevices = (body.devicesColumn || body.devices_column || '').toString().trim()
+  const mapUuid = (body.uuidColumn || body.uuid_column || '').toString().trim()
   const skipEmptyRows = body.skipEmptyRows !== false
+  const writeBackToNocoDB = body.writeBackToNocoDB !== false
+  const updateExistingUsers = body.updateExistingUsers === true || body.updateExisting === true
+  const loginColumn = (body.loginColumn || body.login_column || 'Login').toString().trim() || 'Login'
+  const passwordColumn = (body.passwordColumn || body.password_column || 'Password').toString().trim() || 'Password'
 
   if (!baseUrl || !apiToken) {
     return res.status(400).json({
@@ -1887,14 +2622,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     })
   }
 
-  const passwordToUse = defaultPassword.length >= 6 ? defaultPassword : null
-  if (!passwordToUse) {
-    return res.status(400).json({
-      success: false,
-      error: 'Задайте пароль по умолчанию для импорта (минимум 6 символов) в поле defaultPassword или IMPORT_DEFAULT_PASSWORD в .env',
-    })
-  }
-
+  // Для каждого пользователя генерируется свой пароль; defaultPassword не используется при обратной записи в NocoDB
   try {
     const listUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
     const limit = 1000
@@ -1919,55 +2647,150 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     }
 
     const created = []
+    const updated = []
     const skipped = []
     const errors = []
+    const writeBackErrors = []
     let emptyRows = 0
+    let writeBackOk = 0
     const sampleRowKeys = allRows.length > 0 ? Object.keys(allRows[0]) : []
+    const patchHeaders = { 'xc-token': apiToken, 'Content-Type': 'application/json' }
 
     for (let i = 0; i < allRows.length; i++) {
       const rawRow = allRows[i]
       const row = normalizeNocoDBRow(rawRow)
+      const recordId = rawRow.Id ?? rawRow.id ?? rawRow.ID
 
-      const email = (mapEmail ? (row[mapEmail] ?? row[mapEmail.toLowerCase()] ?? '') : pickFirst(row, 'email', 'email', 'mail', 'e-mail') || '').toString().trim().toLowerCase()
+      // Колонка "email" в NocoDB записывается как логин; для Firebase Auth нужен email — если значение с @, используем как email, иначе добавляем @imported.local
+      const loginValue = (mapEmail ? (row[mapEmail] ?? row[mapEmail.toLowerCase()] ?? '') : pickFirst(row, 'email', 'email', 'mail', 'e-mail') || '').toString().trim()
       const name = (mapName ? (row[mapName] ?? row[mapName.toLowerCase()] ?? '') : pickFirst(row, 'name', 'name', 'full_name', 'fullname', 'имя') || '').toString().trim()
 
-      if (!email || !name) {
-        if (skipEmptyRows && !email && !name) {
+      if (!loginValue || !name) {
+        if (skipEmptyRows && !loginValue && !name) {
           emptyRows += 1
         } else {
           skipped.push({
             rowIndex: i + 1,
-            reason: !email && !name ? 'Пустая строка' : (!email ? 'Нет email' : 'Нет имени'),
-            row: { email: email || '(пусто)', name: name || '(пусто)' },
+            reason: !loginValue && !name ? 'Пустая строка' : (!loginValue ? 'Нет логина (колонка email)' : 'Нет имени'),
+            row: { login: loginValue || '(пусто)', name: name || '(пусто)' },
           })
         }
         continue
       }
 
+      const login = loginValue.toLowerCase()
+      const email = login.includes('@') ? login : `${login}@imported.local`
       const phone = mapPhone ? (row[mapPhone] ?? row[mapPhone.toLowerCase()] ?? '') : pickFirst(row, 'phone', 'phone', 'telephone', 'телефон')
       const tgId = mapTgId ? (row[mapTgId] ?? row[mapTgId.toLowerCase()] ?? '') : pickFirst(row, 'tgid', 'tg_id', 'telegram_id', 'telegramid', 'telegram id')
-      const roleRaw = (mapRole ? (row[mapRole] ?? row[mapRole.toLowerCase()] ?? '') : pickFirst(row, 'role', 'role', 'роль') || 'user').toLowerCase()
       const planRaw = (mapPlan ? (row[mapPlan] ?? row[mapPlan.toLowerCase()] ?? '') : pickFirst(row, 'plan', 'plan', 'план') || 'free').toLowerCase()
-      const allowedRoles = ['user', 'admin', 'accountant', 'бухгалтер']
-      const role = allowedRoles.includes(roleRaw) ? roleRaw : 'user'
       const plan = planRaw || 'free'
+      const subIdVal = mapSubId ? (row[mapSubId] ?? row[mapSubId.toLowerCase()] ?? '').toString().trim() : ''
+      const tariffNameVal = mapTariffName ? (row[mapTariffName] ?? row[mapTariffName.toLowerCase()] ?? '').toString().trim() : ''
+      const expiresAtVal = mapExpiresAt ? (row[mapExpiresAt] ?? row[mapExpiresAt.toLowerCase()] ?? '').toString().trim() : ''
+      const orderIdVal = mapOrderId ? (row[mapOrderId] ?? row[mapOrderId.toLowerCase()] ?? '').toString().trim() : ''
+      const amountVal = mapAmount ? (row[mapAmount] ?? row[mapAmount.toLowerCase()] ?? '').toString().trim() : ''
+      const devicesVal = mapDevices ? (row[mapDevices] ?? row[mapDevices.toLowerCase()] ?? '').toString().trim() : ''
+      const uuidVal = mapUuid ? (row[mapUuid] ?? row[mapUuid.toLowerCase()] ?? '').toString().trim() : ''
+      const expiresAtMs = parseExpiresAt(expiresAtVal)
+      const amountNum = amountVal ? parseFloat(String(amountVal).replace(',', '.')) : null
+      const devicesNum = devicesVal ? parseInt(devicesVal, 10) : null
+
+      // При повторном импорте обновляем существующих по Telegram ID (не по логину)
+      if (updateExistingUsers && tgId && String(tgId).trim() !== '') {
+        const byTgId = await findUserByTgId(db, APP_ID, String(tgId).trim())
+        if (byTgId.found && byTgId.uid) {
+          try {
+            await updateUserFromNocoDBRow(db, APP_ID, byTgId.uid, {
+              name,
+              phone: phone || '',
+              tgId: String(tgId).trim(),
+              plan,
+              subId: subIdVal || undefined,
+              tariffName: tariffNameVal || undefined,
+              uuid: uuidVal || undefined,
+              expiresAt: expiresAtMs,
+              devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
+            })
+            updated.push({ login, email, id: byTgId.uid, recordId, tgId: String(tgId).trim() })
+          } catch (err) {
+            errors.push({ rowIndex: i + 1, email, error: err.message || String(err) })
+          }
+          continue
+        }
+      }
+
+      const duplicateCheck = await checkImportDuplicate(db, APP_ID, login, email)
+      if (duplicateCheck.duplicate) {
+        skipped.push({
+          rowIndex: i + 1,
+          reason: duplicateCheck.reason === 'email' ? 'Дубликат (email уже зарегистрирован)' : 'Дубликат (логин уже существует)',
+          row: { login, email },
+        })
+        continue
+      }
+
+      const generatedPassword = generateRandomPassword(12)
+      // При импорте все пользователи создаются с ролью «пользователь»
+      const role = 'user'
 
       try {
         const result = await createOneUser(admin, db, APP_ID, {
           email,
+          login,
           name,
-          password: passwordToUse,
+          password: generatedPassword,
           phone: phone || undefined,
           role,
           plan,
           tgId: tgId || undefined,
+          subId: subIdVal || undefined,
+          uuid: uuidVal || undefined,
+          tariffName: tariffNameVal || undefined,
+          expiresAt: expiresAtMs,
+          devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
         })
-        created.push({ email, id: result.user.id })
+        const createdUid = result.user.id
+        created.push({ login, email, id: createdUid, recordId })
+
+        if (orderIdVal && Number.isFinite(amountNum) && amountNum > 0 && db) {
+          try {
+            const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+            await paymentsRef.add({
+              orderId: orderIdVal,
+              userId: createdUid,
+              amount: amountNum,
+              status: 'pending',
+              tariffName: tariffNameVal || null,
+              createdAt: new Date().toISOString(),
+              source: 'nocodb_import',
+            })
+          } catch (payErr) {
+            console.warn('⚠️ Импорт NocoDB: не удалось создать запись платежа', { orderId: orderIdVal, error: payErr.message })
+          }
+        }
+
+        if (writeBackToNocoDB && recordId != null && String(recordId).trim() !== '') {
+          try {
+            // NocoDB API v2: PATCH на .../records без id в пути; id записи передаётся в теле (см. data-apis-v2.nocodb.com)
+            const patchUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+            const idKey = rawRow.Id !== undefined ? 'Id' : (rawRow.id !== undefined ? 'id' : 'ID')
+            const patchBody = { [idKey]: recordId, [loginColumn]: login, [passwordColumn]: generatedPassword }
+            const patchRes = await axios.patch(patchUrl, patchBody, { headers: patchHeaders, timeout: 15000, validateStatus: () => true })
+            if (patchRes.status >= 200 && patchRes.status < 300) {
+              writeBackOk += 1
+            } else {
+              writeBackErrors.push({ rowIndex: i + 1, login, recordId, status: patchRes.status, error: patchRes.data?.message || patchRes.data?.msg || String(patchRes.data) })
+            }
+          } catch (patchErr) {
+            writeBackErrors.push({ rowIndex: i + 1, login, recordId, error: patchErr.message || String(patchErr) })
+          }
+        }
       } catch (err) {
-        if (err.code === 'auth/email-already-exists') {
-          skipped.push({ rowIndex: i + 1, email, reason: 'Уже существует' })
+        const msg = err.message || String(err)
+        if (err.code === 'auth/email-already-exists' || msg.includes('логином уже существует') || msg.includes('email already')) {
+          skipped.push({ rowIndex: i + 1, login, email, reason: 'Дубликат (логин или email уже существует)' })
         } else {
-          errors.push({ rowIndex: i + 1, email, error: err.message || String(err) })
+          errors.push({ rowIndex: i + 1, email, error: shortenFirebaseErrorForImport(msg) })
         }
       }
     }
@@ -1975,11 +2798,14 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     return res.json({
       success: true,
       created: created.length,
+      updated: updated.length,
       skipped: skipped.length,
       emptyRows,
       errors: errors.length,
+      writeBackOk: writeBackToNocoDB ? writeBackOk : undefined,
+      writeBackErrors: writeBackErrors.length ? writeBackErrors : undefined,
       sampleRowKeys,
-      details: { created, skipped, errors },
+      details: { created, updated, skipped, errors, writeBackOk, writeBackErrors },
     })
   } catch (err) {
     const msg = err.response?.data?.message || err.response?.data?.msg || err.message
@@ -1999,6 +2825,10 @@ const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || process.e
 let telegramTokenCache = { token: null, expiresAt: 0 }
 const TELEGRAM_CACHE_TTL_MS = 60 * 1000
 
+/** Кэш документа settings (TTL 60 с). Снижает Firestore reads для getTelegramToken и loadSettings. */
+let settingsCache = { data: null, expiresAt: 0 }
+const SETTINGS_CACHE_TTL_MS = 60 * 1000
+
 /**
  * Токен бота: приоритет 1) TELEGRAM_BOT_TOKEN (env), 2) кэш, 3) Firestore (artifacts/APP_ID/public/settings.telegramBotToken).
  * Используется для webhook привязки, уведомлений об оплате, send-reminders и тестовых сообщений.
@@ -2009,17 +2839,37 @@ async function getTelegramToken() {
   if (telegramTokenCache.token && Date.now() < telegramTokenCache.expiresAt) {
     return telegramTokenCache.token
   }
-  if (!db) return ''
+  const settings = await getSettingsCached()
+  const token = (settings.telegramBotToken) ? String(settings.telegramBotToken).trim() : ''
+  if (token) {
+    telegramTokenCache = { token, expiresAt: Date.now() + TELEGRAM_CACHE_TTL_MS }
+  }
+  return token
+}
+
+/** Загрузить settings из Firestore с кэшированием. */
+async function getSettingsCached() {
+  if (settingsCache.data && Date.now() < settingsCache.expiresAt) {
+    return settingsCache.data
+  }
+  if (!db) return {}
   try {
     const snap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
-    const token = (snap.exists && snap.data().telegramBotToken) ? String(snap.data().telegramBotToken).trim() : ''
-    if (token) {
-      telegramTokenCache = { token, expiresAt: Date.now() + TELEGRAM_CACHE_TTL_MS }
-    }
-    return token
+    const data = snap.exists ? snap.data() : {}
+    settingsCache = { data, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS }
+    return data
   } catch {
-    return ''
+    return {}
   }
+}
+
+/** API-ключ DeepSeek: приоритет 1) DEEPSEEK_API_KEY (env), 2) настройки в Firestore (из админки). */
+async function getDeepSeekApiKey() {
+  const fromEnv = process.env.DEEPSEEK_API_KEY && String(process.env.DEEPSEEK_API_KEY).trim()
+  if (fromEnv) return fromEnv
+  const s = await getSettingsCached()
+  const fromSettings = s.deepseekApiKey != null ? String(s.deepseekApiKey).trim() : ''
+  return fromSettings || ''
 }
 
 /**
@@ -2326,9 +3176,11 @@ app.patch('/api/admin/telegram/settings', async (req, res) => {
       update.telegramBotToken = token || null
       update.telegramBotTokenUpdatedAt = new Date().toISOString()
       telegramTokenCache = { token: null, expiresAt: 0 }
+      settingsCache = { data: null, expiresAt: 0 }
     }
     if (adminChatId !== undefined) {
       update.telegramAdminChatId = adminChatId || null
+      settingsCache = { data: null, expiresAt: 0 }
     }
     if (Object.keys(update).length) {
       await settingsRef.set(update, { merge: true })
@@ -2342,6 +3194,57 @@ app.patch('/api/admin/telegram/settings', async (req, res) => {
     res.json({ success: true, configured: Boolean(token !== undefined ? token : (await getTelegramToken())), savedTo: 'firestore' })
   } catch (err) {
     console.error('❌ PATCH /api/admin/telegram/settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/admin/ai/status — статус настройки ИИ (DeepSeek). Токен не возвращаем. Только админ. */
+app.get('/api/admin/ai/status', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const apiKey = await getDeepSeekApiKey()
+  const settings = await getSettingsCached()
+  res.json({
+    success: true,
+    configured: Boolean(apiKey && apiKey.length > 0),
+    model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    temperature: settings.deepseekTemperature != null ? Number(settings.deepseekTemperature) : 0.7,
+    maxTokens: settings.deepseekMaxTokens != null ? Number(settings.deepseekMaxTokens) : 2048,
+    timeoutSeconds: settings.deepseekTimeoutSeconds != null ? Number(settings.deepseekTimeoutSeconds) : 60,
+    systemPromptPreset: settings.deepseekSystemPromptPreset != null ? String(settings.deepseekSystemPromptPreset) : '',
+  })
+})
+
+/** PATCH /api/admin/ai/settings — сохранить настройки ИИ в Firestore (токен, модель, параметры). Только админ. */
+app.patch('/api/admin/ai/settings', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const body = req.body || {}
+  const update = {}
+  if (body.apiKey !== undefined) {
+    update.deepseekApiKey = body.apiKey ? String(body.apiKey).trim() : null
+    update.deepseekApiKeyUpdatedAt = body.apiKey ? new Date().toISOString() : null
+  }
+  if (body.model !== undefined) update.deepseekModel = body.model ? String(body.model).trim() || null : null
+  if (body.temperature !== undefined) update.deepseekTemperature = body.temperature != null ? Number(body.temperature) : null
+  if (body.maxTokens !== undefined) update.deepseekMaxTokens = body.maxTokens != null ? Number(body.maxTokens) : null
+  if (body.timeoutSeconds !== undefined) update.deepseekTimeoutSeconds = body.timeoutSeconds != null ? Number(body.timeoutSeconds) : null
+  if (body.systemPromptPreset !== undefined) update.deepseekSystemPromptPreset = body.systemPromptPreset != null ? String(body.systemPromptPreset) : null
+  if (Object.keys(update).length === 0) {
+    return res.json({ success: true, configured: Boolean(await getDeepSeekApiKey()) })
+  }
+  try {
+    settingsCache = { data: null, expiresAt: 0 }
+    const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+    await settingsRef.set(update, { merge: true })
+    const configured = Boolean(await getDeepSeekApiKey())
+    if (update.deepseekApiKey !== undefined) {
+      console.log('✅ ИИ (DeepSeek): настройки сохранены в Firestore (artifacts/%s/public/settings).', APP_ID)
+    }
+    res.json({ success: true, configured, savedTo: 'firestore' })
+  } catch (err) {
+    console.error('❌ PATCH /api/admin/ai/settings:', err.message)
     res.status(500).json({ success: false, error: err.message })
   }
 })
@@ -2433,14 +3336,9 @@ app.post('/api/admin/telegram/send-test', express.json(), async (req, res) => {
 async function getTelegramAdminChatId() {
   const fromEnv = process.env.TELEGRAM_ADMIN_CHAT_ID && String(process.env.TELEGRAM_ADMIN_CHAT_ID).trim()
   if (fromEnv) return fromEnv
-  if (!db) return ''
-  try {
-    const snap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
-    const id = (snap.exists && snap.data().telegramAdminChatId) ? String(snap.data().telegramAdminChatId).trim() : ''
-    return id
-  } catch {
-    return ''
-  }
+  const settings = await getSettingsCached()
+  const id = (settings.telegramAdminChatId) ? String(settings.telegramAdminChatId).trim() : ''
+  return id
 }
 
 function escapeHtml(s) {
@@ -2553,9 +3451,9 @@ app.post('/api/notify/support-ticket', express.json(), async (req, res) => {
   }
 })
 
-/** GET /api/push-vapid-public — публичный ключ VAPID для подписки на push (без авторизации). */
+/** GET /api/push-vapid-public — публичный ключ VAPID для подписки на push (без авторизации). При отсутствии ключей возвращает 200 и success: false, чтобы клиент не получал 503. */
 app.get('/api/push-vapid-public', (req, res) => {
-  if (!VAPID_PUBLIC) return res.status(503).json({ success: false, error: 'Web Push не настроен' })
+  if (!VAPID_PUBLIC) return res.json({ success: false, publicKey: null, error: 'Web Push не настроен' })
   res.json({ success: true, publicKey: VAPID_PUBLIC })
 })
 
@@ -2636,6 +3534,43 @@ app.get('/api/admin/errors', async (req, res) => {
 })
 
 /**
+ * Внутренняя функция: уведомить пользователя об ответе поддержки (Telegram + Web Push).
+ * baseUrl — корень приложения для ссылки в уведомлении (опционально).
+ */
+async function notifyUserAboutSupportReply(uid, ticketId, subject, text, baseUrl = null) {
+  if (!db) return { telegramSent: false, webPushSent: 0 }
+  const tid = (ticketId ?? '').toString().trim()
+  const appRoot = (baseUrl || process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
+  const linkPath = tid ? `/#support?ticket=${encodeURIComponent(tid)}` : '/#support'
+  const linkUrl = appRoot ? `${appRoot}${linkPath}` : ''
+  const msgText = (text ?? '').toString().trim().slice(0, 200)
+  const pushPayload = { title: 'Ответ поддержки', body: msgText || 'Новое сообщение в обращении', url: linkUrl, ticketId: tid, type: 'support-reply' }
+  let telegramSent = false
+  let webPushSent = 0
+  const botToken = await getTelegramToken()
+  const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`).get()
+  const tgId = (userSnap.exists && userSnap.data().tgId) ? String(userSnap.data().tgId).trim() : ''
+  if (botToken && tgId) {
+    const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    const telegramText = `📩 <b>Ответ поддержки</b>\n\nТема: ${escapeHtml((subject ?? '').trim()) || 'Обращение'}\n\n${escapeHtml(msgText) || '—'}\n\n🔗 <a href="${safeHref}">Открыть обращение в личном кабинете</a>`
+    const result = await sendTelegramMessage(botToken, tgId, telegramText)
+    if (result.ok) {
+      telegramSent = true
+      console.log('📨 Уведомление об ответе поддержки отправлено в Telegram', { userId: uid, ticketId: tid })
+    }
+  }
+  const pushResult = await sendWebPushToUser(uid, pushPayload)
+  webPushSent = pushResult.sent
+  if (pushResult.sent > 0) {
+    console.log('📨 Web Push отправлен пользователю (тикет)', { userId: uid, ticketId: tid, count: pushResult.sent })
+  }
+  if (pushResult.errors?.length) {
+    pushResult.errors.forEach((e) => console.warn('Web Push ошибка:', e))
+  }
+  return { telegramSent, webPushSent }
+}
+
+/**
  * POST /api/notify/support-reply — уведомление пользователю об ответе поддержки: Telegram (если привязан) + Web Push (в фоне).
  * Вызывается с фронта после addMessage(from=support) или createTicketAsAdmin.
  */
@@ -2649,46 +3584,19 @@ app.post('/api/notify/support-reply', express.json(), async (req, res) => {
   const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
     ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
     : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
-  const appRoot = baseUrl.replace(/\/$/, '')
-  const linkPath = tid ? `/#support?ticket=${encodeURIComponent(tid)}` : '/#support'
-  const linkUrl = `${appRoot}${linkPath}`
   const subj = (subject ?? '').toString().trim()
   const msgText = (text ?? '').toString().trim().slice(0, 200)
-  const pushPayload = { title: 'Ответ поддержки', body: msgText || 'Новое сообщение в обращении', url: linkUrl, ticketId: tid, type: 'support-reply' }
-
-  let telegramSent = false
-  let webPushSent = 0
 
   try {
-    const botToken = await getTelegramToken()
+    const result = await notifyUserAboutSupportReply(uid, tid, subj, msgText, baseUrl)
+    const sent = result.telegramSent || result.webPushSent > 0
     const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`).get()
     const tgId = (userSnap.exists && userSnap.data().tgId) ? String(userSnap.data().tgId).trim() : ''
-
-    if (botToken && tgId) {
-      const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-      const telegramText = `📩 <b>Ответ поддержки</b>\n\nТема: ${escapeHtml(subj) || 'Обращение'}\n\n${escapeHtml(msgText) || '—'}\n\n🔗 <a href="${safeHref}">Открыть обращение в личном кабинете</a>`
-      const result = await sendTelegramMessage(botToken, tgId, telegramText)
-      if (result.ok) {
-        telegramSent = true
-        console.log('📨 Уведомление об ответе поддержки отправлено в Telegram', { userId: uid, ticketId: tid })
-      }
-    }
-
-    const pushResult = await sendWebPushToUser(uid, pushPayload)
-    webPushSent = pushResult.sent
-    if (pushResult.sent > 0) {
-      console.log('📨 Web Push отправлен пользователю (тикет)', { userId: uid, ticketId: tid, count: pushResult.sent })
-    }
-    if (pushResult.errors?.length) {
-      pushResult.errors.forEach((e) => console.warn('Web Push ошибка:', e))
-    }
-
-    const sent = telegramSent || webPushSent > 0
     return res.status(200).json({
       success: true,
       sent,
-      telegram: telegramSent,
-      webPush: webPushSent,
+      telegram: result.telegramSent,
+      webPush: result.webPushSent,
       reason: sent ? null : (tgId ? 'Ошибка Telegram' : 'Включите уведомления в браузере или привяжите Telegram'),
     })
   } catch (err) {
@@ -3406,18 +4314,9 @@ async function loadPaymentSettings() {
 
   try {
     const APP_ID = process.env.APP_ID || 'skyputh'
-    // Путь к документу: artifacts/{APP_ID}/public/settings
-    const settingsPath = `artifacts/${APP_ID}/public/settings`
-    console.log('🔍 n8n-webhook-proxy: Загрузка настроек платежей из Firestore', {
-      appId: APP_ID,
-      settingsPath
-    })
-    
-    const settingsRef = db.doc(settingsPath)
-    const settingsSnapshot = await settingsRef.get()
-    
-    if (settingsSnapshot.exists) {
-      const data = settingsSnapshot.data()
+    const data = await getSettingsCached()
+    if (Object.keys(data).length) {
+      console.log('🔍 n8n-webhook-proxy: Настройки платежей (из кэша или Firestore)', { appId: APP_ID })
       const paymentSettings = {
         yoomoneyWallet: data.yoomoneyWallet || data.yooMoneyWallet || null,
         yoomoneySecretKey: data.yoomoneySecretKey || data.yooMoneySecretKey || null,
@@ -3430,10 +4329,7 @@ async function loadPaymentSettings() {
       })
       return paymentSettings
     } else {
-      console.warn('⚠️ n8n-webhook-proxy: Документ settings не найден в Firestore', {
-        appId: APP_ID,
-        settingsPath
-      })
+      console.warn('⚠️ n8n-webhook-proxy: Документ settings не найден или пуст', { appId: APP_ID })
       return {}
     }
   } catch (err) {
@@ -5205,29 +6101,132 @@ async function activateSubscriptionAfterPayment(paymentData) {
 }
 
 /**
- * System Monitoring Routes
+ * System Monitoring Routes — реальные метрики сервера
  */
 app.get('/api/system/status', async (req, res) => {
   try {
     const cpuLoad = os.loadavg()[0]
     const cpuCores = os.cpus().length
-    const cpuUsagePercent = Math.min((cpuLoad / cpuCores) * 100, 100)
+    const cpuUsagePercent = Math.min(100, Math.round((cpuLoad / Math.max(cpuCores, 1)) * 100))
     const totalMemory = os.totalmem()
     const freeMemory = os.freemem()
     const usedMemory = totalMemory - freeMemory
-    const memoryUsagePercent = (usedMemory / totalMemory) * 100
-    const uptime = os.uptime()
+    const memoryUsagePercent = Math.round((usedMemory / totalMemory) * 100 * 10) / 10
+    const uptimeSeconds = process.uptime()
+    const uptimeFormatted = `${Math.floor(uptimeSeconds / 3600)}ч ${Math.floor((uptimeSeconds % 3600) / 60)}м`
 
-    res.json({
-      status: 'ok',
+    const processMem = process.memoryUsage()
+    const metrics = getMetrics({ isWebhookPath })
+
+    // Проверка доступности 3x-ui (XUI_HOST)
+    let xuiStatus = { connected: false, responseTime: null, error: null, configured: false }
+    const xuiHost = process.env.XUI_HOST || process.env.VITE_XUI_HOST
+    if (xuiHost) {
+      xuiStatus.configured = true
+      const xuiStart = Date.now()
+      try {
+        const xuiUrl = `${xuiHost.replace(/\/+$/, '')}/login`
+        const xuiRes = await axios.get(xuiUrl, { timeout: 3000, validateStatus: () => true })
+        xuiStatus = {
+          ...xuiStatus,
+          connected: xuiRes.status < 500,
+          responseTime: Date.now() - xuiStart,
+          error: xuiRes.status >= 400 ? `HTTP ${xuiRes.status}` : null,
+        }
+      } catch (xuiErr) {
+        xuiStatus = { ...xuiStatus, connected: false, responseTime: null, error: xuiErr.message || 'Недоступен' }
+      }
+    }
+
+    // Проверка Firebase/Firestore
+    let firebaseStatus = { connected: false, error: null }
+    if (db) {
+      const fbStart = Date.now()
+      try {
+        const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+        await settingsRef.get()
+        firebaseStatus = { connected: true, responseTimeMs: Date.now() - fbStart, error: null }
+      } catch (fbErr) {
+        firebaseStatus = { connected: false, error: fbErr.message || 'Ошибка доступа' }
+      }
+    } else {
+      firebaseStatus = { connected: false, error: 'Firebase не инициализирован' }
+    }
+
+    // Проверка n8n: /healthz или корень (если healthz отключён)
+    let n8nStatus = { available: false, responseTimeMs: null, error: null, baseUrl: '' }
+    const n8nBase = (process.env.N8N_BASE_URL || 'https://n8n.skypath.fun').replace(/\/+$/, '')
+    const tryN8n = async (path) => {
+      const start = Date.now()
+      const res = await axios.get(`${n8nBase}${path}`, { timeout: 3000, validateStatus: () => true })
+      return { status: res.status, responseTimeMs: Date.now() - start }
+    }
+    try {
+      const r = await tryN8n('/healthz')
+      if (r.status === 404) {
+        const r2 = await tryN8n('/')
+        n8nStatus = {
+          available: r2.status < 500,
+          responseTimeMs: r2.responseTimeMs,
+          error: r2.status >= 400 ? `HTTP ${r2.status}` : null,
+          baseUrl: n8nBase,
+        }
+      } else {
+        n8nStatus = {
+          available: r.status < 500,
+          responseTimeMs: r.responseTimeMs,
+          error: r.status >= 400 ? `HTTP ${r.status}` : null,
+          baseUrl: n8nBase,
+        }
+      }
+    } catch (n8nErr) {
+      n8nStatus = { available: false, responseTimeMs: null, error: n8nErr.code || n8nErr.message || 'Недоступен', baseUrl: n8nBase }
+    }
+
+    const data = {
+      connected: true,
       timestamp: new Date().toISOString(),
-      cpu: { load: cpuLoad.toFixed(2), cores: cpuCores, usagePercent: cpuUsagePercent.toFixed(2) },
-      memory: { total: totalMemory, used: usedMemory, free: freeMemory, usagePercent: memoryUsagePercent.toFixed(2) },
-      uptime: { seconds: uptime, formatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m` },
-      n8n: { available: true, baseUrl: N8N_BASE_URL },
-    })
+      platform: {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        arch: os.arch(),
+        nodeVersion: process.version,
+      },
+      cpu: {
+        usage: cpuUsagePercent,
+        load: Math.round(cpuLoad * 100) / 100,
+        cores: cpuCores,
+        loadAvg: os.loadavg().map((l) => Math.round(l * 100) / 100),
+      },
+      ram: {
+        usage: memoryUsagePercent,
+        usedGB: Math.round((usedMemory / 1024 / 1024 / 1024) * 100) / 100,
+        totalGB: Math.round((totalMemory / 1024 / 1024 / 1024) * 100) / 100,
+        freeGB: Math.round((freeMemory / 1024 / 1024 / 1024) * 100) / 100,
+      },
+      processMemory: {
+        heapUsedMB: Math.round(processMem.heapUsed / 1024 / 1024 * 10) / 10,
+        heapTotalMB: Math.round(processMem.heapTotal / 1024 / 1024 * 10) / 10,
+        rssMB: Math.round(processMem.rss / 1024 / 1024 * 10) / 10,
+      },
+      uptime: { seconds: Math.floor(uptimeSeconds), formatted: uptimeFormatted },
+      firebase: firebaseStatus,
+      xui: xuiStatus,
+      n8n: n8nStatus,
+      api: {
+        requests: metrics.requests,
+        avgResponseTimeMs: metrics.avgResponseTimeMs,
+        activeRequestsCount: metrics.activeRequestsCount,
+        status4xx: metrics.status4xx,
+        status5xx: metrics.status5xx,
+        timeoutsCount: metrics.timeoutsCount,
+        metricsWebhook: metrics.metricsWebhook,
+      },
+    }
+
+    res.json({ success: true, data })
   } catch (error) {
-    res.status(500).json({ status: 'error', error: error.message })
+    res.status(500).json({ success: false, error: error.message })
   }
 })
 

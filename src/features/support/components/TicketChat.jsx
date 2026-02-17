@@ -10,6 +10,9 @@ const TicketChat = ({
   onUpdateStatus,
   sending,
   isAdmin,
+  suggestedReply = null,
+  suggestedUserWarning = null,
+  onSuggestedReplyApplied,
 }) => {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
@@ -17,6 +20,17 @@ const TicketChat = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (suggestedReply != null && String(suggestedReply).trim()) {
+      const reply = String(suggestedReply).trim()
+      const withWarning = suggestedUserWarning && String(suggestedUserWarning).trim()
+        ? `${String(suggestedUserWarning).trim()}\n\n${reply}`
+        : reply
+      setInput(withWarning)
+      onSuggestedReplyApplied?.()
+    }
+  }, [suggestedReply, suggestedUserWarning])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -82,12 +96,14 @@ const TicketChat = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.map((msg) => {
           const isSupport = msg.from === 'support'
+          const isMichael = isSupport && (msg.userId === 'michael' || msg.userId === 'ai')
+          const senderName = isSupport ? (isMichael ? 'Майкл' : 'Поддержка') : (isAdmin && ticket?.userName ? ticket.userName : 'Вы')
           return (
             <div
               key={msg.id}
               className={`flex gap-3 ${isSupport ? 'flex-row-reverse' : ''}`}
             >
-              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center" title={senderName}>
                 {isSupport ? (
                   <Headphones size={16} className="text-blue-400" />
                 ) : (
@@ -101,6 +117,7 @@ const TicketChat = ({
                     : 'bg-slate-700 text-slate-200'
                 }`}
               >
+                <p className="text-xs font-medium opacity-90 mb-0.5">{senderName}</p>
                 <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
                 <p className="text-xs opacity-70 mt-1">
                   {formatDate(msg.createdAt)}
@@ -111,6 +128,13 @@ const TicketChat = ({
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Предупреждение при эскалации ИИ */}
+      {canReply && suggestedUserWarning && (
+        <div className="mx-3 mt-2 p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-200 text-sm">
+          ⚠️ ИИ рекомендует передать обращение специалисту. Сообщение для пользователя можно отредактировать ниже.
+        </div>
+      )}
 
       {/* Поле ввода */}
       {canReply && (

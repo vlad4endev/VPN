@@ -23,6 +23,7 @@ import { logError } from '../utils/errorHandler.js'
 import CreateUserModal from './CreateUserModal.jsx'
 import ImportFromNocoDBModal from './ImportFromNocoDBModal.jsx'
 import TelegramPanel from './TelegramPanel.jsx'
+import AIPanel from './AIPanel.jsx'
 import ErrorsPanel from './ErrorsPanel.jsx'
 
 const AdminPanel = ({
@@ -1103,6 +1104,10 @@ const AdminPanel = ({
 
         {adminTab === 'telegram' && (
           <TelegramPanel />
+        )}
+
+        {adminTab === 'ai' && (
+          <AIPanel />
         )}
 
         {adminTab === 'errors' && (

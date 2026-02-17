@@ -81,4 +81,37 @@ export const supportNotifyService = {
       text: (text || '').slice(0, 500),
     })
   },
+
+  /**
+   * Запустить автоматический ответ ИИ по тикету (после нового сообщения пользователя).
+   * Вызывается без await — ответ ИИ придёт в тикет по подписке в реальном времени.
+   * @param {string} ticketId
+   * @param {() => Promise<string|null>} getToken — например () => auth.currentUser?.getIdToken() ?? Promise.resolve(null)
+   * @returns {Promise<{ ok: boolean, replied?: boolean, reason?: string }>}
+   */
+  async triggerAutoReply(ticketId, getToken) {
+    const base = getApiBase()
+    if (!ticketId) return { ok: false }
+    const token = typeof getToken === 'function' ? await getToken() : null
+    if (!token) return { ok: false }
+    try {
+      const res = await fetch(`${base}/api/ai/support-auto-reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ticketId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.warn('[SupportNotify] support-auto-reply:', data.error || res.statusText)
+        return { ok: false }
+      }
+      return { ok: true, replied: data.replied, reason: data.reason }
+    } catch (err) {
+      console.warn('[SupportNotify] support-auto-reply:', err.message)
+      return { ok: false }
+    }
+  },
 }

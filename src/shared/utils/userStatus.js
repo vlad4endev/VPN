@@ -3,12 +3,23 @@ const EXPIRING_SOON_DAYS = 2   // Показывать «Истекает чер
 const GRACE_DAYS_AFTER_EXPIRY = 5 // «expired» и «Нет подписки» только через 5 дней после просрочки
 
 /**
- * Нормализует дату окончания в миллисекунды
+ * Нормализует дату окончания в миллисекунды.
+ * Поддерживает: number (ms или секунды), Date, ISO-строка, Firestore Timestamp.
  */
 function toExpiryMs (value) {
-  if (value == null || value === 0) return null
-  if (typeof value === 'number' && value > 1e12) return value // уже ms
-  if (typeof value === 'number') return value
+  if (value == null || value === '') return null
+  if (typeof value === 'number') {
+    if (Number.isFinite(value) && value > 0) {
+      return value > 1e12 ? value : value * 1000 // уже ms или секунды
+    }
+    return null
+  }
+  // Firestore Timestamp (объект с toMillis или seconds)
+  if (value && typeof value === 'object') {
+    if (typeof value.toMillis === 'function') return value.toMillis()
+    if (typeof value.toDate === 'function') return value.toDate().getTime()
+    if (Number.isFinite(value.seconds)) return value.seconds * 1000
+  }
   const t = new Date(value).getTime()
   return Number.isNaN(t) ? null : t
 }

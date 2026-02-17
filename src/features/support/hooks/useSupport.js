@@ -131,6 +131,12 @@ export function useSupport(currentUser) {
           subject,
           message
         )
+        // Автоответ ИИ по первому сообщению в новом тикете
+        supportNotifyService
+          .triggerAutoReply(id, () =>
+            auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
+          )
+          .catch(() => {})
         return id
       } catch (err) {
         setError(err.message || 'Не удалось создать тикет')
@@ -203,6 +209,12 @@ export function useSupport(currentUser) {
               t.subject,
               text
             )
+            // Автоответ ИИ: ИИ сам ответит в тикете или отправит админу уведомление о живой консультации
+            supportNotifyService
+              .triggerAutoReply(selectedTicketId, () =>
+                auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
+              )
+              .catch(() => {})
           }
         }
       } catch (err) {

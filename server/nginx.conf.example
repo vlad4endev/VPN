@@ -91,6 +91,13 @@ server {
         return 204;
     }
     
+    # ========== Gzip compression ==========
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 5;
+    gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml;
+
     # ========== Content Security Policy ==========
     add_header Content-Security-Policy "
         default-src 'self';

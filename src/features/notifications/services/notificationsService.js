@@ -86,7 +86,7 @@ export const notificationsService = {
         callback(list)
       },
       (err) => {
-        logger.error('Notifications', 'Ошибка подписки', { userId }, err)
+        logger.warn('Notifications', 'Подписка недоступна (правила или индекс Firestore)', { userId, code: err?.code || err?.message })
         callback([])
       }
     )

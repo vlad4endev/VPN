@@ -271,14 +271,16 @@ export const authService = {
       logger.info('Auth', 'Уникальный subId сгенерирован для нового пользователя (Google)', { email: firebaseUser.email, subId: generatedSubId })
       
       const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
+      const email = (firebaseUser.email || '').toLowerCase()
       const newUserData = {
-        email: firebaseUser.email || '',
+        email,
+        login: email,
         name: firebaseUser.displayName || '',
         phone: '',
         role: 'user',
         plan: 'free',
         uuid: generatedUUID,
-        subId: generatedSubId, // Уникальный subId для 3x-ui
+        subId: generatedSubId,
         expiresAt: null,
         tariffName: '',
         tariffId: '',

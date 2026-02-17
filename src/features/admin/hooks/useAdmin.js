@@ -149,7 +149,10 @@ export function useAdmin({
     generateUUID: safeGenerateUUID,
     generateSubId: safeGenerateSubId,
     createUser: usersHook.createUser,
+    fetchNocoDBPreview: usersHook.fetchNocoDBPreview,
     importFromNocoDB: usersHook.importFromNocoDB,
+    getSavedNocoDBImportConfig: usersHook.getSavedNocoDBImportConfig,
+    saveNocoDBImportConfig: usersHook.saveNocoDBImportConfig,
 
     // Тарифы
     editingTariff: tariffsHook.editingTariff,

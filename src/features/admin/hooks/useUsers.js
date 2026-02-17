@@ -419,6 +419,24 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     }
   }, [currentUser, setUsers, setError, setSuccess])
 
+  // Загрузка данных из NocoDB для окна сопоставления (только админ)
+  const fetchNocoDBPreview = useCallback(async (params) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      const err = new Error('Недостаточно прав')
+      logError('Admin', 'fetchNocoDBPreview', err, { currentUserId: currentUser?.id })
+      setError('Недостаточно прав')
+      throw err
+    }
+    try {
+      return await usersApiService.fetchNocoDBPreview(params)
+    } catch (err) {
+      const errorMessage = handleFirestoreError(err)
+      logError('Admin', 'fetchNocoDBPreview', err)
+      setError(errorMessage)
+      throw err
+    }
+  }, [currentUser, setError])
+
   // Импорт пользователей из NocoDB (только админ)
   const importFromNocoDB = useCallback(async (params) => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -431,7 +449,7 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       const result = await usersApiService.importFromNocoDB(params)
       await loadUsers()
       setSuccess(
-        `Импорт: создано ${result.created}, пропущено ${result.skipped}, ошибок ${result.errors}`,
+        `Импорт: создано ${result.created}${(result.updated ?? 0) > 0 ? `, обновлено ${result.updated}` : ''}, пропущено ${result.skipped}, ошибок ${result.errors}`,
       )
       setTimeout(() => setSuccess(''), 5000)
       logger.info('Admin', 'Импорт из NocoDB выполнен', result)
@@ -444,6 +462,35 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     }
   }, [currentUser, loadUsers, setError, setSuccess])
 
+  const getSavedNocoDBImportConfig = useCallback(async () => {
+    if (!currentUser || currentUser.role !== 'admin') return { config: null }
+    try {
+      return await usersApiService.getSavedNocoDBImportConfig()
+    } catch (err) {
+      logError('Admin', 'getSavedNocoDBImportConfig', err)
+      return { config: null }
+    }
+  }, [currentUser])
+
+  const saveNocoDBImportConfig = useCallback(async (params) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      const err = new Error('Недостаточно прав')
+      logError('Admin', 'saveNocoDBImportConfig', err)
+      throw err
+    }
+    try {
+      const result = await usersApiService.saveNocoDBImportConfig(params)
+      setSuccess('Настройки импорта сохранены для автозагрузки')
+      setTimeout(() => setSuccess(''), 4000)
+      return result
+    } catch (err) {
+      const errorMessage = handleFirestoreError(err)
+      logError('Admin', 'saveNocoDBImportConfig', err)
+      setError(errorMessage)
+      throw err
+    }
+  }, [currentUser, setError, setSuccess])
+
   return {
     editingUser,
     loading,
@@ -455,7 +502,10 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     generateUUID,
     generateSubId,
     createUser,
+    fetchNocoDBPreview,
     importFromNocoDB,
+    getSavedNocoDBImportConfig,
+    saveNocoDBImportConfig,
   }
 }
 

@@ -110,44 +110,7 @@ export const adminService = {
       
       // ВАЖНО: Используем setDoc с merge вместо updateDoc для гарантии сохранения всех полей
       await setDoc(userDoc, updateData, { merge: true })
-      
       console.log('✅ Данные сохранены в Firestore')
-      
-      // Проверяем, что данные действительно сохранились
-      const verifyDoc = await getDoc(userDoc)
-      if (verifyDoc.exists()) {
-        const savedData = verifyDoc.data()
-        console.log('✅ Проверка сохраненных данных:', {
-          savedKeys: Object.keys(savedData),
-          savedValues: {
-            uuid: savedData.uuid,
-            name: savedData.name,
-            phone: savedData.phone,
-            expiresAt: savedData.expiresAt,
-            trafficGB: savedData.trafficGB,
-            devices: savedData.devices,
-            tariffId: savedData.tariffId,
-            plan: savedData.plan,
-            subId: savedData.subId,
-          }
-        })
-        
-        // Проверяем, что subId сохранился правильно
-        if (updateData.subId !== undefined) {
-          const savedSubId = savedData.subId || savedData.subid // Обратная совместимость
-          const expectedSubId = updateData.subId
-          if (String(savedSubId || '').trim() !== String(expectedSubId || '').trim()) {
-            console.warn('⚠️ Предупреждение: subId может быть сохранен некорректно', {
-              expected: expectedSubId,
-              saved: savedSubId,
-            })
-          } else {
-            console.log('✅ subId успешно сохранен:', savedSubId)
-          }
-        }
-      } else {
-        console.error('❌ Документ не найден после сохранения!')
-      }
 
       // Если обновляем данные в 3x-ui (expiryTime, totalGB, limitIp, subId)
       // Обновляем в 3x-ui если изменились: expiresAt, trafficGB, devices, uuid, или subId

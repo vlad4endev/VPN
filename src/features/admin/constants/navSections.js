@@ -1,4 +1,4 @@
-import { Users, MessageCircle, Megaphone, Server, DollarSign, CreditCard, Tag, Star, Link2, LayoutDashboard, Search, Send, AlertTriangle } from 'lucide-react'
+import { Users, MessageCircle, Megaphone, Server, DollarSign, CreditCard, Tag, Star, Link2, LayoutDashboard, Search, Send, AlertTriangle, Bot } from 'lucide-react'
 
 /** Подразделы админ-панели: группа → пункты меню (единый источник правды для Sidebar и AdminPanel) */
 export const ADMIN_NAV_SECTIONS = [
@@ -42,6 +42,7 @@ export const ADMIN_NAV_SECTIONS = [
     items: [
       { id: 'n8n', label: 'n8n', icon: Link2 },
       { id: 'telegram', label: 'Telegram', icon: Send },
+      { id: 'ai', label: 'ИИ (DeepSeek)', icon: Bot },
     ],
   },
   {

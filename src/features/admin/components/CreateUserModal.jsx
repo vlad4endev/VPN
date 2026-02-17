@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { X, Save, Mail, User, Phone, Shield, Send } from 'lucide-react'
+import { X, Save, Mail, User, Phone, Shield, Send, AtSign } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import { USER_ROLE_OPTIONS } from '../../../shared/constants/admin.js'
 
@@ -10,6 +10,7 @@ const CreateUserModal = ({ onClose }) => {
 
   const [form, setForm] = useState({
     email: '',
+    login: '',
     password: '',
     name: '',
     phone: '',
@@ -30,18 +31,20 @@ const CreateUserModal = ({ onClose }) => {
     setError('')
 
     const email = form.email.trim()
+    const login = form.login.trim() || (email ? email.split('@')[0] : '')
     const name = form.name.trim()
     const password = form.password
 
-    if (!email || !name || !password) {
-      setError('Email, имя и пароль обязательны')
+    if (!login || !name || !password) {
+      setError('Логин, имя и пароль обязательны. Email можно не указывать.')
       return
     }
 
     setIsSubmitting(true)
     try {
       await createUser({
-        email,
+        email: email || undefined,
+        login,
         password,
         name,
         phone: form.phone.trim(),
@@ -89,8 +92,23 @@ const CreateUserModal = ({ onClose }) => {
           <div className="space-y-3">
             <div>
               <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                <AtSign className="w-4 h-4" />
+                Логин (обязателен, для входа)
+              </label>
+              <input
+                type="text"
+                name="login"
+                value={form.login}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="уникальный логин"
+                required
+              />
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
                 <Mail className="w-4 h-4" />
-                Email
+                Email (необязательно)
               </label>
               <input
                 type="email"
@@ -98,11 +116,9 @@ const CreateUserModal = ({ onClose }) => {
                 value={form.email}
                 onChange={handleChange}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="user@example.com"
-                required
+                placeholder="если пусто — вход только по логину"
               />
             </div>
-
             <div>
               <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
                 <User className="w-4 h-4" />

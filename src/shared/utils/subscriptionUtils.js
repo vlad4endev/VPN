@@ -1,5 +1,7 @@
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { APP_ID } from '../constants/app.js'
+
+const ACTIVE_SUBSCRIPTION_STATUSES = ['pending_payment', 'test_period', 'activating', 'active']
 
 /**
  * Получение активной подписки пользователя из Firestore
@@ -54,13 +56,30 @@ export async function getActiveSubscriptionByUserId(db, userId) {
       const userData = userDoc.data()
       if (userData.subscriptionId) {
         const subscription = await getSubscriptionById(db, userData.subscriptionId)
-        if (subscription && ['pending_payment', 'test_period', 'activating', 'active'].includes(subscription.status)) {
+        if (subscription && ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
           return subscription
         }
       }
     }
-    
-    return null
+
+    // Резерв: подписка по subscriptionId не найдена или неактивна — ищем в коллекции по userId
+    const subscriptionsRef = collection(db, `artifacts/${APP_ID}/public/data/subscriptions`)
+    const q = query(subscriptionsRef, where('userId', '==', userId))
+    const snapshot = await getDocs(q)
+    const subs = []
+    snapshot.forEach((d) => {
+      const data = d.data()
+      if (ACTIVE_SUBSCRIPTION_STATUSES.includes(data.status)) {
+        subs.push({ id: d.id, ...data })
+      }
+    })
+    if (subs.length === 0) return null
+    subs.sort((a, b) => {
+      const at = (a.updatedAt || a.createdAt || 0)
+      const bt = (b.updatedAt || b.createdAt || 0)
+      return new Date(bt).getTime() - new Date(at).getTime()
+    })
+    return subs[0]
   } catch (error) {
     console.error('❌ subscriptionUtils: Ошибка получения активной подписки', {
       userId,

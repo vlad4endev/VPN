@@ -4,9 +4,9 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // Время, после которого данные считаются устаревшими
-      staleTime: 5 * 60 * 1000, // 5 минут
+      staleTime: 5 * 60 * 1000, // 5 минут (settings/tariffs можно увеличить через queryKey-specific options)
       // Время хранения неиспользуемых данных в кеше
-      gcTime: 10 * 60 * 1000, // 10 минут (ранее cacheTime)
+      gcTime: 15 * 60 * 1000, // 15 минут (ранее cacheTime)
       // Автоматический refetch при фокусе окна
       refetchOnWindowFocus: true,
       // Retry при ошибках

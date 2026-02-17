@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { MessageCircle, PlusCircle, X } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { MessageCircle, PlusCircle, X, Bot, Loader2 } from 'lucide-react'
 import { useSupport } from '../../support/hooks/useSupport.js'
 import TicketList from '../../support/components/TicketList.jsx'
 import TicketChat from '../../support/components/TicketChat.jsx'
+import { getSupportSuggestReply } from '../services/aiAdminService.js'
 
 /**
  * Панель тикетов поддержки в админ-панели.
@@ -29,6 +30,10 @@ const SupportTicketsPanel = ({ currentUser, users = [], loadUsers }) => {
   const [openTicketUserId, setOpenTicketUserId] = useState('')
   const [openTicketSubject, setOpenTicketSubject] = useState('')
   const [openTicketMessage, setOpenTicketMessage] = useState('')
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false)
+  const [aiSuggestError, setAiSuggestError] = useState(null)
+  const [suggestedReply, setSuggestedReply] = useState(null)
+  const [suggestedUserWarning, setSuggestedUserWarning] = useState(null)
 
   const handleOpenTicketModalOpen = () => {
     if (users.length === 0 && typeof loadUsers === 'function') loadUsers()
@@ -58,6 +63,37 @@ const SupportTicketsPanel = ({ currentUser, users = [], loadUsers }) => {
     setOpenTicketMessage('')
     setError(null)
   }
+
+  const handleAiSuggest = useCallback(async () => {
+    if (!ticket?.id) return
+    setAiSuggestError(null)
+    setSuggestedReply(null)
+    setSuggestedUserWarning(null)
+    setAiSuggestLoading(true)
+    try {
+      const result = await getSupportSuggestReply(ticket.id)
+      if (result.success && result.reply != null) {
+        setSuggestedReply(result.reply)
+        if (result.escalate && result.userWarning) {
+          setSuggestedUserWarning(result.userWarning)
+        }
+        if (result.escalate) {
+          setError(null)
+        }
+      } else {
+        setAiSuggestError(result.error || 'Не удалось получить ответ ИИ')
+      }
+    } catch (err) {
+      setAiSuggestError(err.message || 'Ошибка запроса к ИИ')
+    } finally {
+      setAiSuggestLoading(false)
+    }
+  }, [ticket?.id])
+
+  const clearSuggestedReply = useCallback(() => {
+    setSuggestedReply(null)
+    setSuggestedUserWarning(null)
+  }, [])
 
   return (
     <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 overflow-hidden">
@@ -114,15 +150,40 @@ const SupportTicketsPanel = ({ currentUser, users = [], loadUsers }) => {
         {/* Чат */}
         <div className="flex-1 flex flex-col min-h-[300px] lg:min-h-0">
           {selectedTicketId ? (
-            <TicketChat
-              ticket={ticket}
-              messages={messages}
-              onBack={() => selectTicket(null)}
-              onSendMessage={(text) => sendMessage(text, ticket)}
-              onUpdateStatus={updateStatus}
-              sending={sending}
-              isAdmin={isAdmin}
-            />
+            <>
+              {aiSuggestError && (
+                <div className="mx-4 mt-2 p-2 bg-red-900/20 border border-red-800/50 rounded-lg text-red-300 text-sm flex items-center justify-between">
+                  <span>{aiSuggestError}</span>
+                  <button type="button" onClick={() => setAiSuggestError(null)} className="text-red-400 hover:text-red-300" aria-label="Закрыть">×</button>
+                </div>
+              )}
+              <TicketChat
+                ticket={ticket}
+                messages={messages}
+                onBack={() => selectTicket(null)}
+                onSendMessage={(text) => sendMessage(text, ticket)}
+                onUpdateStatus={updateStatus}
+                sending={sending}
+                isAdmin={isAdmin}
+                suggestedReply={suggestedReply}
+                suggestedUserWarning={suggestedUserWarning}
+                onSuggestedReplyApplied={clearSuggestedReply}
+              />
+              {isAdmin && ticket?.status !== 'closed' && (
+                <div className="px-3 pb-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleAiSuggest}
+                    disabled={aiSuggestLoading}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium disabled:opacity-50"
+                    title="ИИ проанализирует вопрос и данные пользователя, предложит ответ. При признаках проблемы — передаст обращение специалисту."
+                  >
+                    {aiSuggestLoading ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
+                    Ответ ИИ
+                  </button>
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-500">
               <MessageCircle className="w-14 h-14 text-slate-600 mb-3" />

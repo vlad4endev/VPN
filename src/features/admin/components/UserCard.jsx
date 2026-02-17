@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send, AtSign, ShieldOff } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
+import { useSubscriptionStatus } from '../../../shared/hooks/useSubscriptionStatus.js'
 import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
 import { UserCardPropTypes } from './UserCard.propTypes.js'
@@ -153,13 +154,15 @@ const UserCard = ({
     }
   }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, tariffs, getTrafficLimit])
 
-  // Вычисляем статус на основе актуальных данных пользователя (user prop)
-  // Это гарантирует, что статус всегда соответствует реальным данным из Firestore
-  const userStatus = getUserStatus(user || editingUser)
+  // Загружаем подписку из коллекции subscriptions (по subscriptionId или по userId) для корректного статуса
+  const { subscription, isLoading: subscriptionLoading } = useSubscriptionStatus(user)
+  // Статус с учётом загруженной подписки (subscription.status — источник правды)
+  const userStatus = getUserStatus(user || editingUser, null, subscription)
 
   // Уникальные ID для полей формы
   const fieldIds = {
     name: `user-card-name-${user.id}`,
+    login: `user-card-login-${user.id}`,
     phone: `user-card-phone-${user.id}`,
     tgId: `user-card-tgid-${user.id}`,
     uuid: `user-card-uuid-${user.id}`,
@@ -209,6 +212,10 @@ const UserCard = ({
 
   const handlePhoneChange = useCallback((e) => {
     handleFieldChange('phone', e.target.value)
+  }, [handleFieldChange])
+
+  const handleLoginChange = useCallback((e) => {
+    handleFieldChange('login', (e.target.value || '').trim().toLowerCase())
   }, [handleFieldChange])
 
   const handleTgIdChange = useCallback((e) => {
@@ -507,6 +514,32 @@ const UserCard = ({
               <Mail className="w-5 h-5" />
               Основная информация
             </h3>
+            {/* Логин и пароль — отображение для быстрого просмотра */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 pb-4 border-b border-slate-700">
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Логин</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm">
+                    {editingUser.login || editingUser.email || '—'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onCopy?.(editingUser.login || editingUser.email || '')}
+                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2 shrink-0"
+                    title="Копировать логин"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Пароль</label>
+                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
+                  В системе не хранится (Firebase Auth). При импорте из NocoDB записывается в таблицу.
+                </div>
+                <p className="text-slate-500 text-xs mt-1">Для смены пароля создайте пользователя заново или задайте его при импорте.</p>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-300 text-sm font-medium mb-2">Email</label>
@@ -514,6 +547,26 @@ const UserCard = ({
                   {editingUser.email}
                 </div>
                 <p className="text-slate-500 text-xs mt-1">Email нельзя изменить</p>
+              </div>
+              <div>
+                <label htmlFor={fieldIds.login} className="block text-slate-300 text-sm font-medium mb-2">
+                  Логин (для входа) {errors.login && <span className="text-red-400 text-xs">({errors.login})</span>}
+                </label>
+                <input
+                  id={fieldIds.login}
+                  name="login"
+                  type="text"
+                  value={editingUser.login || ''}
+                  onChange={handleLoginChange}
+                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    errors.login ? 'border-red-500' : 'border-slate-700'
+                  }`}
+                  placeholder="уникальный логин"
+                />
+                <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
+                  <AtSign className="w-3.5 h-3.5" />
+                  Вход по логину или email; логин должен быть уникальным.
+                </p>
               </div>
               <div>
                 <label htmlFor={fieldIds.name} className="block text-slate-300 text-sm font-medium mb-2">
@@ -576,6 +629,43 @@ const UserCard = ({
                 <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
                   <Send className="w-3.5 h-3.5" />
                   ID из Telegram (поле <span className="font-mono">user.id</span>). Используется для входа через Mini App и уведомлений.
+                </p>
+              </div>
+              <div>
+                <label className="block text-slate-300 text-sm font-medium mb-2">
+                  Сессия Telegram Mini App
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(user?.telegramSessionToken || editingUser?.telegramSessionToken) ? (
+                    <>
+                      <span className="font-mono text-slate-400 text-xs">
+                        ••••••••{(user?.telegramSessionToken || editingUser?.telegramSessionToken).slice(-8)}
+                      </span>
+                      {(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt) && (
+                        <span className="text-slate-500 text-xs">
+                          до {formatDate ? formatDate(new Date(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt).getTime(), 'short') : new Date(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt).toLocaleDateString()}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setEditingUser(prev => ({ ...prev, telegramSessionToken: null, telegramSessionTokenExpiresAt: null }))
+                          const payload = { ...editingUser, telegramSessionToken: null, telegramSessionTokenExpiresAt: null }
+                          if (handleSaveUserCard) await handleSaveUserCard(normalizeUser(payload))
+                        }}
+                        className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-amber-900/50 hover:bg-amber-800/50 text-amber-200 text-xs transition-colors"
+                        title="Отозвать сессию — при следующем входе в Mini App потребуется снова авторизация по Telegram"
+                      >
+                        <ShieldOff className="w-3.5 h-3.5" />
+                        Отозвать
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-slate-500 text-xs">Нет активной сессии (вход по initData)</span>
+                  )}
+                </div>
+                <p className="text-slate-500 text-xs mt-1">
+                  Сохраняется при входе через Mini App; по сессии пользователь определяется без повторной проверки initData.
                 </p>
               </div>
               <div>

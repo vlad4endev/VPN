@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Activity, Cpu, HardDrive, Wifi, AlertCircle, CheckCircle2, XCircle, Trash2, Filter, RefreshCw, Server, Database, Zap, Loader2 } from 'lucide-react'
+import { Activity, Cpu, HardDrive, Wifi, AlertCircle, CheckCircle2, XCircle, Trash2, Filter, RefreshCw, Server, Database, Zap, Loader2, Gauge, Cloud, Workflow, Shield } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import axios from 'axios'
 import logger from '../../../shared/utils/logger.js'
@@ -80,18 +80,18 @@ const SystemMonitor = () => {
       if (response.status === 200 && response.data.success) {
         const data = response.data.data
 
-        // Update response time history
-        if (data.xui?.responseTime) {
+        // Update response time history (API avgResponseTimeMs или xui.responseTime)
+        const latency = data.api?.avgResponseTimeMs ?? data.xui?.responseTime
+        if (latency != null) {
           setResponseTimeHistory((prev) => {
             const newHistory = [
               ...prev,
               {
                 time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                latency: data.xui.responseTime,
+                latency: typeof latency === 'number' ? latency : Number(latency) || 0,
                 timestamp: Date.now(),
               },
             ]
-            // Keep only last maxHistoryPoints
             return newHistory.slice(-maxHistoryPoints)
           })
         }
@@ -273,6 +273,18 @@ const SystemMonitor = () => {
     )
   }
 
+  // Сводка состояния всех сервисов
+  const healthItems = status ? [
+    { id: 'api', label: 'API', ok: status.connected !== false, icon: Server },
+    { id: 'firebase', label: 'Firebase', ok: status.firebase?.connected, icon: Database },
+    { id: 'n8n', label: 'n8n', ok: status.n8n?.available, icon: Workflow },
+    { id: 'xui', label: '3x-ui', ok: status.xui?.configured ? status.xui.connected : null, icon: Zap },
+  ] : []
+
+  const healthAllOk = healthItems.length > 0 && healthItems.every((h) => h.ok === true)
+  const healthHasFail = healthItems.some((h) => h.ok === false)
+  const healthState = healthAllOk ? 'ok' : healthHasFail ? 'fail' : 'partial'
+
   return (
     <div className="space-y-4 sm:space-y-5 md:space-y-6">
       {/* Success/Error Messages */}
@@ -287,6 +299,52 @@ const SystemMonitor = () => {
         <div className="bg-red-900/30 border border-red-800 rounded-lg sm:rounded-xl p-3 sm:p-4 flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
           <div className="text-red-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{error}</div>
+        </div>
+      )}
+
+      {/* Сводка состояния — все сервисы */}
+      {status && healthItems.length > 0 && (
+        <div className={`rounded-lg sm:rounded-xl p-4 sm:p-5 border ${
+          healthState === 'ok' ? 'bg-green-900/20 border-green-800/60' :
+          healthState === 'fail' ? 'bg-red-900/20 border-red-800/60' :
+          'bg-slate-900/80 border-slate-700'
+        }`}>
+          <div className="flex items-center gap-2 mb-3">
+            <Shield className={`w-5 h-5 ${
+              healthState === 'ok' ? 'text-green-400' : healthState === 'fail' ? 'text-red-400' : 'text-slate-400'
+            }`} />
+            <h2 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] font-semibold text-slate-200">
+              Сводка состояния
+            </h2>
+            <span className={`ml-auto text-sm font-medium ${
+              healthState === 'ok' ? 'text-green-400' : healthState === 'fail' ? 'text-red-400' : 'text-slate-400'
+            }`}>
+              {healthState === 'ok' ? 'Все сервисы работают' : healthState === 'fail' ? 'Есть проблемы' : 'Частично'}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-3 sm:gap-4">
+            {healthItems.map((item) => {
+              const Icon = item.icon
+              const ok = item.ok
+              const na = ok === null
+              return (
+                <div
+                  key={item.id}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
+                    ok ? 'bg-green-900/30 text-green-300' : na ? 'bg-slate-800 text-slate-500' : 'bg-red-900/30 text-red-300'
+                  }`}
+                >
+                  {ok ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : na ? <span className="w-4 h-4 text-xs">—</span> : <XCircle className="w-4 h-4 flex-shrink-0" />}
+                  <Icon className="w-4 h-4 flex-shrink-0 opacity-80" />
+                  <span className="text-sm font-medium">{item.label}</span>
+                  <span className="text-xs opacity-80">{ok ? 'OK' : na ? 'Н/Д' : 'Ошибка'}</span>
+                </div>
+              )
+            })}
+          </div>
+          {status.timestamp && (
+            <p className="text-slate-500 text-xs mt-3">Обновлено: {new Date(status.timestamp).toLocaleString('ru-RU')}</p>
+          )}
         </div>
       )}
 
@@ -317,6 +375,12 @@ const SystemMonitor = () => {
                   <span className="text-slate-200 font-mono text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
                     {status.uptime.formatted || status.uptime}
                   </span>
+                </div>
+              )}
+              {status.platform && (
+                <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-slate-500">
+                  <span>{status.platform.hostname || '-'}</span>
+                  <span>Node {status.platform.nodeVersion || '-'}</span>
                 </div>
               )}
             </>
@@ -354,9 +418,74 @@ const SystemMonitor = () => {
         </div>
       </div>
 
-      {/* Info Cards Grid - Mobile First */}
+      {/* Сервисы: Firebase, n8n, 3x-ui, CPU, RAM, API */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Status Card - Mobile First */}
+        {/* Firebase */}
+        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center gap-2">
+              <Cloud className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">Firebase</h3>
+            </div>
+            {status?.firebase && (() => {
+              const Icon = getStatusIcon(status.firebase.connected)
+              return <Icon className={`w-5 h-5 sm:w-6 sm:h-6 ${getStatusColor(status.firebase.connected)} flex-shrink-0`} />
+            })()}
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Firestore</span>
+              <span className={`font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${getStatusColor(status?.firebase?.connected)}`}>
+                {status?.firebase?.connected ? 'Подключено' : status?.firebase ? 'Ошибка' : 'Н/Д'}
+              </span>
+            </div>
+            {status?.firebase?.responseTimeMs != null && (
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Задержка</span>
+                <span className="text-slate-200 font-mono text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-sm">{status.firebase.responseTimeMs} ms</span>
+              </div>
+            )}
+            {status?.firebase?.error && (
+              <div className="text-red-400 text-xs mt-2">{status.firebase.error}</div>
+            )}
+          </div>
+        </div>
+
+        {/* n8n */}
+        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center gap-2">
+              <Workflow className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">n8n</h3>
+            </div>
+            {status?.n8n && (() => {
+              const Icon = getStatusIcon(status.n8n.available)
+              return <Icon className={`w-5 h-5 sm:w-6 sm:h-6 ${getStatusColor(status.n8n.available)} flex-shrink-0`} />
+            })()}
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Сервис</span>
+              <span className={`font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${getStatusColor(status?.n8n?.available)}`}>
+                {status?.n8n?.available ? 'Доступен' : status?.n8n ? 'Недоступен' : 'Н/Д'}
+              </span>
+            </div>
+            {status?.n8n?.responseTimeMs != null && (
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Время ответа</span>
+                <span className="text-slate-200 font-mono text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-sm">{status.n8n.responseTimeMs} ms</span>
+              </div>
+            )}
+            {status?.n8n?.baseUrl && (
+              <div className="text-slate-500 text-xs truncate" title={status.n8n.baseUrl}>{status.n8n.baseUrl}</div>
+            )}
+            {status?.n8n?.error && (
+              <div className="text-red-400 text-xs mt-2">{status.n8n.error}</div>
+            )}
+          </div>
+        </div>
+
+        {/* 3x-ui */}
         <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <div className="flex items-center gap-2">
@@ -364,18 +493,19 @@ const SystemMonitor = () => {
               <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">3x-ui</h3>
             </div>
             {status?.xui && (() => {
+              if (!status.xui.configured) return <span className="text-slate-500 text-xs">Н/Д</span>
               const Icon = getStatusIcon(status.xui.connected)
               return <Icon className={`w-5 h-5 sm:w-6 sm:h-6 ${getStatusColor(status.xui.connected)} flex-shrink-0`} />
             })()}
           </div>
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Подключение</span>
-              <span className={`font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${getStatusColor(status?.xui?.connected)}`}>
-                {status?.xui?.connected ? 'Подключено' : status?.xui ? 'Отключено' : 'Н/Д'}
+              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Панель VPN</span>
+              <span className={`font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${status?.xui?.configured ? getStatusColor(status.xui.connected) : 'text-slate-500'}`}>
+                {!status?.xui?.configured ? 'Не настроен' : status.xui.connected ? 'Подключено' : 'Отключено'}
               </span>
             </div>
-            {status?.xui?.responseTime && (
+            {status?.xui?.configured && status?.xui?.responseTime && (
               <div className="flex justify-between items-center">
                 <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Время ответа</span>
                 <span className="text-slate-200 font-mono text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{status.xui.responseTime}ms</span>
@@ -479,21 +609,63 @@ const SystemMonitor = () => {
           </div>
         </div>
 
-        {/* Active Connections Card - Mobile First */}
+        {/* API Load Card - запросы, latency, 4xx/5xx */}
         <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <div className="flex items-center gap-2">
-              <Wifi className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
-              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">Подключения</h3>
+              <Gauge className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">API</h3>
             </div>
+            {status?.api?.activeRequestsCount != null && (
+              <span className={`text-xs font-medium px-2 py-0.5 rounded ${status.api.activeRequestsCount > 10 ? 'bg-yellow-900/30 text-yellow-400' : 'bg-slate-700 text-slate-300'}`}>
+                {status.api.activeRequestsCount} активных
+              </span>
+            )}
           </div>
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Активные</span>
-              <span className="text-slate-200 font-semibold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">
-                {status?.activeConnections || 0}
+              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Запросов</span>
+              <span className="text-slate-200 font-mono text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
+                {status?.api?.requests ?? '-'}
               </span>
             </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Среднее время ответа</span>
+              <span className="text-slate-200 font-mono text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
+                {status?.api?.avgResponseTimeMs != null ? `${status.api.avgResponseTimeMs} мс` : '-'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs">
+              <span className="text-slate-500">4xx: {status?.api?.status4xx ?? 0}</span>
+              <span className="text-red-400/80">5xx: {status?.api?.status5xx ?? 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Process Memory (Node.js) Card */}
+        <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200">Процесс Node</h3>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {status?.processMemory ? (
+              <>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Heap</span>
+                  <span className="text-slate-200 font-mono text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
+                    {status.processMemory.heapUsedMB} / {status.processMemory.heapTotalMB} MB
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-slate-500">
+                  <span>RSS: {status.processMemory.rssMB} MB</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-slate-500 text-xs">Метрики недоступны</div>
+            )}
           </div>
         </div>
       </div>

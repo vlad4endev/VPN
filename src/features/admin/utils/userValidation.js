@@ -52,8 +52,16 @@ export function validateUser(user) {
     errors.push('ID пользователя обязателен')
   }
 
-  if (!user.email || !isValidEmail(user.email)) {
-    errors.push('Email обязателен и должен быть валидным')
+  const hasEmail = user.email && String(user.email).trim()
+  const hasLogin = user.login != null && String(user.login).trim().length > 0
+  if (hasEmail && !isValidEmail(user.email)) {
+    errors.push('Email должен быть валидным')
+  }
+  if (!hasEmail && !hasLogin) {
+    errors.push('Укажите email или логин')
+  }
+  if (hasLogin && String(user.login).trim().length < 2) {
+    errors.push('Логин должен быть не короче 2 символов')
   }
 
   // Валидация UUID (если указан)
@@ -126,7 +134,16 @@ export function normalizeUser(user) {
     ...userWithoutOldSubid,
     // Нормализуем основные поля
     id: String(user.id || ''),
-    email: String(user.email || '').trim().toLowerCase(),
+    email: (user.email && String(user.email).trim())
+      ? String(user.email).trim().toLowerCase()
+      : (user.login && String(user.login).trim() ? `${String(user.login).trim().toLowerCase()}@no-email.placeholder` : ''),
+    login: (() => {
+      if (user.login != null && String(user.login).trim()) return String(user.login).trim().toLowerCase()
+      if (!user.email || !String(user.email).trim()) return ''
+      const e = String(user.email).trim().toLowerCase()
+      if (e.endsWith('@no-email.placeholder') || e.endsWith('@telegram.placeholder')) return e.split('@')[0] || ''
+      return e
+    })(),
     uuid: user.uuid ? String(user.uuid).trim() : '',
     name: user.name ? String(user.name).trim() : '',
     phone: user.phone ? String(user.phone).trim() : '',
@@ -146,6 +163,10 @@ export function normalizeUser(user) {
     ...(user.discount != null && { discount: Math.min(1, Math.max(0, Number(user.discount))) }),
     ...(user.discountValidFrom != null && { discountValidFrom: typeof user.discountValidFrom === 'number' ? user.discountValidFrom : new Date(user.discountValidFrom).getTime() }),
     ...(user.discountValidTo != null && { discountValidTo: typeof user.discountValidTo === 'number' ? user.discountValidTo : new Date(user.discountValidTo).getTime() }),
+    telegramSessionToken: user.telegramSessionToken != null ? String(user.telegramSessionToken) : null,
+    telegramSessionTokenExpiresAt: user.telegramSessionTokenExpiresAt != null
+      ? (typeof user.telegramSessionTokenExpiresAt === 'string' ? user.telegramSessionTokenExpiresAt : new Date(user.telegramSessionTokenExpiresAt).toISOString())
+      : null,
   }
 }
 

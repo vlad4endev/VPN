@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react'
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -22,12 +22,16 @@ import { getEnvErrorMessage } from '../shared/utils/envValidation.js'
 import logger from '../shared/utils/logger.js'
 import LoggerPanel from '../shared/components/LoggerPanel.jsx'
 import LoginForm from '../features/auth/components/LoginForm.jsx'
-import Dashboard from '../features/dashboard/components/Dashboard.jsx'
-import AdminPanel from '../features/admin/components/AdminPanel.jsx'
-import FinancesDashboard from '../features/admin/components/FinancesDashboard.jsx'
-import SupportView from '../features/support/components/SupportView.jsx'
+import SetPasswordPage from '../features/auth/components/SetPasswordPage.jsx'
 import PublicReviewPage from '../features/reviews/components/PublicReviewPage.jsx'
+
+// Lazy load heavy views для уменьшения initial bundle
+const Dashboard = lazy(() => import('../features/dashboard/components/Dashboard.jsx'))
+const FinancesDashboard = lazy(() => import('../features/admin/components/FinancesDashboard.jsx'))
+const SupportView = lazy(() => import('../features/support/components/SupportView.jsx'))
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
+// AdminPanel — статический импорт, чтобы избежать «Should have a queue» (две копии React в lazy-чанке и контексте)
+import AdminPanel from '../features/admin/components/AdminPanel.jsx'
 import SidebarNav from '../shared/components/Sidebar.jsx'
 import Footer from '../shared/components/Footer.jsx'
 import WelcomePage from '../shared/components/WelcomePage.jsx'
@@ -323,6 +327,7 @@ export default function VPNServiceApp() {
         const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
         const hash = (window.location.hash || '').toLowerCase()
         if (path === '/review' || hash === '#review') return 'review'
+        if (path === '/set-password') return 'set-password'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -400,7 +405,7 @@ export default function VPNServiceApp() {
   const [loading, setLoading] = useState(true)
   const [googleSignInLoading, setGoogleSignInLoading] = useState(false)
   const [authMode, setAuthMode] = useState('login') // 'login' | 'register'
-  const [loginData, setLoginData] = useState({ email: '', password: '', name: '' })
+  const [loginData, setLoginData] = useState({ email: '', login: '', password: '', name: '' })
   const [firebaseUser, setFirebaseUser] = useState(null)
   const [configError, setConfigError] = useState(null)
   const [settingsLoading, setSettingsLoading] = useState(true)
@@ -497,6 +502,7 @@ export default function VPNServiceApp() {
       const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
+      if (path === '/set-password') setViewState('set-password')
     }
     syncViewFromUrl()
     window.addEventListener('hashchange', syncViewFromUrl)
@@ -944,9 +950,8 @@ export default function VPNServiceApp() {
         if (typeof window !== 'undefined') {
           const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
           const hash = (window.location.hash || '').toLowerCase()
-          if (path === '/review' || hash === '#review') {
-            setViewState('review')
-          }
+          if (path === '/review' || hash === '#review') setViewState('review')
+          else if (path === '/set-password') setViewState('set-password')
         }
       }
       
@@ -957,30 +962,80 @@ export default function VPNServiceApp() {
     return () => unsubscribe()
   }, [auth, db, loadUserData, generateUniqueSubId])
 
-  // Telegram Mini App: авто-вход по сессии Telegram (initData) — подтягивание данных без формы
+  const TMA_SESSION_KEY = 'tma_session_token'
+  const storeTmaSession = useCallback((token, expiresAt) => {
+    try {
+      if (typeof localStorage !== 'undefined' && token) {
+        localStorage.setItem(TMA_SESSION_KEY, token)
+        if (expiresAt) localStorage.setItem('tma_session_expires', String(expiresAt))
+      }
+    } catch (_) {}
+  }, [])
+  const clearTmaSession = useCallback(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(TMA_SESSION_KEY)
+        localStorage.removeItem('tma_session_expires')
+      }
+    } catch (_) {}
+  }, [])
+
+  // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
-    if (typeof window === 'undefined' || !window.__TELEGRAM_INIT_DATA || telegramAuthTriedRef.current) return
-    const initData = window.__TELEGRAM_INIT_DATA
-    telegramAuthTriedRef.current = true
+    if (typeof window === 'undefined') return
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
-    fetch(`${base}/api/telegram/auth`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
-      body: JSON.stringify({ initData }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && data.customToken) {
-          return signInWithCustomToken(auth, data.customToken)
-        }
-        if (!data.success) logger.warn('App', 'Telegram auth: ответ без customToken', { error: data.error })
+    const initData = window.__TELEGRAM_INIT_DATA
+    const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
+
+    const tryInitData = () => {
+      if (!initData || telegramAuthTriedRef.current) return
+      telegramAuthTriedRef.current = true
+      fetch(`${base}/api/telegram/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
+        body: JSON.stringify({ initData }),
       })
-      .then(() => { /* onAuthStateChanged обновит currentUser */ })
-      .catch((err) => {
-        logger.warn('App', 'Ошибка авторизации через Telegram', { message: err?.message }, err)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.customToken) {
+            if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
+            return signInWithCustomToken(auth, data.customToken)
+          }
+          if (!data.success) {
+            logger.warn('App', 'Telegram auth: ответ без customToken', { error: data.error, reason: data.reason })
+            setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
+          }
+        })
+        .then(() => {})
+        .catch((err) => {
+          logger.warn('App', 'Ошибка авторизации через Telegram', { message: err?.message }, err)
+        })
+    }
+
+    if (storedToken) {
+      fetch(`${base}/api/telegram/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
+        body: JSON.stringify({ sessionToken: storedToken }),
       })
-  }, [auth, firebaseUser, authChecking])
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.customToken) {
+            if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
+            return signInWithCustomToken(auth, data.customToken)
+          }
+          clearTmaSession()
+          tryInitData()
+        })
+        .catch(() => {
+          clearTmaSession()
+          tryInitData()
+        })
+    } else {
+      tryInitData()
+    }
+  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession])
 
   // Состояния для админ-панели теперь в useUIStore (adminTab, editingUser, editingServer, editingTariff)
   // settings, tariffs, servers теперь загружаются через React Query
@@ -1223,30 +1278,32 @@ export default function VPNServiceApp() {
       return
     }
 
-    // Извлекаем значения напрямую из формы
     const formData = new FormData(e.target)
-    const email = formData.get('email') || e.target.querySelector('input[type="email"]')?.value || ''
+    const loginOrEmail = (formData.get('email') || formData.get('loginOrEmail') || e.target.querySelector('input[name="email"]')?.value || '').trim()
     const password = formData.get('password') || e.target.querySelector('input[type="password"]')?.value || ''
-    
-    // Валидация email
-    const emailError = validateEmail(email)
-    if (emailError) {
-      setError(emailError)
+    if (!loginOrEmail) {
+      setError('Введите логин или email')
       return
     }
-    
-    // Валидация пароля
     const passwordError = validatePassword(password, false)
     if (passwordError) {
       setError(passwordError)
       return
     }
 
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+    let emailToUse = loginOrEmail
     try {
-      logger.info('Auth', 'Попытка входа через Firebase Auth', { email })
-      
-      // Вход через Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(auth, email, password)
+      const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(loginOrEmail)}`)
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (data.email) emailToUse = data.email
+      }
+    } catch (_) {}
+
+    try {
+      logger.info('Auth', 'Попытка входа через Firebase Auth', { loginOrEmail, emailToUse })
+      const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password)
       const firebaseUser = userCredential.user
       
       // Загружаем дополнительные данные пользователя из Firestore
@@ -1285,14 +1342,14 @@ export default function VPNServiceApp() {
       setCurrentUser(currentUserData)
       logger.info('Auth', 'Успешный вход', { email, uid: firebaseUser.uid, role: userData.role })
         setSuccess('Вход выполнен успешно')
-        setLoginData({ email: '', password: '' })
+        setLoginData(prev => ({ ...prev, email: '', password: '' }))
       setView(userData.role === 'admin' ? 'admin' : 'dashboard')
       // Устанавливаем вкладку "Подписки" после входа
       if (userData.role !== 'admin') {
         setDashboardTab('subscription')
       }
     } catch (err) {
-      logger.error('Auth', 'Ошибка входа', { email }, err)
+      logger.error('Auth', 'Ошибка входа', { loginOrEmail }, err)
       
       // Обработка ошибок Firebase Auth
       let errorMessage = 'Ошибка входа. Попробуйте еще раз.'
@@ -1327,31 +1384,51 @@ export default function VPNServiceApp() {
       return
     }
 
-    // Извлекаем значения напрямую из формы
     const formData = new FormData(e.target)
-    const email = formData.get('email') || e.target.querySelector('input[type="email"]')?.value || ''
+    const emailRaw = (formData.get('email') || e.target.querySelector('input[type="email"]')?.value || '').trim()
+    const login = (formData.get('login') || e.target.querySelector('input[name="login"]')?.value || '').trim()
     const password = formData.get('password') || e.target.querySelector('input[type="password"]')?.value || ''
-    const name = formData.get('name') || e.target.querySelector('input[name="name"]')?.value || ''
-    
-    // Валидация email
-    const emailError = validateEmail(email)
-    if (emailError) {
-      setError(emailError)
+    const name = (formData.get('name') || e.target.querySelector('input[name="name"]')?.value || '').trim()
+
+    if (emailRaw) {
+      const emailError = validateEmail(emailRaw)
+      if (emailError) {
+        setError(emailError)
+        return
+      }
+    }
+    if (!login || login.length < 2) {
+      setError('Логин обязателен (минимум 2 символа)')
       return
     }
-    
-    // Валидация имени (обязательно для регистрации)
     const nameError = validateName(name)
     if (nameError) {
       setError(nameError)
       return
     }
-    
-    // Валидация пароля (более строгая для регистрации)
     const passwordError = validatePassword(password, true)
     if (passwordError) {
       setError(passwordError)
       return
+    }
+    const email = emailRaw || `${login}@no-email.placeholder`
+
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+    try {
+      const res = await fetch(`${base}/api/auth/check-identifier?login=${encodeURIComponent(login.toLowerCase())}&email=${encodeURIComponent(email.toLowerCase())}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.loginAvailable) {
+          setError('Этот логин уже занят')
+          return
+        }
+        if (!data.emailAvailable) {
+          setError('Этот email уже зарегистрирован')
+          return
+        }
+      }
+    } catch (err) {
+      logger.warn('Auth', 'Проверка логина/email недоступна', err)
     }
 
     const refCode = referralCodePending || getReferralCodePending(false)
@@ -1388,13 +1465,14 @@ export default function VPNServiceApp() {
       // 5. Создаем документ в Firestore с дополнительными данными
       const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
       const newUserData = {
-        email: email,
+        email: email.toLowerCase(),
+        login: login.toLowerCase(),
         name: name.trim(),
         phone: '',
         role: 'user',
         plan: 'free',
-        uuid: generatedUUID, // UUID генерируется сразу при регистрации
-        subId: generatedSubId, // Уникальный subId для 3x-ui
+        uuid: generatedUUID,
+        subId: generatedSubId,
         expiresAt: null,
         tariffName: '',
         tariffId: '',
@@ -1430,7 +1508,7 @@ export default function VPNServiceApp() {
       setCurrentUser(currentUserData)
       logger.info('Auth', 'Регистрация завершена успешно', { email, uid: firebaseUser.uid })
       setSuccess('Регистрация выполнена успешно! Теперь вы можете получить ключ в личном кабинете.')
-        setLoginData({ email: '', password: '', name: '' })
+        setLoginData({ email: '', login: '', password: '', name: '' })
       setView('dashboard')
       // Устанавливаем вкладку "Подписки" после регистрации
       setDashboardTab('subscription')
@@ -1677,16 +1755,36 @@ export default function VPNServiceApp() {
     setError('')
     try {
       const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
-      const res = await fetch(`${base}/api/telegram/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
-        body: JSON.stringify({ initData }),
-      })
-      const data = await res.json().catch(() => ({}))
+      let data = {}
+      const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem('tma_session_token')) || ''
+      if (storedToken) {
+        const resSession = await fetch(`${base}/api/telegram/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
+          body: JSON.stringify({ sessionToken: storedToken }),
+        })
+        data = await resSession.json().catch(() => ({}))
+        if (!data.success && typeof localStorage !== 'undefined') {
+          localStorage.removeItem('tma_session_token')
+          localStorage.removeItem('tma_session_expires')
+        }
+      }
+      if (!data.success && initData) {
+        const resInit = await fetch(`${base}/api/telegram/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
+          body: JSON.stringify({ initData }),
+        })
+        data = await resInit.json().catch(() => ({}))
+      }
       if (data.success && data.customToken) {
+        if (data.sessionToken && typeof localStorage !== 'undefined') {
+          localStorage.setItem('tma_session_token', data.sessionToken)
+          if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
+        }
         await signInWithCustomToken(auth, data.customToken)
       } else {
-        setError(data.error || 'Не удалось войти через Telegram')
+        setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
       }
     } catch (err) {
       logger.warn('App', 'Ошибка входа через Telegram', { message: err?.message }, err)
@@ -1699,7 +1797,7 @@ export default function VPNServiceApp() {
   const handleLogout = useCallback(async () => {
     const userEmail = currentUser?.email
     logger.info('Auth', 'Выход пользователя', { email: userEmail })
-    
+    clearTmaSession()
     try {
       if (auth) {
         await signOut(auth)
@@ -1707,13 +1805,12 @@ export default function VPNServiceApp() {
     } catch (err) {
       logger.error('Auth', 'Ошибка при выходе', { email: userEmail }, err)
     }
-    
     setCurrentUser(null)
     setShowKeyModal(false)
     setView('welcome')
     setError('')
     setSuccess('')
-  }, [currentUser, auth])
+  }, [currentUser, auth, clearTmaSession])
 
   // Удаление пользователя (админ)
   const handleDeleteUser = useCallback(async (userId) => {
@@ -1807,6 +1904,10 @@ export default function VPNServiceApp() {
 
   const handleNameChange = useCallback((e) => {
     setLoginData(prev => ({ ...prev, name: e.target.value }))
+  }, [])
+
+  const handleLoginChange = useCallback((e) => {
+    setLoginData(prev => ({ ...prev, login: e.target.value }))
   }, [])
 
   const handleAuthModeLogin = useCallback(() => {
@@ -3918,6 +4019,13 @@ export default function VPNServiceApp() {
     )
   }
 
+  // Уникальная страница установки пароля по ссылке (логин + создание пароля)
+  if (view === 'set-password') {
+    return (
+      <SetPasswordPage onSetView={setView} />
+    )
+  }
+
   // Если view === login или register
   if (view === 'login' || view === 'register') {
     return (
@@ -3927,6 +4035,7 @@ export default function VPNServiceApp() {
         error={error}
         success={success}
         onEmailChange={handleEmailChange}
+        onLoginChange={handleLoginChange}
         onPasswordChange={handlePasswordChange}
         onNameChange={handleNameChange}
         onAuthModeLogin={handleAuthModeLogin}
@@ -3960,7 +4069,9 @@ export default function VPNServiceApp() {
         />
         <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
           <div className="w-full max-w-content mx-auto">
-            <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
+            <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+              <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
+            </Suspense>
           </div>
           <div className="max-sm:hidden">
             <Footer />
@@ -3977,6 +4088,7 @@ export default function VPNServiceApp() {
       return null
     }
     return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <SupportView
         currentUser={currentUser}
         onSetView={setView}
@@ -3986,6 +4098,7 @@ export default function VPNServiceApp() {
         adminTab={adminTab}
         onSetAdminTab={setAdminTab}
       />
+      </Suspense>
     )
   }
 
@@ -4015,6 +4128,7 @@ export default function VPNServiceApp() {
     }
     
     return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <AdminViewWithContext
         currentUser={currentUser}
         users={users}
@@ -4087,6 +4201,7 @@ export default function VPNServiceApp() {
           onHandleSeoChange={handleSeoChange}
         />
       </AdminViewWithContext>
+      </Suspense>
     )
   }
 
@@ -4097,6 +4212,7 @@ export default function VPNServiceApp() {
     // Если пользователь админ, но view не 'admin' - показываем личный кабинет
     // Админы тоже имеют личный кабинет со своими данными
     return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <Dashboard
         currentUser={currentUser}
         view={view}
@@ -4133,6 +4249,7 @@ export default function VPNServiceApp() {
         onGetKey={handleGetKey}
         servers={servers}
       />
+      </Suspense>
     )
   }
 
