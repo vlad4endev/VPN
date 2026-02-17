@@ -281,13 +281,8 @@ export const adminService = {
         return {
           ...data,
           servers: firestoreServers,
-          // Инициализируем appLinks если их нет
-          appLinks: data.appLinks || {
-            android: '',
-            ios: '',
-            macos: '',
-            windows: '',
-          },
+          appLinks: data.appLinks && typeof data.appLinks === 'object' ? data.appLinks : { android: '', ios: '', macos: '', windows: '' },
+          seo: data.seo && typeof data.seo === 'object' ? data.seo : {},
         }
       } else {
         // Создаем настройки по умолчанию

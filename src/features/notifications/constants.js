@@ -6,6 +6,7 @@ export const NOTIFICATION_TYPES = {
   subscription: 'subscription',
   feature: 'feature',
   interaction: 'interaction',
+  personal_discount: 'personal_discount',
 }
 
 export const NOTIFICATION_TYPE_LABELS = {
@@ -13,4 +14,5 @@ export const NOTIFICATION_TYPE_LABELS = {
   [NOTIFICATION_TYPES.subscription]: 'Подписка',
   [NOTIFICATION_TYPES.feature]: 'Новая функция',
   [NOTIFICATION_TYPES.interaction]: 'Взаимодействие',
+  [NOTIFICATION_TYPES.personal_discount]: 'Персональная скидка',
 }

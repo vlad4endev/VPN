@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2 } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
 import { validateUser, normalizeUser } from '../utils/userValidation.js'
 import { UserCardPropTypes } from './UserCard.propTypes.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
+import { notificationsService } from '../../notifications/services/notificationsService.js'
+import { NOTIFICATION_TYPES } from '../../notifications/constants.js'
 
 /**
  * Улучшенная карточка пользователя для редактирования админом
@@ -50,6 +52,14 @@ const UserCard = ({
   const [isSaving, setIsSaving] = useState(false)
   const [errors, setErrors] = useState({})
   const [saveError, setSaveError] = useState(null)
+  const [discountPercent, setDiscountPercent] = useState(10)
+  const [discountFrom, setDiscountFrom] = useState(() => new Date().toISOString().slice(0, 10))
+  const [discountTo, setDiscountTo] = useState(() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() + 1)
+    return d.toISOString().slice(0, 10)
+  })
+  const [discountNotifyStatus, setDiscountNotifyStatus] = useState(null)
 
   // Функция для определения лимита трафика на основе тарифа и статуса оплаты
   // Определяем до useEffect, чтобы она была доступна при инициализации
@@ -374,6 +384,43 @@ const UserCard = ({
       setIsSaving(false)
     }
   }, [editingUser, handleSaveUserCard])
+
+  const assignDiscountAndNotify = useCallback(async () => {
+    const percent = Math.min(100, Math.max(0, Number(discountPercent) || 0))
+    const fromMs = new Date(discountFrom).getTime()
+    const toMs = new Date(discountTo).getTime()
+    if (isNaN(fromMs) || isNaN(toMs) || toMs < fromMs) {
+      setDiscountNotifyStatus({ error: 'Укажите корректный период действия скидки' })
+      return
+    }
+    setDiscountNotifyStatus(null)
+    setIsSaving(true)
+    try {
+      const merged = {
+        ...editingUser,
+        discount: percent / 100,
+        discountValidFrom: fromMs,
+        discountValidTo: toMs,
+      }
+      const normalizedUser = normalizeUser(merged)
+      await handleSaveUserCard(normalizedUser)
+      setEditingUser(prev => ({ ...prev, ...normalizedUser }))
+      const fromStr = new Date(fromMs).toLocaleDateString()
+      const toStr = new Date(toMs).toLocaleDateString()
+      await notificationsService.createOne({
+        userId: user.id,
+        type: NOTIFICATION_TYPES.personal_discount,
+        title: 'Вам назначена персональная скидка',
+        body: `Скидка ${percent}% действует с ${fromStr} по ${toStr}. При оплате подписки скидка применится автоматически.`,
+        overview: `Скидка ${percent}% до ${toStr}`,
+      })
+      setDiscountNotifyStatus({ success: true })
+    } catch (err) {
+      setDiscountNotifyStatus({ error: err.message || 'Не удалось назначить скидку' })
+    } finally {
+      setIsSaving(false)
+    }
+  }, [editingUser, discountPercent, discountFrom, discountTo, user.id, handleSaveUserCard])
 
   // Формируем ссылку на подписку
   // Приоритет: 1) subscriptionLink из тарифа, 2) subscriptionLink из данных пользователя, 3) формируем на основе subId, 4) vpnLink
@@ -832,6 +879,69 @@ const UserCard = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Персональная скидка */}
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <Percent className="w-5 h-5" />
+              Персональная скидка
+            </h3>
+            {(editingUser.discount != null && editingUser.discountValidFrom != null && editingUser.discountValidTo != null) && (
+              <div className="mb-4 p-3 bg-slate-900 rounded border border-slate-600 text-slate-300 text-sm">
+                Текущая скидка: <strong>{Math.round((editingUser.discount ?? 0) * 100)}%</strong>
+                {' — '}
+                с {formatDate?.(editingUser.discountValidFrom) ?? new Date(editingUser.discountValidFrom).toLocaleDateString()} по {formatDate?.(editingUser.discountValidTo) ?? new Date(editingUser.discountValidTo).toLocaleDateString()}
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label htmlFor={`user-card-discount-percent-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Скидка, %</label>
+                <input
+                  id={`user-card-discount-percent-${user.id}`}
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={discountPercent}
+                  onChange={e => setDiscountPercent(Number(e.target.value) || 0)}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label htmlFor={`user-card-discount-from-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Действует с</label>
+                <input
+                  id={`user-card-discount-from-${user.id}`}
+                  type="date"
+                  value={discountFrom}
+                  onChange={e => setDiscountFrom(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label htmlFor={`user-card-discount-to-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Действует по</label>
+                <input
+                  id={`user-card-discount-to-${user.id}`}
+                  type="date"
+                  value={discountTo}
+                  onChange={e => setDiscountTo(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            {discountNotifyStatus?.error && (
+              <p className="text-red-400 text-sm mb-2">{discountNotifyStatus.error}</p>
+            )}
+            {discountNotifyStatus?.success && (
+              <p className="text-green-400 text-sm mb-2">Скидка назначена, уведомление отправлено пользователю.</p>
+            )}
+            <button
+              type="button"
+              onClick={assignDiscountAndNotify}
+              disabled={isSaving}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors"
+            >
+              {isSaving ? 'Сохранение...' : 'Назначить и уведомить'}
+            </button>
           </div>
           
           {/* Базовая информация */}

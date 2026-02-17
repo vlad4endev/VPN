@@ -1967,7 +1967,14 @@ app.post('/api/telegram/webhook', verifyTelegramWebhookSecret, express.json(), a
   if (!update) return
 
   const botToken = await getTelegramToken()
-  if (!botToken) return
+  if (!botToken) {
+    console.warn('⚠️ Telegram webhook: обновление пропущено (токен бота не настроен). Настройте токен в админке или TELEGRAM_BOT_TOKEN.')
+    return
+  }
+  if (!db) {
+    console.warn('⚠️ Telegram webhook: обновление пропущено (Firestore недоступен). Настройте Firebase в server/.env.')
+    return
+  }
 
   try {
     if (update.callback_query) {
@@ -1989,7 +1996,7 @@ app.post('/api/telegram/webhook', verifyTelegramWebhookSecret, express.json(), a
 
     if (text.startsWith('/start ')) {
       const token = text.slice(7).trim()
-      if (!token || !db) return
+      if (!token) return
       try {
         const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
         const snap = await bindRef.get()

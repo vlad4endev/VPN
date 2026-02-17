@@ -994,10 +994,16 @@ export default function VPNServiceApp() {
       
       if (settingsSnapshot.exists()) {
         const data = settingsSnapshot.data()
-        setSettings(data)
+        // Сохраняем полную структуру: appLinks и seo всегда присутствуют (для отображения и сохранения)
+        const merged = {
+          ...data,
+          appLinks: data.appLinks && typeof data.appLinks === 'object' ? data.appLinks : { android: '', ios: '', macos: '', windows: '' },
+          seo: data.seo && typeof data.seo === 'object' ? data.seo : {},
+        }
+        setSettings(merged)
         // ВАЖНО: Объединяем серверы из Firestore с текущими локальными серверами
         // Это предотвращает потерю серверов, которые были добавлены/изменены локально, но еще не сохранены
-        const firestoreServers = (data.servers || []).map(server => {
+        const firestoreServers = (merged.servers || data.servers || []).map(server => {
           // КРИТИЧНО: Очищаем кавычки при загрузке из Firestore
           // Это исправляет проблему, если в Firestore сохранены данные с кавычками
           const cleanServer = {
@@ -1083,18 +1089,16 @@ export default function VPNServiceApp() {
           return mergedServers
         })
       } else {
-        // Создаем настройки по умолчанию
+        // Создаем настройки по умолчанию (полная структура для админ-форм)
         const defaultSettings = {
-          // Адрес и порт панели / сервера, которые используются при работе с 3x-ui
           serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
           serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-          // Доступ к панели 3x-ui
           xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
           xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-          // Основной inbound для работы приложения
           xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
-          // Массив серверов 3x-ui
           servers: [],
+          appLinks: { android: '', ios: '', macos: '', windows: '' },
+          seo: {},
           updatedAt: new Date().toISOString(),
         }
         await setDoc(settingsDoc, stripUndefinedForFirestore(defaultSettings))
@@ -1107,7 +1111,6 @@ export default function VPNServiceApp() {
       
       if (isOffline) {
         logger.warn('Admin', 'Офлайн-режим: используем настройки по умолчанию', null)
-        // Используем настройки по умолчанию из переменных окружения
         const defaultSettings = {
           serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
           serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
@@ -1115,6 +1118,8 @@ export default function VPNServiceApp() {
           xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
           xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
           servers: [],
+          appLinks: { android: '', ios: '', macos: '', windows: '' },
+          seo: {},
           updatedAt: new Date().toISOString(),
         }
         setSettings(defaultSettings)
@@ -2239,9 +2244,14 @@ export default function VPNServiceApp() {
 
     const devices = currentUser.devices ?? tariff?.devices ?? 1
     const periodMonths = currentUser.periodMonths ?? 1
-    const discount = currentUser.discount ?? 0
+    const now = Date.now()
+    const from = currentUser.discountValidFrom != null ? Number(currentUser.discountValidFrom) : null
+    const to = currentUser.discountValidTo != null ? Number(currentUser.discountValidTo) : null
+    const discount = (currentUser.discount != null && from != null && to != null && now >= from && now <= to)
+      ? Number(currentUser.discount)
+      : 0
     return await handleCreateSubscription(tariff, devices, currentUser.natrockPort ?? null, periodMonths, false, 'pay_now', discount)
-  }, [currentUser?.id, currentUser?.devices, currentUser?.periodMonths, currentUser?.natrockPort, currentUser?.discount, tariffs, handleCreateSubscription])
+  }, [currentUser?.id, currentUser?.devices, currentUser?.periodMonths, currentUser?.natrockPort, currentUser?.discount, currentUser?.discountValidFrom, currentUser?.discountValidTo, tariffs, handleCreateSubscription])
 
   // Обновление данных пользователя после успешной оплаты (чтобы статус подписки обновился без перезагрузки)
   const onRefreshUserAfterPayment = useCallback(async () => {
@@ -2592,28 +2602,32 @@ export default function VPNServiceApp() {
     setSettings(prev => prev ? { ...prev, xuiInboundId: newValue } : null)
   }, [])
 
-  // Обработчики для изменения ссылок на приложения HAPP Proxy
+  // Дефолтная структура appLinks и seo, чтобы не терять данные при сохранении
+  const DEFAULT_APP_LINKS = { android: '', ios: '', macos: '', windows: '' }
+  const DEFAULT_SEO = {}
+
+  // Обработчики для изменения ссылок на приложения HAPP Proxy (при settings=null не затираем состояние)
   const handleAppLinkChange = useCallback((platform, value) => {
     setSettings(prev => {
-      if (!prev) return null
+      const base = prev || {}
       return {
-        ...prev,
+        ...base,
         appLinks: {
-          ...(prev.appLinks || { android: '', ios: '', macos: '', windows: '' }),
+          ...(base.appLinks || DEFAULT_APP_LINKS),
           [platform]: value,
         },
       }
     })
   }, [])
 
-  // Обработчики для SEO-настроек (глобальный объект settings.seo)
+  // Обработчики для SEO-настроек (при settings=null не затираем состояние)
   const handleSeoChange = useCallback((field, value) => {
     setSettings(prev => {
-      if (!prev) return null
+      const base = prev || {}
       return {
-        ...prev,
+        ...base,
         seo: {
-          ...(prev.seo || {}),
+          ...(base.seo || DEFAULT_SEO),
           [field]: value,
         },
       }
@@ -2621,39 +2635,35 @@ export default function VPNServiceApp() {
   }, [])
 
   // Сохранение настроек
-  // ВАЖНО: Только админы могут сохранять настройки. Настройки глобальные - применяются ко всем пользователям
+  // ВАЖНО: Только админы могут сохранять настройки. Настройки глобальные - применяются ко всем пользователям.
+  // Перед записью сливаем с текущим документом, чтобы не потерять поля при частичном состоянии (например только seo).
   const handleSaveSettings = useCallback(async () => {
-    // Проверка прав доступа
     if (!currentUser || currentUser.role !== 'admin') {
       setError('Недостаточно прав для сохранения настроек')
       logger.warn('Admin', 'Попытка сохранения настроек без прав администратора', { userId: currentUser?.id })
       return
     }
 
-    if (!db || !settings) return
+    if (!db) return
 
     try {
-      logger.info('Admin', 'Сохранение глобальных настроек системы', { 
-        adminId: currentUser.id,
-        message: 'Настройки будут применены ко всем пользователям'
-      })
-      // Путь к настройкам: artifacts/skyputh/public/settings (4 сегмента - четное число)
-      // ВАЖНО: Это глобальный документ, изменения применяются ко всем пользователям
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
-      await setDoc(settingsDoc, stripUndefinedForFirestore({
-        ...settings,
-        servers: servers, // Сохраняем серверы вместе с настройками
+      const currentSnap = await getDoc(settingsDoc)
+      const currentData = currentSnap.exists() ? currentSnap.data() : {}
+      // Слияние: текущий документ + локальное состояние (appLinks, seo, серверы и т.д.)
+      const payload = {
+        ...currentData,
+        ...(settings || {}),
+        servers: servers,
         updatedAt: new Date().toISOString(),
-        updatedBy: currentUser.id, // Сохраняем ID админа, который внес изменения
-      }))
-      logger.info('Admin', 'Глобальные настройки успешно сохранены', { 
-        adminId: currentUser.id,
-        message: 'Настройки применены ко всем пользователям системы'
-      })
+        updatedBy: currentUser.id,
+      }
+      await setDoc(settingsDoc, stripUndefinedForFirestore(payload))
+      setSettings(payload)
       setSuccess('Глобальные настройки сохранены и применены ко всем пользователям')
       setTimeout(() => setSuccess(''), 3000)
     } catch (err) {
-      logger.error('Admin', 'Ошибка сохранения настроек', { adminId: currentUser.id }, err)
+      logger.error('Admin', 'Ошибка сохранения настроек', { adminId: currentUser?.id }, err)
       setError('Ошибка сохранения настроек')
     }
   }, [db, settings, servers, currentUser?.id, currentUser?.role])

@@ -141,6 +141,9 @@ export function normalizeUser(user) {
     plan: user.plan ? String(user.plan) : 'free',
     role: user.role ? String(user.role) : 'user',
     subId: normalizedSubId,
+    ...(user.discount != null && { discount: Math.min(1, Math.max(0, Number(user.discount))) }),
+    ...(user.discountValidFrom != null && { discountValidFrom: typeof user.discountValidFrom === 'number' ? user.discountValidFrom : new Date(user.discountValidFrom).getTime() }),
+    ...(user.discountValidTo != null && { discountValidTo: typeof user.discountValidTo === 'number' ? user.discountValidTo : new Date(user.discountValidTo).getTime() }),
   }
 }
 

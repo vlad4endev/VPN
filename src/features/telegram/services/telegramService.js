@@ -29,7 +29,11 @@ export async function getBindLink() {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    return { success: false, error: data.error || res.statusText }
+    const msg = data.error || res.statusText
+    const hint = res.status === 503
+      ? ' Запустите бэкенд (node server/n8n-webhook-proxy.js), проверьте Firebase и токен бота в админке (Telegram).'
+      : ''
+    return { success: false, error: msg + hint }
   }
   return { success: true, link: data.link, expiresIn: data.expiresIn }
 }

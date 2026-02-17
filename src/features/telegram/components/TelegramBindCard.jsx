@@ -1,6 +1,6 @@
-import { Send, Unlink, Loader2, Copy, ExternalLink, CheckCircle } from 'lucide-react'
+import { Send, Unlink, Loader2, Copy, ExternalLink, CheckCircle, RefreshCw } from 'lucide-react'
 import { useTelegram } from '../hooks/useTelegram.js'
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import logger from '../../../shared/utils/logger.js'
 
 /**
@@ -10,6 +10,7 @@ import logger from '../../../shared/utils/logger.js'
  * @param {(text: string) => void} [onCopy] - копирование в буфер (опционально)
  */
 export default function TelegramBindCard({ currentUser, onBoundChange, onCopy }) {
+  const [refreshing, setRefreshing] = useState(false)
   const {
     isBound,
     bindLink,
@@ -19,6 +20,16 @@ export default function TelegramBindCard({ currentUser, onBoundChange, onCopy })
     unbind,
     clearLink,
   } = useTelegram(currentUser, onBoundChange)
+
+  const handleRefreshStatus = useCallback(async () => {
+    if (typeof onBoundChange !== 'function') return
+    setRefreshing(true)
+    try {
+      await onBoundChange()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [onBoundChange])
 
   const handleCopyLink = useCallback(() => {
     if (bindLink && typeof onCopy === 'function') {
@@ -65,7 +76,7 @@ export default function TelegramBindCard({ currentUser, onBoundChange, onCopy })
         </div>
       ) : bindLink ? (
         <div className="space-y-3">
-          <p className="text-slate-300 text-sm">Откройте ссылку и нажмите «Start» в боте. Ссылка действительна 15 минут.</p>
+          <p className="text-slate-300 text-sm">Откройте ссылку в Telegram и нажмите «Start» (или «Запустить»). Ссылка действительна 15 минут.</p>
           <div className="flex flex-wrap gap-2">
             <a
               href={bindLink}
@@ -86,12 +97,25 @@ export default function TelegramBindCard({ currentUser, onBoundChange, onCopy })
             </button>
             <button
               type="button"
+              onClick={handleRefreshStatus}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-50"
+              title="Обновить статус после нажатия Start в боте"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+              Обновить статус
+            </button>
+            <button
+              type="button"
               onClick={clearLink}
               className="inline-flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-slate-300 text-sm"
             >
               Отмена
             </button>
           </div>
+          <p className="text-slate-500 text-xs mt-2">
+            Нажали Start в боте, но статус не изменился? Нажмите «Обновить статус» или обновите страницу (F5). Убедитесь, что webhook настроен (Админка → Telegram → Установить webhook) и сервер доступен из интернета.
+          </p>
         </div>
       ) : (
         <button

@@ -74,6 +74,19 @@ export const sanitizeUser = (userData) => {
       sanitized.referralBonusBalance = Number.isFinite(n) ? n : 0
     }
 
+    if (userData.discount != null) {
+      const d = Number(userData.discount)
+      sanitized.discount = d >= 0 && d <= 1 ? d : 0
+    }
+    if (userData.discountValidFrom != null) {
+      const t = typeof userData.discountValidFrom === 'number' ? userData.discountValidFrom : new Date(userData.discountValidFrom).getTime()
+      sanitized.discountValidFrom = Number.isFinite(t) ? t : null
+    }
+    if (userData.discountValidTo != null) {
+      const t = typeof userData.discountValidTo === 'number' ? userData.discountValidTo : new Date(userData.discountValidTo).getTime()
+      sanitized.discountValidTo = Number.isFinite(t) ? t : null
+    }
+
     // Валидация email формата
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(sanitized.email)) {
