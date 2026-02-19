@@ -30,6 +30,33 @@ function displayName(row, users = []) {
   return row.userId || '—'
 }
 
+/** Текст подписки: нет / истекла N дн. назад */
+function subscriptionStatus(row) {
+  const exp = row.subscriptionExpiresAt
+  if (!exp) return { text: 'Нет подписки', type: 'none' }
+  const ms = new Date(exp).getTime()
+  if (Number.isNaN(ms)) return { text: '—', type: 'unknown' }
+  const now = Date.now()
+  if (ms >= now) return { text: 'Активна', type: 'active' }
+  const days = Math.floor((now - ms) / (24 * 60 * 60 * 1000))
+  return { text: `Истекла ${days} дн.`, type: 'expired' }
+}
+
+/** Цвет churn по значению: высокий риск / средний / низкий */
+function churnLevel(score) {
+  if (score == null) return 'text-slate-500'
+  if (score >= 80) return 'text-red-400 font-medium'
+  if (score >= 50) return 'text-amber-400'
+  return 'text-slate-400'
+}
+
+function formatLTV(value) {
+  if (value == null || value === 0) return '0'
+  const n = Number(value)
+  if (Number.isNaN(n)) return '—'
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n))
+}
+
 export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatDate, onCopy }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -237,7 +264,14 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
 
   const segments = data?.segments || {}
   const topByPriority = data?.topByPriority || []
-  const noSubscriptionOrExpired = data?.noSubscriptionOrExpired || []
+  const noSubscriptionOrExpiredRaw = data?.noSubscriptionOrExpired || []
+  // В таблицу — только пользователи с ролью "user" (админов и бухгалтеров не показываем)
+  const noSubscriptionOrExpired = noSubscriptionOrExpiredRaw.filter((row) => {
+    const u = users.find((usr) => usr.id === row.userId)
+    if (!u) return false
+    const r = (u.role || '').toString().toLowerCase()
+    return r === 'user' || r === ''
+  })
   const avgChurn = data?.avgChurnScore ?? 0
   const forecast = data?.churnForecast || {}
   const totalUsers = data?.totalUsers ?? 0
@@ -287,123 +321,130 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
         </div>
       )}
 
-      {/* Сводка */}
-      <section className="rounded-xl bg-slate-900 border border-slate-800 p-4 sm:p-5">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">Сводка</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="flex items-start gap-2">
-            <span className="w-9 h-9 rounded-lg bg-slate-700 flex items-center justify-center flex-shrink-0">
-              <Users className="w-4 h-4 text-slate-400" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xl font-semibold text-slate-100 tabular-nums">{totalUsers}</p>
-              <p className="text-xs text-slate-500">пользователей в воронке</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="w-9 h-9 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-              <TrendingDown className="w-4 h-4 text-amber-400" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xl font-semibold text-slate-100 tabular-nums">{avgChurn}</p>
-              <p className="text-xs text-slate-500">средний churn score</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center flex-shrink-0">
-              <Target className="w-4 h-4 text-orange-400" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xl font-semibold text-slate-100 tabular-nums">{forecast.atRiskUsers ?? 0}</p>
-              <p className="text-xs text-slate-500">в зоне риска / уходящие</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="w-9 h-9 rounded-lg bg-slate-700 flex items-center justify-center flex-shrink-0">
-              <Zap className="w-4 h-4 text-slate-400" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xl font-semibold text-slate-100 tabular-nums">{forecast.estimatedChurnRate ?? 0}%</p>
-              <p className="text-xs text-slate-500">прогноз оттока</p>
-            </div>
-          </div>
+      {/* Сводка — компактная строка */}
+      <section className="rounded-xl bg-slate-900 border border-slate-800 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <span className="flex items-center gap-2 text-slate-400">
+            <Users className="w-4 h-4 text-slate-500" />
+            <span className="tabular-nums font-medium text-slate-200">{totalUsers}</span>
+            <span>в воронке</span>
+          </span>
+          <span className="flex items-center gap-2 text-slate-400">
+            <TrendingDown className="w-4 h-4 text-amber-500/80" />
+            <span className="tabular-nums font-medium text-slate-200">{avgChurn}</span>
+            <span>ср. churn</span>
+          </span>
+          <span className="flex items-center gap-2 text-slate-400">
+            <Target className="w-4 h-4 text-orange-500/80" />
+            <span className="tabular-nums font-medium text-slate-200">{forecast.atRiskUsers ?? 0}</span>
+            <span>в зоне риска</span>
+          </span>
+          <span className="flex items-center gap-2 text-slate-400">
+            <Zap className="w-4 h-4 text-slate-500" />
+            <span className="tabular-nums font-medium text-slate-200">{forecast.estimatedChurnRate ?? 0}%</span>
+            <span>прогноз оттока</span>
+          </span>
         </div>
       </section>
 
-      {/* Пользователи без подписки / давно не продлевали */}
+      {/* Таблица: без подписки или давно не продлевали (топ 50) */}
       {noSubscriptionOrExpired.length > 0 && (
-        <section className="rounded-xl bg-slate-900 border border-orange-800/50 p-4 sm:p-5">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
-            Без подписки или давно не продлевали (топ 50) — приоритет тем, у кого были тикеты «не работало / не смогли воспользоваться»
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-slate-500 border-b border-slate-700">
-                  <th className="pb-2 pr-3 font-medium">Клиент</th>
-                  <th className="pb-2 pr-3 font-medium">Сегмент</th>
-                  <th className="pb-2 pr-3 font-medium">Churn</th>
-                  <th className="pb-2 pr-3 font-medium">Приоритет</th>
-                  <th className="pb-2 pr-3 font-medium">LTV</th>
-                  <th className="pb-2 pr-3 font-medium">Тикеты / поощрения</th>
-                  <th className="pb-2 pr-3 font-medium">Действие</th>
+        <section className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-800 bg-slate-800/30">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Без подписки или давно не продлевали · топ 50 по приоритету
+            </p>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Приоритет — у кого были тикеты «не работало / не смогли воспользоваться». Клик по строке — карточка пользователя.
+            </p>
+          </div>
+          <div className="overflow-x-auto max-h-[min(70vh,32rem)] overflow-y-auto">
+            <table className="w-full text-xs min-w-[640px]">
+              <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur border-b border-slate-700">
+                <tr className="text-slate-400">
+                  <th className="text-left py-1.5 pl-3 pr-2 font-medium w-[1%] whitespace-nowrap">#</th>
+                  <th className="text-left py-1.5 pr-2 font-medium min-w-[120px]" title="Имя или email">Клиент</th>
+                  <th className="text-left py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Статус подписки">Подписка</th>
+                  <th className="text-left py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap">Сегмент</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Риск оттока 0–100">Churn</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Приоритет для возврата">Приор.</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Пожизненная ценность">LTV</th>
+                  <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Тикеты с жалобами">Тикеты</th>
+                  <th className="text-right py-1.5 pr-3 font-medium w-[1%] whitespace-nowrap">Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {noSubscriptionOrExpired.map((row) => (
-                  <tr
-                    key={row.userId}
-                    className="border-b border-slate-800/80 hover:bg-slate-800/50 cursor-pointer transition-colors"
-                    onClick={(e) => handleRowClick(row, e)}
-                  >
-                    <td className="py-2 pr-3 text-slate-200 truncate max-w-[180px]" title={row.email || row.userId}>
-                      {displayName(row, users)}
-                    </td>
-                    <td className="py-2 pr-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded border text-xs ${SEGMENT_COLORS[row.segment] || ''}`}>
-                        {SEGMENT_LABELS[row.segment] || row.segment}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 text-slate-300 tabular-nums">{row.churnScore ?? '-'}</td>
-                    <td className="py-2 pr-3 text-slate-300 tabular-nums">{row.priorityScore ?? '-'}</td>
-                    <td className="py-2 pr-3 text-slate-300 tabular-nums">{row.lifetimeValue ?? 0}</td>
-                    <td className="py-2 pr-3">
-                      {row.hasProblemTickets ? (
-                        <span className="inline-flex flex-col gap-0.5" title={Array.isArray(row.problemTicketSubjects) && row.problemTicketSubjects.length ? row.problemTicketSubjects.join(' • ') : ''}>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs">
-                            Нужны поощрения
-                          </span>
-                          <span className="text-slate-500 text-xs">тикетов: {row.problemTicketsCount ?? 0}</span>
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-3 flex flex-wrap gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenAiStrategy(row)}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded text-xs"
-                        title="Запустить анализ ИИ"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        Анализ ИИ
-                      </button>
-                      {row.churnScore > 80 && (
-                        <button
-                          type="button"
-                          onClick={() => handleSendOffer(row.userId)}
-                          disabled={sendingOffer === row.userId}
-                          className="inline-flex items-center gap-1 px-2 py-1 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white rounded text-xs"
-                          title="Отправить оффер в Telegram"
+                {noSubscriptionOrExpired.map((row, idx) => {
+                  const sub = subscriptionStatus(row)
+                  return (
+                    <tr
+                      key={row.userId}
+                      className="border-b border-slate-800/80 hover:bg-slate-800/60 cursor-pointer transition-colors"
+                      onClick={(e) => handleRowClick(row, e)}
+                    >
+                      <td className="py-1 pl-3 pr-2 text-slate-500 tabular-nums">{idx + 1}</td>
+                      <td className="py-1 pr-2 text-slate-200 truncate max-w-[140px]" title={row.email || row.userId}>
+                        {displayName(row, users)}
+                      </td>
+                      <td className="py-1 pr-2 whitespace-nowrap">
+                        <span
+                          className={
+                            sub.type === 'none' ? 'text-slate-500' :
+                            sub.type === 'expired' ? 'text-amber-400/90' : 'text-slate-400'
+                          }
+                          title={row.subscriptionExpiresAt || ''}
                         >
-                          {sendingOffer === row.userId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                          Оффер в TG
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                          {sub.text}
+                        </span>
+                      </td>
+                      <td className="py-1 pr-2">
+                        <span className={`inline-flex px-1.5 py-0.5 rounded border text-[11px] ${SEGMENT_COLORS[row.segment] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}>
+                          {SEGMENT_LABELS[row.segment] || row.segment}
+                        </span>
+                      </td>
+                      <td className={`py-1 pr-2 text-right tabular-nums ${churnLevel(row.churnScore)}`}>
+                        {row.churnScore ?? '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right text-slate-300 tabular-nums">{row.priorityScore ?? '—'}</td>
+                      <td className="py-1 pr-2 text-right text-slate-300 tabular-nums">{formatLTV(row.lifetimeValue)}</td>
+                      <td className="py-1 pr-2 text-center">
+                        {row.hasProblemTickets ? (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px]"
+                            title={Array.isArray(row.problemTicketSubjects) && row.problemTicketSubjects.length ? row.problemTicketSubjects.join(' · ') : ''}
+                          >
+                            {row.problemTicketsCount ?? 0}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-1 pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <span className="inline-flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAiStrategy(row)}
+                            className="p-1.5 rounded bg-violet-600/80 hover:bg-violet-600 text-white"
+                            title="Анализ ИИ"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
+                          {row.churnScore > 80 && (
+                            <button
+                              type="button"
+                              onClick={() => handleSendOffer(row.userId)}
+                              disabled={sendingOffer === row.userId}
+                              className="p-1.5 rounded bg-sky-600/80 hover:bg-sky-600 disabled:opacity-50 text-white"
+                              title="Оффер в Telegram"
+                            >
+                              {sendingOffer === row.userId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -411,19 +452,19 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
       )}
 
       {/* Сегменты */}
-      <section className="rounded-xl bg-slate-900 border border-slate-800 p-4 sm:p-5">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">Сегменты</p>
-        <div className="flex flex-wrap gap-2">
+      <section className="rounded-xl bg-slate-900 border border-slate-800 px-4 py-3">
+        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mb-2">Сегменты</p>
+        <div className="flex flex-wrap gap-1.5">
           {Object.entries(segments).map(([key, count]) => (
             <span
               key={key}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium ${SEGMENT_COLORS[key] || 'bg-slate-700 text-slate-300 border-slate-600'}`}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium tabular-nums ${SEGMENT_COLORS[key] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}
             >
               {SEGMENT_LABELS[key] || key}: {count}
             </span>
           ))}
           {Object.keys(segments).length === 0 && (
-            <p className="text-slate-500 text-sm">Нет данных. Нажмите «Обновить метрики».</p>
+            <p className="text-slate-500 text-xs">Нет данных. Нажмите «Обновить метрики».</p>
           )}
         </div>
       </section>
