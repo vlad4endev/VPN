@@ -91,11 +91,18 @@ export const supportNotifyService = {
    */
   async triggerAutoReply(ticketId, getToken) {
     const base = getApiBase()
-    if (!ticketId) return { ok: false }
+    if (!ticketId) {
+      console.warn('[SupportNotify] triggerAutoReply: нет ticketId')
+      return { ok: false }
+    }
     const token = typeof getToken === 'function' ? await getToken() : null
-    if (!token) return { ok: false }
+    if (!token) {
+      console.warn('[SupportNotify] triggerAutoReply: нет токена авторизации (войдите в аккаунт)')
+      return { ok: false }
+    }
     try {
-      const res = await fetch(`${base}/api/ai/support-auto-reply`, {
+      const url = `${base}/api/ai/support-auto-reply`
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -105,13 +112,16 @@ export const supportNotifyService = {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        console.warn('[SupportNotify] support-auto-reply:', data.error || res.statusText)
-        return { ok: false }
+        console.warn('[SupportNotify] support-auto-reply:', res.status, data.error || res.statusText, data.reason || '')
+        return { ok: false, status: res.status, reason: data.reason, error: data.error }
+      }
+      if (import.meta.env?.DEV) {
+        console.log('[SupportNotify] support-auto-reply OK:', res.status, data)
       }
       return { ok: true, replied: data.replied, reason: data.reason }
     } catch (err) {
-      console.warn('[SupportNotify] support-auto-reply:', err.message)
-      return { ok: false }
+      console.warn('[SupportNotify] support-auto-reply (сеть):', err.message)
+      return { ok: false, error: err.message }
     }
   },
 }

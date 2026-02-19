@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send, AtSign, ShieldOff } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send, AtSign, ShieldOff, MessageSquare, Loader2 } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { useSubscriptionStatus } from '../../../shared/hooks/useSubscriptionStatus.js'
 import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
@@ -9,6 +9,7 @@ import { UserCardPropTypes } from './UserCard.propTypes.js'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import { notificationsService } from '../../notifications/services/notificationsService.js'
 import { NOTIFICATION_TYPES } from '../../notifications/constants.js'
+import { notifyDiscountAssigned } from '../services/notifyDiscountService.js'
 
 /**
  * Улучшенная карточка пользователя для редактирования админом
@@ -53,14 +54,67 @@ const UserCard = ({
   const [isSaving, setIsSaving] = useState(false)
   const [errors, setErrors] = useState({})
   const [saveError, setSaveError] = useState(null)
-  const [discountPercent, setDiscountPercent] = useState(10)
-  const [discountFrom, setDiscountFrom] = useState(() => new Date().toISOString().slice(0, 10))
+  const [discountPercent, setDiscountPercent] = useState(() => (user?.discount != null ? Math.round(Number(user.discount) * 100) : 10))
+  const [discountFrom, setDiscountFrom] = useState(() => {
+    if (user?.discountValidFrom != null) {
+      const ms = typeof user.discountValidFrom === 'number' ? user.discountValidFrom : new Date(user.discountValidFrom).getTime()
+      return new Date(ms).toISOString().slice(0, 10)
+    }
+    return new Date().toISOString().slice(0, 10)
+  })
   const [discountTo, setDiscountTo] = useState(() => {
+    if (user?.discountValidTo != null) {
+      const ms = typeof user.discountValidTo === 'number' ? user.discountValidTo : new Date(user.discountValidTo).getTime()
+      return new Date(ms).toISOString().slice(0, 10)
+    }
     const d = new Date()
     d.setMonth(d.getMonth() + 1)
     return d.toISOString().slice(0, 10)
   })
   const [discountNotifyStatus, setDiscountNotifyStatus] = useState(null)
+  const [sendNotificationOpen, setSendNotificationOpen] = useState(false)
+  const [sendNotificationTemplates, setSendNotificationTemplates] = useState([])
+  const [sendNotificationTemplateId, setSendNotificationTemplateId] = useState('')
+  const [sendNotificationTitle, setSendNotificationTitle] = useState('')
+  const [sendNotificationBody, setSendNotificationBody] = useState('')
+  const [sendNotificationSending, setSendNotificationSending] = useState(false)
+  const [sendNotificationError, setSendNotificationError] = useState(null)
+
+  useEffect(() => {
+    if (sendNotificationOpen) {
+      setSendNotificationError(null)
+      notificationsService.getTemplates().then(setSendNotificationTemplates).catch(() => setSendNotificationTemplates([]))
+    }
+  }, [sendNotificationOpen])
+
+  const handleSendNotification = useCallback(async () => {
+    const uid = String(user?.id || editingUser?.id || '').trim()
+    if (!uid) return
+    const useTemplate = sendNotificationTemplateId && sendNotificationTemplates.find((t) => t.id === sendNotificationTemplateId)
+    const title = useTemplate ? useTemplate.titleTemplate : sendNotificationTitle.trim()
+    const body = useTemplate ? useTemplate.bodyTemplate : sendNotificationBody.trim()
+    if (!title || !body) {
+      setSendNotificationError('Укажите заголовок и текст или выберите шаблон')
+      return
+    }
+    setSendNotificationSending(true)
+    setSendNotificationError(null)
+    try {
+      await notificationsService.sendToOne(uid, {
+        templateId: useTemplate ? useTemplate.id : undefined,
+        title: useTemplate ? undefined : title,
+        body: useTemplate ? undefined : body,
+      })
+      setSendNotificationOpen(false)
+      setSendNotificationTemplateId('')
+      setSendNotificationTitle('')
+      setSendNotificationBody('')
+    } catch (err) {
+      setSendNotificationError(err.message || 'Ошибка отправки')
+    } finally {
+      setSendNotificationSending(false)
+    }
+  }, [user?.id, editingUser?.id, sendNotificationTemplateId, sendNotificationTitle, sendNotificationBody, sendNotificationTemplates])
 
   // Функция для определения лимита трафика на основе тарифа и статуса оплаты
   // Определяем до useEffect, чтобы она была доступна при инициализации
@@ -151,8 +205,17 @@ const UserCard = ({
       })
       setErrors({})
       setSaveError(null)
+      if (user.discount != null) setDiscountPercent(Math.round(Number(user.discount) * 100))
+      if (user.discountValidFrom != null) {
+        const ms = typeof user.discountValidFrom === 'number' ? user.discountValidFrom : new Date(user.discountValidFrom).getTime()
+        setDiscountFrom(new Date(ms).toISOString().slice(0, 10))
+      }
+      if (user.discountValidTo != null) {
+        const ms = typeof user.discountValidTo === 'number' ? user.discountValidTo : new Date(user.discountValidTo).getTime()
+        setDiscountTo(new Date(ms).toISOString().slice(0, 10))
+      }
     }
-  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, tariffs, getTrafficLimit])
+  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, user?.discount, user?.discountValidFrom, user?.discountValidTo, tariffs, getTrafficLimit])
 
   // Загружаем подписку из коллекции subscriptions (по subscriptionId или по userId) для корректного статуса
   const { subscription, isLoading: subscriptionLoading } = useSubscriptionStatus(user)
@@ -355,8 +418,17 @@ const UserCard = ({
     setErrors({})
 
     try {
-      // Нормализуем данные перед сохранением (normalizeUser уже обрабатывает subId правильно)
-      const normalizedUser = normalizeUser(editingUser)
+      // Подставляем текущие значения скидки из формы в сохраняемые данные (чтобы скидка сохранялась при нажатии «Сохранить изменения»)
+      const percent = Math.min(100, Math.max(0, Number(discountPercent) || 0))
+      const fromMs = discountFrom ? new Date(discountFrom).getTime() : null
+      const toMs = discountTo ? new Date(discountTo).getTime() : null
+      const withDiscount = {
+        ...editingUser,
+        discount: percent / 100,
+        discountValidFrom: Number.isFinite(fromMs) ? fromMs : null,
+        discountValidTo: Number.isFinite(toMs) ? toMs : null,
+      }
+      const normalizedUser = normalizeUser(withDiscount)
       
       // Валидация после нормализации (чтобы все поля были в правильном формате)
       const validation = validateUser(normalizedUser)
@@ -398,7 +470,7 @@ const UserCard = ({
     } finally {
       setIsSaving(false)
     }
-  }, [editingUser, handleSaveUserCard])
+  }, [editingUser, discountPercent, discountFrom, discountTo, handleSaveUserCard])
 
   const assignDiscountAndNotify = useCallback(async () => {
     const percent = Math.min(100, Math.max(0, Number(discountPercent) || 0))
@@ -435,7 +507,21 @@ const UserCard = ({
         body: notifBody,
         overview: `Скидка ${percent}% до ${toStr}`,
       })
-      setDiscountNotifyStatus({ success: true })
+      let telegramSent = false
+      let telegramReason = null
+      try {
+        const result = await notifyDiscountAssigned({
+          userId: targetUserId,
+          percent,
+          validFrom: fromMs,
+          validTo: toMs,
+        })
+        telegramSent = result.sent
+        telegramReason = result.reason || null
+      } catch (err) {
+        telegramReason = err?.message || 'Ошибка запроса к серверу'
+      }
+      setDiscountNotifyStatus({ success: true, telegramSent, telegramReason })
     } catch (err) {
       setDiscountNotifyStatus({ error: err.message || 'Не удалось назначить скидку' })
     } finally {
@@ -490,13 +576,24 @@ const UserCard = ({
             </h2>
             <p className="text-slate-400 text-sm mt-1">{user.email}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-200"
-            aria-label="Закрыть карточку"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSendNotificationOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium transition-colors"
+              title="Отправить уведомление пользователю"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span className="max-sm:hidden">Отправить уведомление</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+              aria-label="Закрыть карточку"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Сообщение об ошибке */}
@@ -1067,7 +1164,13 @@ const UserCard = ({
               <p className="text-red-400 text-sm mb-2">{discountNotifyStatus.error}</p>
             )}
             {discountNotifyStatus?.success && (
-              <p className="text-green-400 text-sm mb-2">Скидка назначена, уведомление отправлено пользователю.</p>
+              <p className="text-green-400 text-sm mb-2">
+                Скидка назначена, уведомление отправлено пользователю.
+                {discountNotifyStatus.telegramSent && ' Сообщение в Telegram доставлено.'}
+                {!discountNotifyStatus.telegramSent && discountNotifyStatus.telegramReason && (
+                  <span className="block mt-1 text-amber-400">В Telegram не отправлено: {discountNotifyStatus.telegramReason}</span>
+                )}
+              </p>
             )}
             <button
               type="button"
@@ -1166,6 +1269,79 @@ const UserCard = ({
           </button>
         </div>
       </div>
+
+      {/* Модалка: отправить уведомление пользователю */}
+      {sendNotificationOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setSendNotificationOpen(false)}>
+          <div className="bg-slate-900 rounded-xl border border-slate-700 shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <MessageSquare className="w-5 h-5" />
+                Отправить уведомление
+              </h3>
+              <button type="button" onClick={() => setSendNotificationOpen(false)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Шаблон (опционально)</label>
+                <select
+                  value={sendNotificationTemplateId}
+                  onChange={(e) => setSendNotificationTemplateId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-200"
+                >
+                  <option value="">— Свой текст —</option>
+                  {sendNotificationTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              {!sendNotificationTemplateId && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Заголовок</label>
+                    <input
+                      type="text"
+                      value={sendNotificationTitle}
+                      onChange={(e) => setSendNotificationTitle(e.target.value)}
+                      placeholder="Заголовок"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Текст</label>
+                    <textarea
+                      value={sendNotificationBody}
+                      onChange={(e) => setSendNotificationBody(e.target.value)}
+                      rows={3}
+                      placeholder="Текст уведомления"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 resize-y"
+                    />
+                  </div>
+                </>
+              )}
+              {sendNotificationError && (
+                <p className="text-sm text-red-400">{sendNotificationError}</p>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-700 flex justify-end gap-2">
+              <button type="button" onClick={() => setSendNotificationOpen(false)} className="px-4 py-2 rounded-lg bg-slate-700 text-slate-200 hover:bg-slate-600">
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleSendNotification}
+                disabled={sendNotificationSending || (!sendNotificationTemplateId && (!sendNotificationTitle.trim() || !sendNotificationBody.trim()))}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-50"
+              >
+                {sendNotificationSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Отправить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

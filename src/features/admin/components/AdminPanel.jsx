@@ -16,13 +16,13 @@ import SupportTicketsPanel from './SupportTicketsPanel.jsx'
 import SystemMonitor from './SystemMonitor.jsx'
 import AdminDashboard from './AdminDashboard.jsx'
 import SeoSettingsPanel from './SeoSettingsPanel.jsx'
-import NotificationsBroadcastPanel from '../../notifications/components/NotificationsBroadcastPanel.jsx'
+import MailingsSection from '../../notifications/components/MailingsSection.jsx'
 import { AdminPanelPropTypes } from './AdminPanel.propTypes.js'
 import { getAdminSectionByTabId } from '../constants/navSections.js'
 import { logError } from '../utils/errorHandler.js'
 import CreateUserModal from './CreateUserModal.jsx'
 import ImportFromNocoDBModal from './ImportFromNocoDBModal.jsx'
-import TelegramPanel from './TelegramPanel.jsx'
+import TelegramSection from './TelegramSection.jsx'
 import AIPanel from './AIPanel.jsx'
 import ErrorsPanel from './ErrorsPanel.jsx'
 
@@ -1091,8 +1091,9 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'notifications' && (
-          <NotificationsBroadcastPanel
+          <MailingsSection
             users={users}
+            tariffs={tariffs}
             onSuccess={onSetSuccess}
             onError={onSetError}
           />
@@ -1103,7 +1104,7 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'telegram' && (
-          <TelegramPanel />
+          <TelegramSection />
         )}
 
         {adminTab === 'ai' && (

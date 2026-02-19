@@ -97,6 +97,7 @@ const TicketChat = ({
         {messages.map((msg) => {
           const isSupport = msg.from === 'support'
           const isMichael = isSupport && (msg.userId === 'michael' || msg.userId === 'ai')
+          const isTyping = !!msg.isTyping
           const senderName = isSupport ? (isMichael ? 'Майкл' : 'Поддержка') : (isAdmin && ticket?.userName ? ticket.userName : 'Вы')
           return (
             <div
@@ -118,10 +119,23 @@ const TicketChat = ({
                 }`}
               >
                 <p className="text-xs font-medium opacity-90 mb-0.5">{senderName}</p>
-                <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
-                <p className="text-xs opacity-70 mt-1">
-                  {formatDate(msg.createdAt)}
-                </p>
+                {isTyping ? (
+                  <p className="text-sm flex items-center gap-1">
+                    <span>{msg.text || 'Печатает'}</span>
+                    <span className="inline-flex gap-0.5 ml-1" aria-hidden>
+                      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
+                )}
+                {!isTyping && (
+                  <p className="text-xs opacity-70 mt-1">
+                    {formatDate(msg.createdAt)}
+                  </p>
+                )}
               </div>
             </div>
           )

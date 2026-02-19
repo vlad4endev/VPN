@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Send } from 'lucide-react'
 import Footer from '../../../shared/components/Footer.jsx'
+import TelegramLoginWidget from './TelegramLoginWidget.jsx'
 import PrivacyPolicyModal from '../../../shared/components/PrivacyPolicyModal.jsx'
 
 const LoginForm = ({
@@ -21,6 +22,8 @@ const LoginForm = ({
   googleSignInLoading,
   onSetView,
   onTelegramSignIn,
+  onTelegramWidgetAuth,
+  onTelegramWidgetError,
   telegramSignInLoading = false,
   isTelegramApp = false,
 }) => {
@@ -266,8 +269,8 @@ const LoginForm = ({
           </div>
         </div>
 
-        <div className="mt-6 flex gap-2 sm:gap-3">
-          {onTelegramSignIn && (
+        <div className="mt-6 flex flex-wrap gap-2 sm:gap-3 items-center justify-center">
+          {onTelegramSignIn && (!(import.meta.env?.VITE_TELEGRAM_BOT_USERNAME || '').trim() || isTelegramApp) && (
             <button
               type="button"
               onClick={onTelegramSignIn}
@@ -280,8 +283,16 @@ const LoginForm = ({
               ) : (
                 <Send size={18} className="flex-shrink-0" />
               )}
-              <span className="truncate">Telegram</span>
+              <span className="truncate">{authMode === 'login' ? 'Войти' : 'Регистрация'} через Telegram</span>
             </button>
+          )}
+          {!isTelegramApp && onTelegramWidgetAuth && (import.meta.env?.VITE_TELEGRAM_BOT_USERNAME || '').trim() && (
+            <div className="flex flex-col items-center gap-1.5 w-full min-w-[180px]">
+              <span className="text-xs text-slate-500">
+                {authMode === 'login' ? 'Войти через Telegram' : 'Зарегистрироваться через Telegram'}
+              </span>
+              <TelegramLoginWidget onAuth={onTelegramWidgetAuth} onError={onTelegramWidgetError} />
+            </div>
           )}
           <button
             type="button"

@@ -1,7 +1,7 @@
 import { FixedSizeList } from 'react-window'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import React from 'react'
-import { Edit2, Trash2, Copy, CheckCircle2, XCircle, AlertCircle, Save, X, User, Mail, Calendar } from 'lucide-react'
+import { Edit2, Trash2, Copy, CheckCircle2, XCircle, AlertCircle, Save, X, User, Mail, Calendar, Search, Filter, XCircle as ClearIcon } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { USER_ROLE_OPTIONS, getRoleLabel, getRoleBadgeClass } from '../../../shared/constants/admin.js'
 
@@ -42,11 +42,63 @@ const VirtualizedUserTable = ({
   const ROW_HEIGHT = 80
   const CARD_HEIGHT = 125 // Высота карточки на мобильных с учетом переносов текста
   
+  // Фильтры
+  const [searchText, setSearchText] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [planFilter, setPlanFilter] = useState('')
+  const [tariffFilter, setTariffFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
+
   // Определяем, мобильный ли экран
   const [isMobile, setIsMobile] = useState(false)
   const [containerHeight, setContainerHeight] = useState(600)
   const [tableWidth, setTableWidth] = useState(1200)
-  
+  const [filtersExpanded, setFiltersExpanded] = useState(true)
+
+  // Уникальные значения для селектов (тарифы из списка пользователей)
+  const tariffOptions = useMemo(() => {
+    const set = new Set()
+    users.forEach((u) => {
+      const t = (u.tariffName || u.tariffId || '').toString().trim()
+      if (t) set.add(t)
+    })
+    return Array.from(set).sort((a, b) => String(a).localeCompare(b))
+  }, [users])
+
+  // Отфильтрованный список
+  const filteredUsers = useMemo(() => {
+    let list = users
+    const search = (searchText || '').trim().toLowerCase()
+    if (search) {
+      list = list.filter((u) => {
+        const name = (u.name || '').toLowerCase()
+        const email = (u.email || '').toLowerCase()
+        const login = (u.login || '').toLowerCase()
+        const phone = (u.phone || '').toLowerCase()
+        return name.includes(search) || email.includes(search) || login.includes(search) || phone.includes(search)
+      })
+    }
+    if (roleFilter) list = list.filter((u) => (u.role || '').toLowerCase() === roleFilter.toLowerCase())
+    if (planFilter) list = list.filter((u) => (u.plan || '').toLowerCase() === planFilter.toLowerCase())
+    if (tariffFilter) {
+      list = list.filter((u) => {
+        const t = (u.tariffName || u.tariffId || '').toString().trim()
+        return t === tariffFilter
+      })
+    }
+    if (paymentFilter) list = list.filter((u) => (u.paymentStatus || '').toLowerCase() === paymentFilter.toLowerCase())
+    return list
+  }, [users, searchText, roleFilter, planFilter, tariffFilter, paymentFilter])
+
+  const hasActiveFilters = !!(searchText.trim() || roleFilter || planFilter || tariffFilter || paymentFilter)
+  const clearFilters = useCallback(() => {
+    setSearchText('')
+    setRoleFilter('')
+    setPlanFilter('')
+    setTariffFilter('')
+    setPaymentFilter('')
+  }, [])
+
   useEffect(() => {
     const updateDimensions = () => {
       const mobile = window.innerWidth < 768
@@ -60,9 +112,9 @@ const VirtualizedUserTable = ({
     return () => window.removeEventListener('resize', updateDimensions)
   }, [])
 
-  // Мемоизация данных для передачи в виртуализированный список
+  // Мемоизация данных для передачи в виртуализированный список (используем отфильтрованный список)
   const itemData = useMemo(() => ({
-    users,
+    users: filteredUsers,
     editingUser,
     onSetEditingUser,
     onHandleUpdateUser,
@@ -77,7 +129,7 @@ const VirtualizedUserTable = ({
     onUserRowClick,
     isMobile,
   }), [
-    users,
+    filteredUsers,
     editingUser,
     onSetEditingUser,
     onHandleUpdateUser,
@@ -388,7 +440,7 @@ const VirtualizedUserTable = ({
     )
   }
 
-  // Если пользователей нет, показываем пустое состояние
+  // Если пользователей нет (всего или после фильтра)
   if (users.length === 0) {
     return (
       <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-6">
@@ -402,20 +454,117 @@ const VirtualizedUserTable = ({
 
   return (
     <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 overflow-hidden">
-      {/* Заголовок - компактный */}
+      {/* Заголовок и счётчик */}
       <div className="p-3 sm:p-4 md:p-5 border-b border-slate-800">
-        <h2 className="text-base sm:text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200">Управление пользователями</h2>
-        <p className="text-slate-400 text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mt-0.5">
-          Всего пользователей: <span className="text-blue-400 font-semibold">{users.length}</span>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base sm:text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200">Управление пользователями</h2>
+            <p className="text-slate-400 text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mt-0.5">
+              {hasActiveFilters ? (
+                <>Показано: <span className="text-blue-400 font-semibold">{filteredUsers.length}</span> из <span className="text-slate-300">{users.length}</span></>
+              ) : (
+                <>Всего: <span className="text-blue-400 font-semibold">{users.length}</span></>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFiltersExpanded((v) => !v)}
+            className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-sm"
+            aria-expanded={filtersExpanded}
+          >
+            <Filter className="w-4 h-4" />
+            {filtersExpanded ? 'Скрыть фильтры' : 'Показать фильтры'}
+          </button>
+        </div>
+
+        {/* Панель фильтров */}
+        {filtersExpanded && (
+          <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <div className="relative flex-1 min-w-[140px] max-w-[220px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="Поиск по имени, email, логину..."
+                  className="w-full pl-8 pr-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  aria-label="Поиск"
+                />
+              </div>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[120px]"
+                aria-label="Роль"
+              >
+                <option value="">Все роли</option>
+                {USER_ROLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <select
+                value={planFilter}
+                onChange={(e) => setPlanFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[100px]"
+                aria-label="План"
+              >
+                <option value="">Все планы</option>
+                <option value="free">free</option>
+                <option value="super">super</option>
+                <option value="multi">multi</option>
+              </select>
+              <select
+                value={tariffFilter}
+                onChange={(e) => setTariffFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[100px]"
+                aria-label="Тариф"
+              >
+                <option value="">Все тарифы</option>
+                {tariffOptions.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <select
+                value={paymentFilter}
+                onChange={(e) => setPaymentFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[120px]"
+                aria-label="Оплата"
+              >
+                <option value="">Все</option>
+                <option value="paid">Оплачено</option>
+                <option value="test_period">Тест</option>
+                <option value="unpaid">Не оплачено</option>
+              </select>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 text-sm"
+                  title="Сбросить фильтры"
+                >
+                  <ClearIcon className="w-4 h-4" />
+                  Сбросить
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Мобильная версия - карточки */}
-      {isMobile ? (
+      {filteredUsers.length === 0 ? (
+        <div className="p-6 text-center text-slate-400">
+          <Filter className="w-10 h-10 mx-auto mb-2 text-slate-600" />
+          <p className="text-sm">Нет пользователей по выбранным фильтрам</p>
+          <button type="button" onClick={clearFilters} className="mt-2 text-blue-400 hover:underline text-sm">Сбросить фильтры</button>
+        </div>
+      ) : isMobile ? (
         <div className="overflow-y-auto" style={{ height: containerHeight }}>
           <FixedSizeList
             height={containerHeight}
-            itemCount={users.length}
+            itemCount={filteredUsers.length}
             itemSize={CARD_HEIGHT}
             width="100%"
             itemData={itemData}
@@ -440,7 +589,7 @@ const VirtualizedUserTable = ({
           <div className="overflow-x-auto">
             <FixedSizeList
               height={containerHeight}
-              itemCount={users.length}
+              itemCount={filteredUsers.length}
               itemSize={ROW_HEIGHT}
               width={tableWidth}
               itemData={itemData}

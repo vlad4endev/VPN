@@ -265,7 +265,7 @@ export const adminService = {
           },
           updatedAt: new Date().toISOString(),
         }
-        await setDoc(settingsDoc, defaultSettings)
+        await setDoc(settingsDoc, defaultSettings, { merge: true })
         return defaultSettings
       }
     } catch (err) {
@@ -318,7 +318,7 @@ export const adminService = {
         servers: servers,
         updatedAt: new Date().toISOString(),
         updatedBy: adminId,
-      }))
+      }), { merge: true })
       logger.info('Admin', 'Глобальные настройки успешно сохранены', { adminId })
     } catch (err) {
       logger.error('Admin', 'Ошибка сохранения настроек', { adminId }, err)

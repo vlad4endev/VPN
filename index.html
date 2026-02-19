@@ -102,6 +102,7 @@
             var uid = tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id;
             console.log('TMA detected (initData ok)', { reason: reason || 'direct', userId: uid || null, initDataLength: tg.initData.length });
           } catch (e) {}
+          try { window.dispatchEvent(new CustomEvent('telegram-initdata-ready')); } catch (e2) {}
           return;
         }
 
@@ -130,6 +131,7 @@
               window.__TELEGRAM_INIT_DATA = decodeURIComponent(raw);
               try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e2) {}
               try { console.log('TMA initData restored from hash', { reason: reason || 'hash', length: window.__TELEGRAM_INIT_DATA.length }); } catch (e3) {}
+              try { window.dispatchEvent(new CustomEvent('telegram-initdata-ready')); } catch (e4) {}
             }
           } catch (e) {}
         }
@@ -141,6 +143,7 @@
         }
         if (window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
           try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
+          try { window.dispatchEvent(new CustomEvent('telegram-initdata-ready')); } catch (e2) {}
         }
       }
       applyTmaInit('boot');

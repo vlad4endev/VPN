@@ -29,7 +29,8 @@ const SERVICE_FIELDS = [
   { key: 'planColumn', label: 'План', hint: 'free и т.д.', required: false },
   { key: 'subIdColumn', label: 'subID / 3x-ui ключ', hint: 'Идентификатор подписки (ключ пользователя)', required: false },
   { key: 'uuidColumn', label: 'UUID', hint: 'Идентификатор пользователя (из таблицы)', required: false },
-  { key: 'tariffNameColumn', label: 'Тариф', hint: 'Название тарифа', required: false },
+  { key: 'tariffNameColumn', label: 'Тариф', hint: 'Название тарифа (SUPER, MULTI — сверяется с name/plan в Firestore)', required: false },
+  { key: 'subscriptionStatusColumn', label: 'Статус подписки', hint: 'Пробная = тестовый (test_period), активная/оплачен = paid', required: false },
   { key: 'expiresAtColumn', label: 'Действует до', hint: 'Дата окончания (ISO или ДД.ММ.ГГГГ)', required: false },
   { key: 'orderIdColumn', label: 'order_id', hint: 'ID заказа — создаётся запись платежа', required: false },
   { key: 'amountColumn', label: 'Сумма', hint: 'Сумма платежа (число)', required: false },
@@ -46,6 +47,7 @@ const DEFAULT_MAPPING = {
   subIdColumn: '',
   uuidColumn: '',
   tariffNameColumn: '',
+  subscriptionStatusColumn: '',
   expiresAtColumn: '',
   orderIdColumn: '',
   amountColumn: '',
@@ -67,6 +69,7 @@ function loadSavedSettings() {
             baseUrl: String(data.connectForm.baseUrl ?? '').trim(),
             apiToken: String(data.connectForm.apiToken ?? '').trim(),
             tableId: String(data.connectForm.tableId ?? '').trim(),
+            tableId2: String(data.connectForm.tableId2 ?? '').trim(),
           }
         : null,
       mapping: data.mapping && typeof data.mapping === 'object' ? { ...DEFAULT_MAPPING, ...data.mapping } : null,
@@ -84,14 +87,15 @@ function loadSavedSettings() {
   }
 }
 
-function saveSettings(connectForm, mapping, writeBack, updateExistingUsers) {
+function saveSettings(connectForm, mapping, writeBack, updateExistingUsers, writeBackLoginPasswordOnUpdate) {
   try {
     if (typeof localStorage === 'undefined') return
     const payload = {
-      connectForm: connectForm ? { baseUrl: connectForm.baseUrl || '', apiToken: connectForm.apiToken || '', tableId: connectForm.tableId || '' } : undefined,
+      connectForm: connectForm ? { baseUrl: connectForm.baseUrl || '', apiToken: connectForm.apiToken || '', tableId: connectForm.tableId || '', tableId2: connectForm.tableId2 || '' } : undefined,
       mapping: mapping || undefined,
       writeBack: writeBack || undefined,
       updateExistingUsers,
+      writeBackLoginPasswordOnUpdate: !!writeBackLoginPasswordOnUpdate,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch (_) {}
@@ -101,11 +105,12 @@ const ImportFromNocoDBModal = ({ onClose }) => {
   const { fetchNocoDBPreview, importFromNocoDB, getSavedNocoDBImportConfig, saveNocoDBImportConfig } = useAdminContext()
 
   const [step, setStep] = useState('connect') // 'connect' | 'mapping' | 'result'
-  const [connectForm, setConnectForm] = useState({ baseUrl: '', apiToken: '', tableId: '' })
+  const [connectForm, setConnectForm] = useState({ baseUrl: '', apiToken: '', tableId: '', tableId2: '' })
   const [previewData, setPreviewData] = useState(null) // { list, columns }
   const [mapping, setMapping] = useState({ ...DEFAULT_MAPPING })
   const [writeBack, setWriteBack] = useState({ enabled: true, loginColumn: 'Login', passwordColumn: 'Password' })
   const [updateExistingUsers, setUpdateExistingUsers] = useState(true)
+  const [writeBackLoginPasswordOnUpdate, setWriteBackLoginPasswordOnUpdate] = useState(false)
   const [savedRestored, setSavedRestored] = useState(false)
   const [loading, setLoading] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
@@ -120,6 +125,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       if (saved.mapping) setMapping(saved.mapping)
       if (saved.writeBack) setWriteBack(saved.writeBack)
       if (saved.updateExistingUsers !== undefined) setUpdateExistingUsers(saved.updateExistingUsers)
+      if (saved.writeBackLoginPasswordOnUpdate !== undefined) setWriteBackLoginPasswordOnUpdate(!!saved.writeBackLoginPasswordOnUpdate)
     }
     setSavedRestored(true)
   }, [savedRestored])
@@ -130,7 +136,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     let cancelled = false
     getSavedNocoDBImportConfig().then(({ config }) => {
       if (cancelled || !config) return
-      if (config.baseUrl) setConnectForm((prev) => ({ ...prev, baseUrl: config.baseUrl || prev.baseUrl, apiToken: config.apiToken ?? prev.apiToken, tableId: config.tableId ?? prev.tableId }))
+      if (config.baseUrl) setConnectForm((prev) => ({ ...prev, baseUrl: config.baseUrl || prev.baseUrl, apiToken: config.apiToken ?? prev.apiToken, tableId: config.tableId ?? prev.tableId, tableId2: config.tableId2 ?? prev.tableId2 }))
       if (config.emailColumn || config.nameColumn) {
         setMapping((prev) => ({
           ...prev,
@@ -158,6 +164,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
         }))
       }
       if (config.updateExistingUsers !== undefined) setUpdateExistingUsers(!!config.updateExistingUsers)
+      if (config.writeBackLoginPasswordOnUpdate !== undefined) setWriteBackLoginPasswordOnUpdate(!!config.writeBackLoginPasswordOnUpdate)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [savedRestored, getSavedNocoDBImportConfig])
@@ -178,6 +185,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       subIdColumn: guessColumn(columns, 'subId', 'sub_id', 'SubID', '3x-ui'),
       uuidColumn: guessColumn(columns, 'uuid', 'UUID', 'Uuid'),
       tariffNameColumn: guessColumn(columns, 'Tariff', 'tariff', 'тариф', 'TariffName', 'tariffName'),
+      subscriptionStatusColumn: guessColumn(columns, 'Статус подписки', 'статус подписки', 'Status', 'status', 'Статус', 'статус', 'subscriptionStatus'),
       expiresAtColumn: guessColumn(columns, 'expiresAt', 'ExpiresAt', 'Действует до', 'действует до', 'validUntil', 'ValidUntil'),
       orderIdColumn: guessColumn(columns, 'order_id', 'orderId', 'OrderId', 'order id'),
       amountColumn: guessColumn(columns, 'amount', 'Amount', 'сумма', 'Сумма', 'price', 'Price'),
@@ -225,6 +233,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
           subIdColumn: guessColumn(cols, 'subId', 'sub_id', 'SubID'),
           uuidColumn: guessColumn(cols, 'uuid', 'UUID', 'Uuid'),
           tariffNameColumn: guessColumn(cols, 'Tariff', 'tariff', 'TariffName'),
+          subscriptionStatusColumn: guessColumn(cols, 'Статус подписки', 'Status', 'статус'),
           expiresAtColumn: guessColumn(cols, 'expiresAt', 'ExpiresAt', 'Действует до', 'validUntil'),
           orderIdColumn: guessColumn(cols, 'order_id', 'orderId'),
           amountColumn: guessColumn(cols, 'amount', 'Amount', 'сумма'),
@@ -264,9 +273,11 @@ const ImportFromNocoDBModal = ({ onClose }) => {
         baseUrl: connectForm.baseUrl.trim(),
         apiToken: connectForm.apiToken.trim(),
         tableId: connectForm.tableId.trim(),
+        tableId2: (connectForm.tableId2 || '').trim(),
         emailColumn: loginCol,
         nameColumn: nameCol,
         writeBackToNocoDB: !!writeBack.enabled,
+        writeBackLoginPasswordOnUpdate: !!writeBackLoginPasswordOnUpdate,
         updateExistingUsers: !!updateExistingUsers,
         loginColumn: (writeBack.loginColumn || 'Login').trim() || 'Login',
         passwordColumn: (writeBack.passwordColumn || 'Password').trim() || 'Password',
@@ -278,16 +289,18 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       if (mapping.subIdColumn?.trim()) params.subIdColumn = mapping.subIdColumn.trim()
       if (mapping.uuidColumn?.trim()) params.uuidColumn = mapping.uuidColumn.trim()
       if (mapping.tariffNameColumn?.trim()) params.tariffNameColumn = mapping.tariffNameColumn.trim()
+      if (mapping.subscriptionStatusColumn?.trim()) params.subscriptionStatusColumn = mapping.subscriptionStatusColumn.trim()
       if (mapping.expiresAtColumn?.trim()) params.expiresAtColumn = mapping.expiresAtColumn.trim()
       if (mapping.orderIdColumn?.trim()) params.orderIdColumn = mapping.orderIdColumn.trim()
       if (mapping.amountColumn?.trim()) params.amountColumn = mapping.amountColumn.trim()
       if (mapping.devicesColumn?.trim()) params.devicesColumn = mapping.devicesColumn.trim()
       const res = await importFromNocoDB(params)
       saveSettings(
-        { baseUrl: connectForm.baseUrl.trim(), apiToken: connectForm.apiToken.trim(), tableId: connectForm.tableId.trim() },
+        { baseUrl: connectForm.baseUrl.trim(), apiToken: connectForm.apiToken.trim(), tableId: connectForm.tableId.trim(), tableId2: (connectForm.tableId2 || '').trim() },
         { ...mapping },
         { ...writeBack },
         updateExistingUsers,
+        writeBackLoginPasswordOnUpdate,
       )
       setResult(res)
       setStep('result')
@@ -296,7 +309,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     } finally {
       setLoading(false)
     }
-  }, [connectForm, mapping, writeBack, updateExistingUsers, importFromNocoDB])
+  }, [connectForm, mapping, writeBack, updateExistingUsers, writeBackLoginPasswordOnUpdate, importFromNocoDB])
 
   const buildImportParams = useCallback(() => {
     const loginCol = (mapping.emailColumn || '').trim()
@@ -305,9 +318,11 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       baseUrl: connectForm.baseUrl.trim(),
       apiToken: connectForm.apiToken.trim(),
       tableId: connectForm.tableId.trim(),
+      tableId2: (connectForm.tableId2 || '').trim(),
       emailColumn: loginCol,
       nameColumn: nameCol,
       writeBackToNocoDB: !!writeBack.enabled,
+      writeBackLoginPasswordOnUpdate: !!writeBackLoginPasswordOnUpdate,
       updateExistingUsers: !!updateExistingUsers,
       loginColumn: (writeBack.loginColumn || 'Login').trim() || 'Login',
       passwordColumn: (writeBack.passwordColumn || 'Password').trim() || 'Password',
@@ -319,12 +334,13 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     if (mapping.subIdColumn?.trim()) params.subIdColumn = mapping.subIdColumn.trim()
     if (mapping.uuidColumn?.trim()) params.uuidColumn = mapping.uuidColumn.trim()
     if (mapping.tariffNameColumn?.trim()) params.tariffNameColumn = mapping.tariffNameColumn.trim()
+    if (mapping.subscriptionStatusColumn?.trim()) params.subscriptionStatusColumn = mapping.subscriptionStatusColumn.trim()
     if (mapping.expiresAtColumn?.trim()) params.expiresAtColumn = mapping.expiresAtColumn.trim()
     if (mapping.orderIdColumn?.trim()) params.orderIdColumn = mapping.orderIdColumn.trim()
     if (mapping.amountColumn?.trim()) params.amountColumn = mapping.amountColumn.trim()
     if (mapping.devicesColumn?.trim()) params.devicesColumn = mapping.devicesColumn.trim()
     return params
-  }, [connectForm, mapping, writeBack, updateExistingUsers])
+  }, [connectForm, mapping, writeBack, updateExistingUsers, writeBackLoginPasswordOnUpdate])
 
   const handleSaveConfigForAuto = useCallback(async () => {
     const loginCol = (mapping.emailColumn || '').trim()
@@ -417,7 +433,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
               </div>
               <div>
                 <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
-                  <Table className="w-4 h-4" /> ID таблицы
+                  <Table className="w-4 h-4" /> ID таблицы 1
                 </label>
                 <input
                   type="text"
@@ -427,8 +443,21 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                   placeholder="mxxxxxxxx (из URL таблицы)"
                 />
               </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
+                  <Table className="w-4 h-4" /> ID таблицы 2 (необязательно)
+                </label>
+                <input
+                  type="text"
+                  value={connectForm.tableId2 || ''}
+                  onChange={(e) => setConnectForm((p) => ({ ...p, tableId2: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="mxxxxxxxx — вторая таблица с той же структурой"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">При импорте данные загрузятся из обеих таблиц (предпросмотр — только из первой).</p>
+              </div>
               <p className="text-[11px] text-slate-500">
-                URL, токен, ID таблицы и маппинг сохраняются в браузере и подставляются при следующем открытии.
+                URL, токен, ID таблиц и маппинг сохраняются в браузере и подставляются при следующем открытии.
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
@@ -522,6 +551,17 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                   />
                   Записывать логин и пароль обратно в NocoDB
                 </label>
+                <p className="text-[11px] text-slate-500">Колонки «логин» и «пароль» ниже должны совпадать с названиями в таблице NocoDB. В таблице должен быть Id записи (системное поле — включите отображение системных полей в настройках таблицы, если запись не срабатывает).</p>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={writeBackLoginPasswordOnUpdate}
+                    onChange={(e) => setWriteBackLoginPasswordOnUpdate(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-blue-500"
+                  />
+                  При повторной загрузке записывать логин и пароль в таблицу (для обновлённых по Telegram ID)
+                </label>
+                <p className="text-[11px] text-slate-500">Включите, если при первом импорте логин/пароль не попали в таблицу — при следующем импорте с включённой галкой они будут записаны для обновлённых записей.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Колонка для логина</label>
@@ -637,11 +677,40 @@ const ImportFromNocoDBModal = ({ onClose }) => {
         {step === 'result' && result != null && (
           <div className="px-4 sm:px-6 py-4">
             <div className="px-3 py-3 bg-slate-800/50 border border-slate-700 rounded text-sm text-slate-200 space-y-2">
+              <p className="text-slate-400 text-xs mb-1">Тариф подтягивается из колонки «Тариф» (SUPER, MULTI и т.д.) и сопоставляется с тарифами в системе.</p>
               <p><span className="text-green-400 font-medium">Создано:</span> {result.created}</p>
-              {result.updated != null && result.updated > 0 && (
-                <p><span className="text-blue-400 font-medium">Обновлено:</span> {result.updated}</p>
+              {details?.created?.length > 0 && (
+                <div className="ml-3 text-xs text-slate-300 max-h-32 overflow-y-auto">
+                  {details.created.slice(0, 20).map((item, i) => (
+                    <div key={i}>Строка {item.rowIndex ?? i + 1}: {item.login}{item.tariffName ? ` — тариф «${item.tariffName}»` : ''}</div>
+                  ))}
+                  {details.created.length > 20 && <div>… и ещё {details.created.length - 20}</div>}
+                </div>
               )}
-              <p><span className="text-amber-400 font-medium">Пропущено:</span> {result.skipped}{result.emptyRows != null && result.emptyRows > 0 && <span className="text-slate-500 ml-1">(пустых: {result.emptyRows})</span>}</p>
+              {result.updated != null && result.updated > 0 && (
+                <>
+                  <p><span className="text-blue-400 font-medium">Обновлено:</span> {result.updated}</p>
+                  {details?.updated?.length > 0 && (
+                    <div className="ml-3 text-xs text-slate-300 max-h-32 overflow-y-auto">
+                      {details.updated.slice(0, 20).map((item, i) => (
+                        <div key={i}>Строка {item.rowIndex ?? i + 1}: {item.login}{item.tariffName ? ` — тариф «${item.tariffName}»` : ''}</div>
+                      ))}
+                      {details.updated.length > 20 && <div>… и ещё {details.updated.length - 20}</div>}
+                    </div>
+                  )}
+                </>
+              )}
+              <p><span className="text-amber-400 font-medium">Пропущено:</span> {result.skipped}{result.emptyRows != null && result.emptyRows > 0 && <span className="text-slate-500 ml-1">(пустых строк: {result.emptyRows})</span>}</p>
+              {details?.skipped?.length > 0 && (
+                <div className="ml-3 text-xs text-amber-200/90 max-h-40 overflow-y-auto border-l-2 border-amber-500/50 pl-2">
+                  {details.skipped.map((item, i) => (
+                    <div key={i} className="mb-1">
+                      <span className="font-medium">Строка {item.rowIndex}:</span> {item.reason}
+                      {item.row?.login && <span className="text-slate-500 ml-1">(логин: {item.row.login})</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               <p><span className="text-red-400 font-medium">Ошибок:</span> {result.errors}</p>
               {result.writeBackOk != null && <p><span className="text-blue-400 font-medium">Записано в NocoDB:</span> {result.writeBackOk}</p>}
               {result.writeBackErrors?.length > 0 && (

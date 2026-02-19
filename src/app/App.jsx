@@ -134,6 +134,52 @@ const ConfigErrorScreen = ({ configError }) => (
 
 // Компонент LoginForm вынесен в отдельный файл src/components/LoginForm.jsx
 
+/** Бот по умолчанию для ссылки «Открыть в Telegram», если VITE_TELEGRAM_BOT_USERNAME не задан */
+const DEFAULT_TELEGRAM_BOT_USERNAME = 'skypathvpn_bot'
+
+/** Модальное окно «Открыть приложение в Telegram» — показывается при нажатии «Войти через Telegram» без initData */
+const TelegramOpenModal = ({ open, url, onClose }) => {
+  if (!open) return null
+  const hasLink = !!url
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-md w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start gap-3 mb-4">
+          <h3 className="text-lg font-bold text-white">Вход через Telegram</h3>
+          <button type="button" onClick={onClose} className="p-1.5 hover:bg-slate-800 rounded-full transition-colors text-slate-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <p className="text-slate-300 text-sm mb-5">
+          {hasLink
+            ? 'Чтобы войти через Telegram, нажмите кнопку ниже — откроется приложение в Telegram. После открытия вы будете авторизованы автоматически.'
+            : 'Откройте приложение в Telegram по кнопке ниже или найдите бота в Telegram и запустите приложение из меню бота.'}
+        </p>
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full py-3 px-4 rounded-xl bg-[#0088cc] hover:bg-[#0077b5] text-white font-medium text-center transition-colors"
+          >
+            Открыть в Telegram
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 w-full py-2.5 text-slate-400 hover:text-white text-sm font-medium transition-colors"
+        >
+          Закрыть
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Компонент модального окна с ключом (вынесен наружу для предотвращения пересоздания)
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
   const [subscriptionLink, setSubscriptionLink] = useState(null)
@@ -356,6 +402,7 @@ export default function VPNServiceApp() {
   const [authChecking, setAuthChecking] = useState(true) // Флаг проверки авторизации
   const [showKeyModal, setShowKeyModal] = useState(false)
   const [showLogger, setShowLogger] = useState(false)
+  const [telegramOpenModal, setTelegramOpenModal] = useState({ open: false, url: null })
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [adminTab, setAdminTab] = useState('dashboard')
@@ -980,62 +1027,103 @@ export default function VPNServiceApp() {
     } catch (_) {}
   }, [])
 
-  // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData
+  // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData (initData может появиться с задержкой)
+  const TMA_LOG = 'TelegramAuth'
+  const [tmaAuthRetryTick, setTmaAuthRetryTick] = useState(0)
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
     if (typeof window === 'undefined') return
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
-    const initData = window.__TELEGRAM_INIT_DATA
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
+    const hasInitData = !!(typeof window !== 'undefined' && window.__TELEGRAM_INIT_DATA && String(window.__TELEGRAM_INIT_DATA).trim())
+    logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
 
     const tryInitData = () => {
-      if (!initData || telegramAuthTriedRef.current) return
+      const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : ''
+      if (!initData || typeof initData !== 'string' || !initData.trim() || telegramAuthTriedRef.current) {
+        if (!initData || !String(initData).trim()) logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
+        return
+      }
       telegramAuthTriedRef.current = true
+      logger.info(TMA_LOG, 'Авто-вход TMA: запрос по initData', { initDataLength: initData.length })
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
         body: JSON.stringify({ initData }),
       })
-        .then((r) => r.json())
+        .then((r) => {
+          logger.info(TMA_LOG, 'Авто-вход TMA: ответ по initData', { status: r.status, ok: r.ok })
+          return r.json()
+        })
         .then((data) => {
           if (data.success && data.customToken) {
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken })
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
           if (!data.success) {
-            logger.warn('App', 'Telegram auth: ответ без customToken', { error: data.error, reason: data.reason })
+            logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка от сервера', { error: data.error, reason: data.reason })
             setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
           }
         })
         .then(() => {})
         .catch((err) => {
-          logger.warn('App', 'Ошибка авторизации через Telegram', { message: err?.message }, err)
+          logger.error(TMA_LOG, 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
+          setError(err?.message || 'Ошибка входа через Telegram')
         })
     }
 
     if (storedToken) {
+      logger.info(TMA_LOG, 'Авто-вход TMA: запрос по сессии', {})
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
         body: JSON.stringify({ sessionToken: storedToken }),
       })
-        .then((r) => r.json())
+        .then((r) => {
+          logger.info(TMA_LOG, 'Авто-вход TMA: ответ по сессии', { status: r.status, ok: r.ok })
+          return r.json()
+        })
         .then((data) => {
           if (data.success && data.customToken) {
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', {})
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
+          logger.warn(TMA_LOG, 'Авто-вход TMA: сессия не принята, пробуем initData', { reason: data.reason })
           clearTmaSession()
           tryInitData()
         })
-        .catch(() => {
+        .catch((err) => {
+          logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка запроса по сессии', { message: err?.message })
           clearTmaSession()
           tryInitData()
         })
     } else {
       tryInitData()
+      if (!hasInitData) {
+        logger.info(TMA_LOG, 'Авто-вход TMA: initData ещё нет, запланированы повторы 400ms, 1.2s, 3s', {})
+        const t1 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 400)
+        const t2 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 1200)
+        const t3 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 3000)
+        return () => {
+          clearTimeout(t1)
+          clearTimeout(t2)
+          clearTimeout(t3)
+        }
+      }
     }
-  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession])
+  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession, tmaAuthRetryTick])
+
+  useEffect(() => {
+    if (!auth || firebaseUser || authChecking) return
+    const onReady = () => {
+      logger.info(TMA_LOG, 'Событие telegram-initdata-ready: повтор попытки входа', {})
+      setTmaAuthRetryTick((n) => n + 1)
+    }
+    window.addEventListener('telegram-initdata-ready', onReady)
+    return () => window.removeEventListener('telegram-initdata-ready', onReady)
+  }, [auth, firebaseUser, authChecking])
 
   // Состояния для админ-панели теперь в useUIStore (adminTab, editingUser, editingServer, editingTariff)
   // settings, tariffs, servers теперь загружаются через React Query
@@ -1741,14 +1829,15 @@ export default function VPNServiceApp() {
   const handleTelegramSignIn = useCallback(async () => {
     if (!auth) return
     const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : null
+    logger.info('TelegramAuth', 'Кнопка «Войти через Telegram»: нажатие', { hasInitData: !!initData })
     if (!initData) {
-      const botUsername = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
+      const fromEnv = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
         ? String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME).trim().replace(/^@/, '')
         : ''
-      const telegramHint = botUsername
-        ? `Откройте в Telegram: https://t.me/${botUsername}/app`
-        : 'Откройте бота в Telegram и запустите приложение (кнопка меню или ссылка из бота).'
-      setError(telegramHint)
+      const botUsername = fromEnv || DEFAULT_TELEGRAM_BOT_USERNAME
+      const url = botUsername ? `https://t.me/${botUsername}/app` : null
+      logger.warn('TelegramAuth', 'Вход через Telegram: нет initData', { url })
+      setTelegramOpenModal({ open: true, url })
       return
     }
     setTelegramSignInLoading(true)
@@ -1758,41 +1847,100 @@ export default function VPNServiceApp() {
       let data = {}
       const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem('tma_session_token')) || ''
       if (storedToken) {
+        logger.info('TelegramAuth', 'Вход по кнопке: запрос по сессии', {})
         const resSession = await fetch(`${base}/api/telegram/auth`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
           body: JSON.stringify({ sessionToken: storedToken }),
         })
         data = await resSession.json().catch(() => ({}))
+        logger.info('TelegramAuth', 'Вход по кнопке: ответ по сессии', { success: data.success, status: resSession.status })
         if (!data.success && typeof localStorage !== 'undefined') {
           localStorage.removeItem('tma_session_token')
           localStorage.removeItem('tma_session_expires')
         }
       }
       if (!data.success && initData) {
+        logger.info('TelegramAuth', 'Вход по кнопке: запрос по initData', {})
         const resInit = await fetch(`${base}/api/telegram/auth`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
           body: JSON.stringify({ initData }),
         })
         data = await resInit.json().catch(() => ({}))
+        logger.info('TelegramAuth', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
       }
       if (data.success && data.customToken) {
+        logger.info('TelegramAuth', 'Вход по кнопке: успех', { hasSessionToken: !!data.sessionToken })
         if (data.sessionToken && typeof localStorage !== 'undefined') {
           localStorage.setItem('tma_session_token', data.sessionToken)
           if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
         }
         await signInWithCustomToken(auth, data.customToken)
       } else {
+        logger.warn('TelegramAuth', 'Вход по кнопке: ошибка', { error: data.error, reason: data.reason })
         setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
       }
     } catch (err) {
-      logger.warn('App', 'Ошибка входа через Telegram', { message: err?.message }, err)
+      logger.error('TelegramAuth', 'Вход по кнопке: исключение', { message: err?.message }, err)
       setError(err?.message || 'Ошибка входа через Telegram')
     } finally {
       setTelegramSignInLoading(false)
     }
   }, [auth])
+
+  const handleTelegramWidgetAuth = useCallback(
+    async (user) => {
+      if (!auth || !user) return
+      setTelegramSignInLoading(true)
+      setError('')
+      const base = (import.meta.env?.VITE_API_BASE_URL || '').toString()
+      try {
+        logger.info('TelegramAuth', 'Login Widget: отправка данных на сервер', { userId: user.id })
+        const res = await fetch(`${base}/api/telegram/auth-widget`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(user),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (data.success && data.customToken) {
+          logger.info('TelegramAuth', 'Login Widget: успех', {})
+          if (data.sessionToken && typeof localStorage !== 'undefined') {
+            localStorage.setItem('tma_session_token', data.sessionToken)
+            if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
+          }
+          await signInWithCustomToken(auth, data.customToken)
+        } else {
+          logger.warn('TelegramAuth', 'Login Widget: ошибка', { error: data.error })
+          setError(data.error || 'Не удалось войти через Telegram')
+        }
+      } catch (err) {
+        logger.error('TelegramAuth', 'Login Widget: исключение', { message: err?.message }, err)
+        setError(err?.message || 'Ошибка входа через Telegram')
+      } finally {
+        setTelegramSignInLoading(false)
+      }
+    },
+    [auth]
+  )
+
+  // Telegram Login Widget: если Telegram вернул пользователя по редиректу (в URL query), завершаем вход
+  useEffect(() => {
+    if (!auth || firebaseUser || authChecking || typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('id')
+    const hash = params.get('hash')
+    if (!id || !hash) return
+    const auth_date = params.get('auth_date')
+    const first_name = params.get('first_name') || ''
+    const last_name = params.get('last_name') || ''
+    const username = params.get('username') || ''
+    const photo_url = params.get('photo_url') || ''
+    const widgetUser = { id, hash, auth_date, first_name, last_name, username, photo_url }
+    logger.info(TMA_LOG, 'Возврат из Telegram по URL (виджет редирект), завершаем вход', { userId: id })
+    window.history.replaceState(null, '', window.location.pathname + (window.location.hash || ''))
+    handleTelegramWidgetAuth(widgetUser)
+  }, [auth, firebaseUser, authChecking, handleTelegramWidgetAuth])
 
   const handleLogout = useCallback(async () => {
     const userEmail = currentUser?.email
@@ -2824,7 +2972,7 @@ export default function VPNServiceApp() {
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id,
       }
-      await setDoc(settingsDoc, stripUndefinedForFirestore(payload))
+      await setDoc(settingsDoc, stripUndefinedForFirestore(payload), { merge: true })
       setSettings(payload)
       setSuccess('Глобальные настройки сохранены и применены ко всем пользователям')
       setTimeout(() => setSuccess(''), 3000)
@@ -3992,13 +4140,22 @@ export default function VPNServiceApp() {
       )
     }
     return (
-      <WelcomePage
-        onSetView={setView}
-        reviews={welcomeReviews}
-        onTelegramSignIn={handleTelegramSignIn}
-        telegramSignInLoading={telegramSignInLoading}
-        isTelegramApp={isTelegramApp}
-      />
+      <>
+        <WelcomePage
+          onSetView={setView}
+          reviews={welcomeReviews}
+          onTelegramSignIn={undefined}
+          onTelegramWidgetAuth={undefined}
+          onTelegramWidgetError={undefined}
+          telegramSignInLoading={telegramSignInLoading}
+          isTelegramApp={isTelegramApp}
+        />
+        <TelegramOpenModal
+          open={telegramOpenModal.open}
+          url={telegramOpenModal.url}
+          onClose={() => setTelegramOpenModal({ open: false, url: null })}
+        />
+      </>
     )
   }
 
@@ -4029,27 +4186,36 @@ export default function VPNServiceApp() {
   // Если view === login или register
   if (view === 'login' || view === 'register') {
     return (
-      <LoginForm
-        authMode={authMode}
-        loginData={loginData}
-        error={error}
-        success={success}
-        onEmailChange={handleEmailChange}
-        onLoginChange={handleLoginChange}
-        onPasswordChange={handlePasswordChange}
-        onNameChange={handleNameChange}
-        onAuthModeLogin={handleAuthModeLogin}
-        onAuthModeRegister={handleAuthModeRegister}
-        onLogin={handleLogin}
-        onRegister={handleRegister}
-        onGoogleSignIn={handleGoogleSignIn}
-        onGoogleSignInRedirect={handleGoogleSignInRedirect}
-        googleSignInLoading={googleSignInLoading}
-        onSetView={setView}
-        onTelegramSignIn={handleTelegramSignIn}
-        telegramSignInLoading={telegramSignInLoading}
-        isTelegramApp={isTelegramApp}
-      />
+      <>
+        <LoginForm
+          authMode={authMode}
+          loginData={loginData}
+          error={error}
+          success={success}
+          onEmailChange={handleEmailChange}
+          onLoginChange={handleLoginChange}
+          onPasswordChange={handlePasswordChange}
+          onNameChange={handleNameChange}
+          onAuthModeLogin={handleAuthModeLogin}
+          onAuthModeRegister={handleAuthModeRegister}
+          onLogin={handleLogin}
+          onRegister={handleRegister}
+          onGoogleSignIn={handleGoogleSignIn}
+          onGoogleSignInRedirect={handleGoogleSignInRedirect}
+          googleSignInLoading={googleSignInLoading}
+          onSetView={setView}
+          onTelegramSignIn={undefined}
+          onTelegramWidgetAuth={undefined}
+          onTelegramWidgetError={undefined}
+          telegramSignInLoading={telegramSignInLoading}
+          isTelegramApp={isTelegramApp}
+        />
+        <TelegramOpenModal
+          open={telegramOpenModal.open}
+          url={telegramOpenModal.url}
+          onClose={() => setTelegramOpenModal({ open: false, url: null })}
+        />
+      </>
     )
   }
 

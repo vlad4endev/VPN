@@ -160,3 +160,46 @@ export async function sendTestMessage(chatId) {
   }
   return { success: true, message: json.message }
 }
+
+const DEFAULT_SCENARIO = {
+  welcomeMessage: '',
+  menuMessage: '',
+  menuButtons: [],
+  callbackResponses: {},
+}
+
+/**
+ * Получить сценарий бота (тексты и кнопки). Только для админа.
+ * @returns {Promise<{ scenario: { welcomeMessage: string, menuMessage: string, menuButtons: Array, callbackResponses: Object } }>}
+ */
+export async function getTelegramScenario() {
+  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/scenario`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok || !json.success) {
+    if (res.status === 403) throw new Error(json.hint || json.error || 'Доступ запрещён.')
+    throw new Error(json.error || res.statusText || 'Ошибка загрузки сценария')
+  }
+  return { scenario: json.scenario || DEFAULT_SCENARIO }
+}
+
+/**
+ * Сохранить сценарий бота в Firestore. Только для админа.
+ * @param {{ welcomeMessage?: string, menuMessage?: string, menuButtons?: Array, callbackResponses?: Object }} scenario
+ * @returns {Promise<{ success: boolean }>}
+ */
+export async function saveTelegramScenario(scenario) {
+  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/scenario`, {
+    method: 'PATCH',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ scenario: scenario || DEFAULT_SCENARIO }),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok || !json.success) {
+    if (res.status === 403) throw new Error(json.hint || json.error || 'Доступ запрещён.')
+    throw new Error(json.error || res.statusText || 'Ошибка сохранения сценария')
+  }
+  return { success: true }
+}

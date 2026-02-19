@@ -21,7 +21,11 @@ import { readFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
 import crypto, { randomUUID } from 'crypto'
-import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery } from './lib/telegram.js'
+import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery, editMessageText } from './lib/telegram.js'
+import { buildMainKeyboard } from './lib/telegram.keyboard.js'
+import { createTelegramRouter } from './routes/telegram.routes.js'
+import { createBotBuilderRouter } from './bot-builder/botbuilder.routes.js'
+import { findScenario as findScenarioBotBuilder, loadScenariosIntoCache } from './bot-builder/botbuilder.service.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { chat as deepseekChat } from './lib/deepseek.js'
@@ -300,10 +304,13 @@ app.use(async (req, res, next) => {
     if (result.ok) {
       req.telegramUser = result.data
       if (result.data.user && result.data.user.id) {
-        console.log('Telegram user:', result.data.user.id)
+        logTelegramAuth('middleware_user', { tgUserId: result.data.user.id, path: req.path })
       }
+    } else {
+      logTelegramAuth('middleware_initData_fail', { reason: result.reason, path: req.path })
     }
   } catch (e) {
+    logTelegramAuth('error', { step: 'middleware', message: e.message })
     console.warn('Telegram initData middleware:', e.message)
   }
   next()
@@ -312,116 +319,58 @@ app.use(async (req, res, next) => {
 /** Срок действия сессии TMA (мс). По умолчанию 90 дней. */
 const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
+/** Лог действий входа и операций через Telegram (в консоль; по префиксу [TMA] удобно фильтровать). */
+function logTelegramAuth(event, data = {}) {
+  const payload = { ts: new Date().toISOString(), event, ...data }
+  const line = `[TMA] ${JSON.stringify(payload)}`
+  if (event === 'error' || event === 'initData_fail' || event === 'session_fail') {
+    console.warn(line)
+  } else {
+    console.log(line)
+  }
+}
+
 /**
  * Авторизация через Telegram Mini App.
  * POST /api/telegram/auth
  * 1) По сессии: Header X-Telegram-Session-Token или body.sessionToken — сразу определяет пользователя без initData.
  * 2) По initData: Header X-Telegram-InitData или body.initData — валидация, поиск/создание по tgId, выдача customToken и sessionToken.
  * В ответе: { success, customToken [, sessionToken, sessionTokenExpiresAt ] }.
+ * Обработчик в server/routes/telegram.routes.js (POST /auth).
  */
-app.post('/api/telegram/auth', express.json(), async (req, res) => {
-  if (!admin || !db) {
-    try { await initFirebaseAdmin() } catch (_) {}
-    if (!admin || !db) {
-      return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-    }
-  }
-  const appId = process.env.APP_ID || 'skyputh'
-  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
 
-  const sessionToken = (req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken) || '').toString().trim()
-  if (sessionToken) {
-    try {
-      const bySession = await usersRef.where('telegramSessionToken', '==', sessionToken).limit(1).get()
-      if (!bySession.empty) {
-        const doc = bySession.docs[0]
-        const data = doc.data()
-        const expiresAt = data.telegramSessionTokenExpiresAt
-        const expiresMs = typeof expiresAt === 'string' ? new Date(expiresAt).getTime() : (typeof expiresAt === 'number' ? expiresAt : 0)
-        if (expiresMs > Date.now()) {
-          const uid = doc.id
-          const customToken = await admin.auth().createCustomToken(uid)
-          return res.json({ success: true, customToken })
-        }
-      }
-    } catch (err) {
-      console.warn('Telegram auth by session token:', err.message)
-    }
+/**
+ * Telegram Login Widget: валидация hash (https://core.telegram.org/widgets/login#checking-authorization).
+ * Возвращает { ok: true, tgId } или { ok: false, reason, message }.
+ */
+async function validateTelegramWidgetData(widgetUser, botToken) {
+  if (!widgetUser || typeof widgetUser !== 'object' || !botToken) {
+    return { ok: false, reason: 'no_token', message: 'Токен бота не задан' }
   }
+  const hash = widgetUser.hash
+  if (!hash) return { ok: false, reason: 'no_hash', message: 'В данных виджета нет подписи' }
+  const keys = Object.keys(widgetUser).filter(k => k !== 'hash').sort()
+  const dataCheckString = keys.map(k => `${k}=${widgetUser[k]}`).join('\n')
+  const secretKey = crypto.createHash('sha256').update(botToken).digest()
+  const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex')
+  if (computedHash !== hash) {
+    return { ok: false, reason: 'invalid_hash', message: 'Неверная подпись данных виджета' }
+  }
+  const authDate = parseInt(widgetUser.auth_date, 10)
+  if (authDate && (Date.now() / 1000 - authDate > TELEGRAM_INIT_DATA_MAX_AGE_MS / 1000)) {
+    return { ok: false, reason: 'expired', message: 'Сессия виджета истекла. Авторизуйтесь заново.' }
+  }
+  const tgId = String(widgetUser.id || '')
+  if (!tgId) return { ok: false, reason: 'no_user', message: 'Нет id пользователя' }
+  return { ok: true, tgId, user: widgetUser }
+}
 
-  const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
-  const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
-  const result = await validateTelegramInitDataWithReasonAsync(initData)
-  if (!result.ok) {
-    const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-    return res.status(400).json({ success: false, error: message, reason: result.reason || 'unknown' })
-  }
-  const validated = result.data
-  const tgId = String(validated.user.id)
-  const nowIso = new Date().toISOString()
-  const sessionTokenNew = crypto.randomBytes(32).toString('hex')
-  const sessionExpiresAt = new Date(Date.now() + TELEGRAM_SESSION_TTL_MS).toISOString()
-
-  try {
-    const byTgId = await usersRef.where('tgId', '==', tgId).limit(1).get()
-    let uid
-    let userRef
-    if (!byTgId.empty) {
-      const doc = byTgId.docs[0]
-      uid = doc.id
-      userRef = doc.ref
-      await userRef.update({
-        telegramSessionToken: sessionTokenNew,
-        telegramSessionTokenExpiresAt: sessionExpiresAt,
-        updatedAt: nowIso,
-      })
-      const customToken = await admin.auth().createCustomToken(uid)
-      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
-    }
-    uid = `tg_${tgId}`
-    userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
-    const existing = await userRef.get()
-    if (existing.exists) {
-      await userRef.update({
-        telegramSessionToken: sessionTokenNew,
-        telegramSessionTokenExpiresAt: sessionExpiresAt,
-        updatedAt: nowIso,
-      })
-      const customToken = await admin.auth().createCustomToken(uid)
-      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
-    }
-    const firstName = validated.user.first_name || ''
-    const lastName = validated.user.last_name || ''
-    const name = [firstName, lastName].filter(Boolean).join(' ') || validated.user.username || `Telegram ${tgId}`
-    const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
-    let subId = ''
-    for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
-    await userRef.set({
-      email: `tg_${tgId}@telegram.placeholder`,
-      login: `tg_${tgId}`,
-      name,
-      phone: '',
-      role: 'user',
-      plan: 'free',
-      uuid: randomUUID(),
-      subId,
-      tgId,
-      telegramSessionToken: sessionTokenNew,
-      telegramSessionTokenExpiresAt: sessionExpiresAt,
-      expiresAt: null,
-      tariffName: '',
-      tariffId: '',
-      photoURL: validated.user.photo_url || null,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    })
-    const customToken = await admin.auth().createCustomToken(uid)
-    return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
-  } catch (err) {
-    console.error('❌ POST /api/telegram/auth:', err.message)
-    return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
-  }
-})
+/**
+ * Авторизация через Telegram Login Widget (для входа с обычного сайта, не Mini App).
+ * POST /api/telegram/auth-widget
+ * Body: { id, first_name, last_name, username, photo_url, auth_date, hash } — данные из onauth callback виджета.
+ * Обработчик в server/routes/telegram.routes.js (POST /auth-widget).
+ */
 
 /**
  * Вход по логину или email: по строке q вернуть email пользователя для signInWithEmailAndPassword.
@@ -645,6 +594,32 @@ async function createNotification(params) {
     console.error('❌ n8n-webhook-proxy: Ошибка создания уведомления', { userId, type, error: err.message })
     return false
   }
+}
+
+const NOTIFICATION_TEMPLATES_PATH = `artifacts/${process.env.APP_ID || 'skyputh'}/public/data/notification_templates`
+
+/** Подстановка переменных в шаблон. Переменные: {{user.name}}, {{user.email}}, {{user.login}}, {{user.phone}}, {{user.tariffName}}, {{user.plan}}, {{user.expiresAt}}, {{user.subId}}, {{paymentLink}}. */
+function substituteTemplate(template, user, extra = {}) {
+  if (typeof template !== 'string') return ''
+  const u = user && typeof user === 'object' ? user : {}
+  const expiresAt = u.expiresAt != null ? (typeof u.expiresAt === 'number' ? new Date(u.expiresAt) : new Date(u.expiresAt)) : null
+  const paymentLink = extra.paymentLink != null ? String(extra.paymentLink) : ''
+  const vars = {
+    'user.name': (u.name || u.login || u.email || '').toString().trim(),
+    'user.email': (u.email || '').toString().trim(),
+    'user.login': (u.login || u.email || '').toString().trim(),
+    'user.phone': (u.phone || '').toString().trim(),
+    'user.tariffName': (u.tariffName || '').toString().trim(),
+    'user.plan': (u.plan || '').toString().trim(),
+    'user.expiresAt': expiresAt ? expiresAt.toLocaleDateString('ru-RU') : '',
+    'user.subId': (u.subId || '').toString().trim(),
+    paymentLink,
+  }
+  let out = template
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replace(new RegExp(`\\{\\{\\s*${key.replace(/\./g, '\\.')}\\s*\\}\\}`, 'g'), value)
+  }
+  return out
 }
 
 const APP_ID = process.env.APP_ID || 'skyputh'
@@ -917,47 +892,181 @@ app.post('/api/referral/process', async (req, res) => {
   }
 })
 
+/** Получить список uid по фильтру: all | plan | tariff. */
+async function resolveRecipientIds(dbInst, appId, filter, plan, tariffId) {
+  const usersRef = dbInst.collection(`artifacts/${appId}/public/data/users_v4`)
+  let q = usersRef
+  if (filter === 'plan' && plan) {
+    q = q.where('plan', '==', String(plan).trim())
+  } else if (filter === 'tariff' && tariffId) {
+    q = q.where('tariffId', '==', String(tariffId).trim())
+  }
+  const snap = await q.get()
+  return snap.docs.map((d) => d.id).filter(Boolean)
+}
+
+app.get('/api/admin/notifications/templates', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  try {
+    const snap = await db.collection(NOTIFICATION_TEMPLATES_PATH).orderBy('createdAt', 'desc').get()
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    res.json({ success: true, templates: list })
+  } catch (err) {
+    console.error('GET /api/admin/notifications/templates:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.post('/api/admin/notifications/templates', express.json(), async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const { name, type, titleTemplate, bodyTemplate, overviewTemplate, buttons } = req.body || {}
+  if (!name || !type || !titleTemplate || !bodyTemplate) {
+    return res.status(400).json({ success: false, error: 'Обязательны: name, type, titleTemplate, bodyTemplate' })
+  }
+  try {
+    const now = new Date().toISOString()
+    const doc = await db.collection(NOTIFICATION_TEMPLATES_PATH).add({
+      name: String(name).trim(),
+      type: String(type).trim(),
+      titleTemplate: String(titleTemplate).trim(),
+      bodyTemplate: String(bodyTemplate).trim(),
+      overviewTemplate: overviewTemplate != null ? String(overviewTemplate).trim() || null : null,
+      buttons: Array.isArray(buttons) ? buttons.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : [],
+      createdAt: now,
+      updatedAt: now,
+    })
+    res.status(201).json({ success: true, id: doc.id })
+  } catch (err) {
+    console.error('POST /api/admin/notifications/templates:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.patch('/api/admin/notifications/templates/:id', express.json(), async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const { id } = req.params
+  const { name, type, titleTemplate, bodyTemplate, overviewTemplate, buttons } = req.body || {}
+  try {
+    const ref = db.doc(`${NOTIFICATION_TEMPLATES_PATH}/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) return res.status(404).json({ success: false, error: 'Шаблон не найден' })
+    const updates = { updatedAt: new Date().toISOString() }
+    if (name !== undefined) updates.name = String(name).trim()
+    if (type !== undefined) updates.type = String(type).trim()
+    if (titleTemplate !== undefined) updates.titleTemplate = String(titleTemplate).trim()
+    if (bodyTemplate !== undefined) updates.bodyTemplate = String(bodyTemplate).trim()
+    if (overviewTemplate !== undefined) updates.overviewTemplate = overviewTemplate != null ? String(overviewTemplate).trim() || null : null
+    if (buttons !== undefined) updates.buttons = Array.isArray(buttons) ? buttons.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : []
+    await ref.update(updates)
+    res.json({ success: true })
+  } catch (err) {
+    console.error('PATCH /api/admin/notifications/templates/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.delete('/api/admin/notifications/templates/:id', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const { id } = req.params
+  try {
+    const ref = db.doc(`${NOTIFICATION_TEMPLATES_PATH}/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) return res.status(404).json({ success: false, error: 'Шаблон не найден' })
+    await ref.delete()
+    res.json({ success: true })
+  } catch (err) {
+    console.error('DELETE /api/admin/notifications/templates/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 /**
- * Рассылка уведомлений через бэкенд (обходит Firestore rules).
+ * Рассылка уведомлений (шаблоны, фильтры, кнопки).
  * POST /api/admin/notifications/broadcast
- * Body: { userIds: string[], type: string, title: string, body: string, overview?: string }
- * Header: Authorization: Bearer <Firebase ID token>
+ * Body: userIds? | recipientFilter (userIds|all|plan|tariff), plan?, tariffId?, templateId?, type?, title?, body?, overview?, buttons?
  */
 app.post('/api/admin/notifications/broadcast', async (req, res) => {
   const authResult = await ensureAdmin(req, res)
   if (!authResult.ok) return
-  if (!db) {
-    return res.status(503).json({ success: false, error: 'Firestore недоступен' })
-  }
-  const { userIds, type, title, body, overview } = req.body || {}
-  if (!Array.isArray(userIds) || userIds.length === 0 || !type || !title || !body) {
-    return res.status(400).json({
-      success: false,
-      error: 'Обязательны: userIds (массив), type, title, body'
-    })
-  }
-  const payload = {
-    type: String(type),
-    title: String(title).trim(),
-    body: String(body).trim(),
-    overview: overview != null ? String(overview).trim() || null : null
-  }
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
   const baseUrl = (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'])
     ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
     : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
-  const linkUrl = baseUrl ? `${baseUrl}/#dashboard` : '/#dashboard'
+  const paymentLink = baseUrl ? `${baseUrl}/#dashboard` : '/#dashboard'
+  const appId = process.env.APP_ID || 'skyputh'
+  const body = req.body || {}
+  let userIds = Array.isArray(body.userIds) ? body.userIds.filter(Boolean) : []
+  const recipientFilter = (body.recipientFilter || (userIds.length > 0 ? 'userIds' : 'all')).toString()
+  const plan = (body.plan || '').toString().trim()
+  const tariffId = (body.tariffId || '').toString().trim()
+  const templateId = (body.templateId || '').toString().trim()
+  const type = (body.type || 'admin_broadcast').toString().trim()
+  let title = (body.title || '').toString().trim()
+  let bodyText = (body.body || '').toString().trim()
+  let overview = body.overview != null ? String(body.overview).trim() || null : null
+  let buttons = Array.isArray(body.buttons) ? body.buttons.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : []
+
+  if (recipientFilter !== 'userIds') {
+    userIds = await resolveRecipientIds(db, appId, recipientFilter, plan, tariffId)
+  }
+  if (userIds.length === 0) {
+    return res.status(400).json({ success: false, error: 'Нет получателей. Укажите userIds, либо фильтр all/plan/tariff с plan или tariffId.' })
+  }
+
+  let template = null
+  if (templateId) {
+    const tSnap = await db.doc(`${NOTIFICATION_TEMPLATES_PATH}/${templateId}`).get()
+    if (!tSnap.exists) return res.status(404).json({ success: false, error: 'Шаблон не найден' })
+    template = { id: tSnap.id, ...tSnap.data() }
+    if (!title) title = template.titleTemplate || ''
+    if (!bodyText) bodyText = template.bodyTemplate || ''
+    if (overview == null && template.overviewTemplate != null) overview = template.overviewTemplate
+    if (buttons.length === 0 && Array.isArray(template.buttons) && template.buttons.length > 0) buttons = template.buttons
+  }
+
+  if (!title || !bodyText) {
+    return res.status(400).json({ success: false, error: 'Обязательны title и body (или выберите шаблон)' })
+  }
+
+  const linkUrl = paymentLink
   let sent = 0
   let failed = 0
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
   for (const uid of userIds) {
-    if (!uid) continue
+    const uidStr = String(uid)
+    let userData = { id: uidStr }
+    if (template || buttons.some((b) => (b.url || '').includes('{{'))) {
+      try {
+        const uSnap = await usersRef.doc(uidStr).get()
+        if (uSnap.exists) userData = { id: uSnap.id, ...uSnap.data() }
+      } catch (_) {}
+    }
+    const extra = { paymentLink }
+    const finalTitle = substituteTemplate(title, userData, extra)
+    const finalBody = substituteTemplate(bodyText, userData, extra)
+    const finalOverview = overview != null ? substituteTemplate(overview, userData, extra) : null
+    const finalButtons = buttons.map((b) => ({ label: substituteTemplate(b.label, userData, extra), url: substituteTemplate(b.url, userData, extra) }))
+    const data = finalButtons.length > 0 ? { buttons: finalButtons } : null
     const ok = await createNotification({
-      userId: String(uid),
-      ...payload
+      userId: uidStr,
+      type,
+      title: finalTitle,
+      body: finalBody,
+      overview: finalOverview,
+      data,
     })
     if (ok) {
       sent += 1
-      const pushPayload = { title: payload.title, body: payload.body.slice(0, 200), url: linkUrl, type: 'notification', notificationType: payload.type }
-      await sendWebPushToUser(String(uid), pushPayload)
+      const pushPayload = { title: finalTitle, body: finalBody.slice(0, 200), url: linkUrl, type: 'notification', notificationType: type }
+      await sendWebPushToUser(uidStr, pushPayload)
     } else {
       failed += 1
     }
@@ -965,11 +1074,62 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
   if (failed > 0) {
     notifyAdminError({
       source: 'broadcast',
-      message: `Рассылка уведомлений: отправлено ${sent}, ошибок ${failed}`,
+      message: `Рассылка: отправлено ${sent}, ошибок ${failed}`,
       severity: failed === userIds.length ? 'high' : 'medium',
     }).catch(() => {})
   }
-  res.json({ success: true, sent, failed })
+  res.json({ success: true, sent, failed, total: userIds.length })
+})
+
+/**
+ * Отправить одно уведомление пользователю (из карточки пользователя).
+ * POST /api/admin/notifications/send-one
+ */
+app.post('/api/admin/notifications/send-one', express.json(), async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const baseUrl = (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'])
+    ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+    : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
+  const paymentLink = baseUrl ? `${baseUrl}/#dashboard` : '/#dashboard'
+  const appId = process.env.APP_ID || 'skyputh'
+  const { userId, templateId, type: typeReq, title: titleReq, body: bodyReq, overview: overviewReq, buttons: buttonsReq } = req.body || {}
+  const uid = (userId || '').toString().trim()
+  if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
+  const type = (typeReq || 'admin_broadcast').toString().trim()
+  let title = (titleReq || '').toString().trim()
+  let bodyText = (bodyReq || '').toString().trim()
+  let overview = overviewReq != null ? String(overviewReq).trim() || null : null
+  let buttons = Array.isArray(buttonsReq) ? buttonsReq.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : []
+  let userData = { id: uid }
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+  try {
+    const uSnap = await usersRef.doc(uid).get()
+    if (uSnap.exists) userData = { id: uSnap.id, ...uSnap.data() }
+  } catch (_) {}
+  const extra = { paymentLink }
+  if (templateId) {
+    const tSnap = await db.doc(`${NOTIFICATION_TEMPLATES_PATH}/${templateId}`).get()
+    if (!tSnap.exists) return res.status(404).json({ success: false, error: 'Шаблон не найден' })
+    const t = tSnap.data()
+    title = substituteTemplate(t.titleTemplate || '', userData, extra)
+    bodyText = substituteTemplate(t.bodyTemplate || '', userData, extra)
+    overview = t.overviewTemplate != null ? substituteTemplate(t.overviewTemplate, userData, extra) : null
+    if (buttons.length === 0 && Array.isArray(t.buttons)) buttons = t.buttons.map((b) => ({ label: substituteTemplate(b.label || '', userData, extra), url: substituteTemplate(b.url || '', userData, extra) }))
+  } else {
+    if (!title || !bodyText) return res.status(400).json({ success: false, error: 'Укажите title и body или templateId' })
+    title = substituteTemplate(title, userData, extra)
+    bodyText = substituteTemplate(bodyText, userData, extra)
+    if (overview != null) overview = substituteTemplate(overview, userData, extra)
+    buttons = buttons.map((b) => ({ label: substituteTemplate(b.label, userData, extra), url: substituteTemplate(b.url, userData, extra) }))
+  }
+  const data = buttons.length > 0 ? { buttons } : null
+  const ok = await createNotification({ userId: uid, type, title, body: bodyText, overview, data })
+  if (!ok) return res.status(500).json({ success: false, error: 'Не удалось создать уведомление' })
+  const linkUrl = paymentLink
+  await sendWebPushToUser(uid, { title, body: bodyText.slice(0, 200), url: linkUrl, type: 'notification', notificationType: type })
+  res.json({ success: true, sent: 1 })
 })
 
 /**
@@ -2116,18 +2276,26 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
   const authResult = await verifyIdToken(req, res)
   if (!authResult?.ok) return
   const ticketId = (req.body?.ticketId ?? '').toString().trim()
-  if (!ticketId) return res.status(400).json({ success: false, error: 'Укажите ticketId' })
-  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  if (!ticketId) {
+    console.warn('support-auto-reply: нет ticketId в body')
+    return res.status(400).json({ success: false, error: 'Укажите ticketId' })
+  }
+  if (!db) {
+    console.warn('support-auto-reply: Firestore недоступен')
+    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
 
   const apiKey = await getDeepSeekApiKey()
   if (!apiKey) {
-    return res.status(503).json({ success: true, replied: false, reason: 'ai_unavailable' })
+    console.warn('support-auto-reply: DeepSeek API ключ не задан (DEEPSEEK_API_KEY или настройки ИИ в админке)')
+    return res.status(503).json({ success: false, replied: false, reason: 'ai_unavailable', error: 'ИИ недоступен: задайте API-ключ DeepSeek' })
   }
 
   try {
     const ticketRef = db.doc(`artifacts/${APP_ID}/public/data/tickets/${ticketId}`)
     const ticketSnap = await ticketRef.get()
     if (!ticketSnap.exists) {
+      console.warn('support-auto-reply: тикет не найден', { ticketId, appId: APP_ID })
       return res.status(404).json({ success: false, error: 'Тикет не найден' })
     }
     const ticketData = ticketSnap.data()
@@ -2140,6 +2308,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
       if (!adminOk?.ok) return
     }
 
+    console.log('support-auto-reply: старт', { ticketId, userId })
     await ensureMichaelOperator()
 
     // Сообщение «Майкл взял в работу» и пауза 2 секунды перед ответом агента
@@ -2155,6 +2324,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
 
     // Ответ клиенту сразу — анализ и ответ ИИ идут в фоне, сообщение придёт по подписке Firestore
     res.status(202).json({ success: true, status: 'processing' })
+    console.log('support-auto-reply: 202 отправлен, фон запущен', { ticketId })
 
     const baseUrlForNotify = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
       ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
@@ -2165,6 +2335,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
         const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
         const hasUserData = userSnap.exists && userSnap.data() && (userSnap.data().name || userSnap.data().email || userSnap.data().login)
         if (!hasUserData) {
+          console.log('support-auto-reply (фон): нет данных пользователя, уведомление админу', { ticketId, userId })
           const botToken = await getTelegramToken()
           const adminChatId = await getTelegramAdminChatId()
           if (botToken && adminChatId) {
@@ -2174,7 +2345,18 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
           return
         }
 
+        const typingNow = new Date().toISOString()
+        const typingRef = await ticketRef.collection('messages').add({
+          from: 'support',
+          userId: AI_SUPPORT_USER_ID,
+          text: 'Майкл печатает...',
+          isTyping: true,
+          createdAt: typingNow,
+        })
+        await ticketRef.update({ updatedAt: typingNow })
+
         const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
+        console.log('support-auto-reply (фон): запрос к DeepSeek', { ticketId })
         const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
 
         let userDataSafe = {}
@@ -2218,6 +2400,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
 
         if (!result.ok) {
           console.error('🤖 Майкл: ошибка DeepSeek', { ticketId, code: result.code, error: result.error })
+          await typingRef.update({ text: 'Не удалось сформировать ответ. Специалист ответит позже.', isTyping: false })
           return
         }
 
@@ -2245,22 +2428,19 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
             const escText = `⚠️ <b>Нужна живая консультация</b>\n🆔 Тикет <code>${escapeHtml(ticketId)}</code>\n📌 ${escapeHtml((ticketData.subject || '').slice(0, 100))}\n\nПричина: ${escapeHtml(escalateReason.slice(0, 200))}`
             await sendTelegramMessage(botToken, adminChatId, escText).catch((e) => console.warn('Telegram notify live support:', e.message))
           }
+          await typingRef.update({ text: 'Обращение передано специалисту. Ожидайте ответа.', isTyping: false })
           return
         }
 
         const replyText = reply || (result.content || '').trim()
         if (!replyText) {
           console.warn('🤖 Майкл: пустой ответ модели', { ticketId })
+          await typingRef.update({ text: 'Не удалось сформировать ответ. Специалист ответит позже.', isTyping: false })
           return
         }
 
         const nowIso = new Date().toISOString()
-        await ticketRef.collection('messages').add({
-          from: 'support',
-          userId: AI_SUPPORT_USER_ID,
-          text: replyText,
-          createdAt: nowIso,
-        })
+        await typingRef.update({ text: replyText, isTyping: false })
         await ticketRef.update({ status: 'answered', updatedAt: nowIso })
 
         await notifyUserAboutSupportReply(userId, ticketId, ticketData.subject || '', replyText, baseUrlForNotify)
@@ -2294,6 +2474,7 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
   const rawTgId = payload.tgId != null ? String(payload.tgId).trim() : ''
   const rawTariffId = payload.tariffId != null ? String(payload.tariffId).trim() : ''
   const rawTariffName = payload.tariffName != null ? String(payload.tariffName).trim() : ''
+  const rawPaymentStatus = payload.paymentStatus != null ? String(payload.paymentStatus).trim() : null
   const rawExpiresAt = payload.expiresAt
   const rawSubId = payload.subId != null ? String(payload.subId).trim() : ''
   const rawUuid = payload.uuid != null ? String(payload.uuid).trim() : ''
@@ -2367,6 +2548,7 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
       updatedAt: nowIso,
     }
     if (rawTgId) userData.tgId = rawTgId
+    if (rawPaymentStatus && ['test_period', 'paid', 'unpaid'].includes(rawPaymentStatus)) userData.paymentStatus = rawPaymentStatus
     const userDocRef = dbInst.doc(`artifacts/${appId}/public/data/users_v4/${createdUid}`)
     await userDocRef.set(userData)
     return { user: { id: createdUid, ...userData } }
@@ -2466,10 +2648,28 @@ async function updateUserFromNocoDBRow(dbInst, appId, uid, data) {
   if (data.plan !== undefined) updates.plan = data.plan != null ? String(data.plan).trim() : 'free'
   if (data.subId !== undefined && String(data.subId).trim() !== '') updates.subId = String(data.subId).trim()
   if (data.tariffName !== undefined) updates.tariffName = data.tariffName != null ? String(data.tariffName).trim() : ''
+  if (data.tariffId !== undefined) updates.tariffId = data.tariffId != null ? String(data.tariffId).trim() : ''
+  if (data.paymentStatus !== undefined) updates.paymentStatus = data.paymentStatus != null ? String(data.paymentStatus).trim() : null
   if (data.uuid !== undefined && String(data.uuid).trim() !== '') updates.uuid = String(data.uuid).trim()
   if (data.expiresAt !== undefined) updates.expiresAt = data.expiresAt
   if (data.devices !== undefined && Number.isFinite(data.devices)) updates.devices = Math.min(99, Math.max(1, data.devices))
   await userRef.update(updates)
+}
+
+/**
+ * Нормализует значение «Статус подписки» из таблицы в paymentStatus.
+ * пробная, тест, тестовый, trial → test_period; активн, оплачен, paid → paid; не оплачен, unpaid → unpaid.
+ * @returns {string|null} 'test_period' | 'paid' | 'unpaid' | null
+ */
+function normalizeSubscriptionStatus(value) {
+  if (value === undefined || value === null) return null
+  const s = String(value).trim().toLowerCase()
+  if (!s) return null
+  if (/пробн|^тест|тестовый|^trial$|триал/.test(s)) return 'test_period'
+  if (/активн|оплачен|^paid$/.test(s)) return 'paid'
+  if (/не\s*оплачен|^unpaid$/.test(s)) return 'unpaid'
+  if (s === 'test_period' || s === 'paid' || s === 'unpaid') return s
+  return null
 }
 
 /** Парсит дату «действует до» из строки (ISO, DD.MM.YYYY, timestamp) в миллисекунды или null. */
@@ -2488,6 +2688,31 @@ function parseExpiresAt(value) {
     const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10)
     const ms = Date.UTC(year, parseInt(m, 10) - 1, parseInt(d, 10))
     return Number.isFinite(ms) ? ms : null
+  }
+  return null
+}
+
+/**
+ * По названию тарифа из NocoDB (SUPER, MULTI и т.д.) находит документ тарифа в Firestore
+ * и возвращает { tariffId, tariffName }. Сравнение по полям name и plan без учёта регистра.
+ * @returns {{ tariffId: string, tariffName: string } | null}
+ */
+async function resolveTariffByName(dbInst, appId, tariffName) {
+  if (!tariffName || typeof tariffName !== 'string') return null
+  const search = tariffName.trim().toLowerCase()
+  if (!search) return null
+  const tariffsRef = dbInst.collection(`artifacts/${appId}/public/data/tariffs`)
+  const snapshot = await tariffsRef.get()
+  for (const doc of snapshot.docs) {
+    const d = doc.data() || {}
+    const name = (d.name || '').toString().trim().toLowerCase()
+    const plan = (d.plan || '').toString().trim().toLowerCase()
+    if (name === search || plan === search) {
+      return {
+        tariffId: doc.id,
+        tariffName: (d.name || doc.id).toString().trim() || doc.id,
+      }
+    }
   }
   return null
 }
@@ -2583,6 +2808,7 @@ app.post('/api/admin/import-from-nocodb/save-config', express.json(), async (req
     baseUrl: (body.baseUrl || '').toString().trim().replace(/\/+$/, ''),
     apiToken: (body.apiToken || '').toString().trim(),
     tableId: (body.tableId || '').toString().trim(),
+    tableId2: (body.tableId2 || '').toString().trim(),
     emailColumn: (body.emailColumn || body.email_column || '').toString().trim(),
     nameColumn: (body.nameColumn || body.name_column || '').toString().trim(),
     phoneColumn: (body.phoneColumn || body.phone_column || '').toString().trim(),
@@ -2595,8 +2821,10 @@ app.post('/api/admin/import-from-nocodb/save-config', express.json(), async (req
     orderIdColumn: (body.orderIdColumn || body.orderId_column || '').toString().trim(),
     amountColumn: (body.amountColumn || body.amount_column || '').toString().trim(),
     devicesColumn: (body.devicesColumn || body.devices_column || '').toString().trim(),
+    subscriptionStatusColumn: (body.subscriptionStatusColumn || body.subscriptionStatus_column || body.statusColumn || body.status_column || '').toString().trim(),
     uuidColumn: (body.uuidColumn || body.uuid_column || '').toString().trim(),
     writeBackToNocoDB: body.writeBackToNocoDB !== false,
+    writeBackLoginPasswordOnUpdate: body.writeBackLoginPasswordOnUpdate === true,
     updateExistingUsers: body.updateExistingUsers === true || body.updateExisting === true,
     loginColumn: (body.loginColumn || body.login_column || 'Login').toString().trim() || 'Login',
     passwordColumn: (body.passwordColumn || body.password_column || 'Password').toString().trim() || 'Password',
@@ -2683,6 +2911,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
   const baseUrl = (body.baseUrl || process.env.NOCODB_BASE_URL || '').toString().trim().replace(/\/+$/, '')
   const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
   const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
+  const tableId2 = (body.tableId2 || '').toString().trim()
   const defaultPassword = (body.defaultPassword || process.env.IMPORT_DEFAULT_PASSWORD || '').toString()
   // Маппинг колонок: точные названия полей из NocoDB (задаются в окне сопоставления)
   const mapEmail = (body.emailColumn || body.email_column || '').toString().trim()
@@ -2698,8 +2927,10 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
   const mapAmount = (body.amountColumn || body.amount_column || '').toString().trim()
   const mapDevices = (body.devicesColumn || body.devices_column || '').toString().trim()
   const mapUuid = (body.uuidColumn || body.uuid_column || '').toString().trim()
+  const mapSubscriptionStatus = (body.subscriptionStatusColumn || body.subscriptionStatus_column || body.statusColumn || body.status_column || '').toString().trim()
   const skipEmptyRows = body.skipEmptyRows !== false
   const writeBackToNocoDB = body.writeBackToNocoDB !== false
+  const writeBackLoginPasswordOnUpdate = body.writeBackLoginPasswordOnUpdate === true
   const updateExistingUsers = body.updateExistingUsers === true || body.updateExisting === true
   const loginColumn = (body.loginColumn || body.login_column || 'Login').toString().trim() || 'Login'
   const passwordColumn = (body.passwordColumn || body.password_column || 'Password').toString().trim() || 'Password'
@@ -2717,11 +2948,11 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     })
   }
 
-  // Для каждого пользователя генерируется свой пароль; defaultPassword не используется при обратной записи в NocoDB
-  try {
-    const listUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+  // Загружаем записи из одной или двух таблиц (одинаковая структура, разные данные)
+  const fetchTableRows = async (tid) => {
+    const listUrl = `${baseUrl}/api/v2/tables/${tid}/records`
     const limit = 1000
-    const allRows = []
+    const rows = []
     let offset = 0
     let hasMore = true
     while (hasMore) {
@@ -2736,9 +2967,20 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
       })
       const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
       if (!Array.isArray(list) || list.length === 0) break
-      allRows.push(...list)
+      list.forEach((r) => {
+        rows.push({ ...r, __tableId: tid })
+      })
       offset += list.length
       if (list.length < limit) hasMore = false
+    }
+    return rows
+  }
+
+  try {
+    const allRows = await fetchTableRows(tableId)
+    if (tableId2) {
+      const rows2 = await fetchTableRows(tableId2)
+      allRows.push(...rows2)
     }
 
     const created = []
@@ -2754,7 +2996,8 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
     for (let i = 0; i < allRows.length; i++) {
       const rawRow = allRows[i]
       const row = normalizeNocoDBRow(rawRow)
-      const recordId = rawRow.Id ?? rawRow.id ?? rawRow.ID
+      // Id записи: в NocoDB может быть Id, id, ID или __ncRecordId (см. data-apis-v2.nocodb.com)
+      const recordId = rawRow.Id ?? rawRow.id ?? rawRow.ID ?? rawRow.__ncRecordId ?? rawRow.recordId
 
       // Колонка "email" в NocoDB записывается как логин; для Firebase Auth нужен email — если значение с @, используем как email, иначе добавляем @imported.local
       const loginValue = (mapEmail ? (row[mapEmail] ?? row[mapEmail.toLowerCase()] ?? '') : pickFirst(row, 'email', 'email', 'mail', 'e-mail') || '').toString().trim()
@@ -2781,11 +3024,16 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
       const plan = planRaw || 'free'
       const subIdVal = mapSubId ? (row[mapSubId] ?? row[mapSubId.toLowerCase()] ?? '').toString().trim() : ''
       const tariffNameVal = mapTariffName ? (row[mapTariffName] ?? row[mapTariffName.toLowerCase()] ?? '').toString().trim() : ''
+      const resolvedTariff = tariffNameVal ? await resolveTariffByName(db, APP_ID, tariffNameVal) : null
+      const tariffIdVal = resolvedTariff ? resolvedTariff.tariffId : ''
+      const tariffNameResolved = resolvedTariff ? resolvedTariff.tariffName : (tariffNameVal || '')
       const expiresAtVal = mapExpiresAt ? (row[mapExpiresAt] ?? row[mapExpiresAt.toLowerCase()] ?? '').toString().trim() : ''
       const orderIdVal = mapOrderId ? (row[mapOrderId] ?? row[mapOrderId.toLowerCase()] ?? '').toString().trim() : ''
       const amountVal = mapAmount ? (row[mapAmount] ?? row[mapAmount.toLowerCase()] ?? '').toString().trim() : ''
       const devicesVal = mapDevices ? (row[mapDevices] ?? row[mapDevices.toLowerCase()] ?? '').toString().trim() : ''
       const uuidVal = mapUuid ? (row[mapUuid] ?? row[mapUuid.toLowerCase()] ?? '').toString().trim() : ''
+      const statusVal = mapSubscriptionStatus ? (row[mapSubscriptionStatus] ?? row[mapSubscriptionStatus.toLowerCase()] ?? '').toString().trim() : ''
+      const paymentStatusVal = normalizeSubscriptionStatus(statusVal)
       const expiresAtMs = parseExpiresAt(expiresAtVal)
       const amountNum = amountVal ? parseFloat(String(amountVal).replace(',', '.')) : null
       const devicesNum = devicesVal ? parseInt(devicesVal, 10) : null
@@ -2801,17 +3049,63 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
               tgId: String(tgId).trim(),
               plan,
               subId: subIdVal || undefined,
-              tariffName: tariffNameVal || undefined,
+              tariffName: tariffNameVal ? tariffNameResolved : undefined,
+              tariffId: tariffIdVal || undefined,
+              paymentStatus: paymentStatusVal || undefined,
               uuid: uuidVal || undefined,
               expiresAt: expiresAtMs,
               devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
             })
-            updated.push({ login, email, id: byTgId.uid, recordId, tgId: String(tgId).trim() })
+            updated.push({
+              rowIndex: i + 1,
+              login,
+              email,
+              id: byTgId.uid,
+              recordId,
+              tgId: String(tgId).trim(),
+              tariffName: tariffNameResolved || null,
+              tariffId: tariffIdVal || null,
+            })
+            // При повторной загрузке: записать логин и пароль в таблицу NocoDB (если включена галка)
+            if (writeBackLoginPasswordOnUpdate && writeBackToNocoDB && recordId != null && String(recordId).trim() !== '') {
+              const updatePassword = generateRandomPassword(12)
+              try {
+                const tableIdForPatch = rawRow.__tableId || tableId
+                const patchUrl = `${baseUrl}/api/v2/tables/${tableIdForPatch}/records`
+                const idKey = rawRow.Id !== undefined ? 'Id' : (rawRow.id !== undefined ? 'id' : 'ID')
+                const patchBody = {
+                  id: recordId,
+                  [idKey]: recordId,
+                  [loginColumn]: login,
+                  [passwordColumn]: updatePassword,
+                }
+                const patchRes = await axios.patch(patchUrl, patchBody, { headers: patchHeaders, timeout: 15000, validateStatus: () => true })
+                if (patchRes.status >= 200 && patchRes.status < 300) {
+                  writeBackOk += 1
+                  try {
+                    await admin.auth().updateUser(byTgId.uid, { password: updatePassword })
+                  } catch (authErr) {
+                    console.warn('⚠️ Импорт NocoDB: логин/пароль записаны в таблицу, но не удалось обновить пароль в Firebase Auth', { uid: byTgId.uid, error: authErr.message })
+                  }
+                } else {
+                  writeBackErrors.push({ rowIndex: i + 1, login, recordId, status: patchRes.status, error: patchRes.data?.message || patchRes.data?.msg || String(patchRes.data) })
+                }
+              } catch (patchErr) {
+                writeBackErrors.push({ rowIndex: i + 1, login, recordId, error: patchErr.message || String(patchErr) })
+              }
+            }
           } catch (err) {
             errors.push({ rowIndex: i + 1, email, error: err.message || String(err) })
           }
           continue
         }
+        // Включено «обновлять по Telegram ID», но пользователь с таким Telegram ID не найден — пропускаем с понятной причиной
+        skipped.push({
+          rowIndex: i + 1,
+          reason: 'Обновление по Telegram ID: пользователь с таким Telegram ID не найден в системе',
+          row: { login, email, tgId: String(tgId).trim() },
+        })
+        continue
       }
 
       const duplicateCheck = await checkImportDuplicate(db, APP_ID, login, email)
@@ -2840,12 +3134,22 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
           tgId: tgId || undefined,
           subId: subIdVal || undefined,
           uuid: uuidVal || undefined,
-          tariffName: tariffNameVal || undefined,
+          tariffName: tariffNameVal ? tariffNameResolved : undefined,
+          tariffId: tariffIdVal || undefined,
+          paymentStatus: paymentStatusVal || undefined,
           expiresAt: expiresAtMs,
           devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
         })
         const createdUid = result.user.id
-        created.push({ login, email, id: createdUid, recordId })
+        created.push({
+          rowIndex: i + 1,
+          login,
+          email,
+          id: createdUid,
+          recordId,
+          tariffName: tariffNameResolved || null,
+          tariffId: tariffIdVal || null,
+        })
 
         if (orderIdVal && Number.isFinite(amountNum) && amountNum > 0 && db) {
           try {
@@ -2855,7 +3159,8 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
               userId: createdUid,
               amount: amountNum,
               status: 'pending',
-              tariffName: tariffNameVal || null,
+              tariffName: tariffNameResolved || tariffNameVal || null,
+              tariffId: tariffIdVal || null,
               createdAt: new Date().toISOString(),
               source: 'nocodb_import',
             })
@@ -2866,10 +3171,16 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
 
         if (writeBackToNocoDB && recordId != null && String(recordId).trim() !== '') {
           try {
-            // NocoDB API v2: PATCH на .../records без id в пути; id записи передаётся в теле (см. data-apis-v2.nocodb.com)
-            const patchUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+            // NocoDB API v2: PATCH на .../records; id записи передаётся в теле; при двух таблицах — в ту, откуда строка
+            const tableIdForPatch = rawRow.__tableId || tableId
+            const patchUrl = `${baseUrl}/api/v2/tables/${tableIdForPatch}/records`
             const idKey = rawRow.Id !== undefined ? 'Id' : (rawRow.id !== undefined ? 'id' : 'ID')
-            const patchBody = { [idKey]: recordId, [loginColumn]: login, [passwordColumn]: generatedPassword }
+            const patchBody = {
+              id: recordId,
+              [idKey]: recordId,
+              [loginColumn]: login,
+              [passwordColumn]: generatedPassword,
+            }
             const patchRes = await axios.patch(patchUrl, patchBody, { headers: patchHeaders, timeout: 15000, validateStatus: () => true })
             if (patchRes.status >= 200 && patchRes.status < 300) {
               writeBackOk += 1
@@ -2924,18 +3235,33 @@ const TELEGRAM_CACHE_TTL_MS = 60 * 1000
 let settingsCache = { data: null, expiresAt: 0 }
 const SETTINGS_CACHE_TTL_MS = 60 * 1000
 
+/** Список appId для поиска токена в Firestore, если в основном документе пусто. */
+const TELEGRAM_SETTINGS_APP_IDS = [APP_ID, 'skyputh', 'skypathvpn'].filter((id, i, arr) => arr.indexOf(id) === i)
+
 /**
- * Токен бота: приоритет 1) TELEGRAM_BOT_TOKEN (env), 2) кэш, 3) Firestore (artifacts/APP_ID/public/settings.telegramBotToken).
- * Используется для webhook привязки, уведомлений об оплате, send-reminders и тестовых сообщений.
+ * Токен бота: приоритет 1) TELEGRAM_BOT_TOKEN или TELEGRAM_TOKEN (env), 2) кэш, 3) Firestore (artifacts/APP_ID/public/settings.telegramBotToken).
+ * Если в основном документе токена нет — пробуем другие appId (skyputh, skypathvpn).
  */
 async function getTelegramToken() {
-  const fromEnv = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
+  const fromEnv = (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()) ||
+    (process.env.TELEGRAM_TOKEN && process.env.TELEGRAM_TOKEN.trim())
   if (fromEnv) return fromEnv
   if (telegramTokenCache.token && Date.now() < telegramTokenCache.expiresAt) {
     return telegramTokenCache.token
   }
   const settings = await getSettingsCached()
-  const token = (settings.telegramBotToken) ? String(settings.telegramBotToken).trim() : ''
+  let token = (settings && settings.telegramBotToken) ? String(settings.telegramBotToken).trim() : ''
+  if (!token && db) {
+    for (const appId of TELEGRAM_SETTINGS_APP_IDS) {
+      if (appId === APP_ID) continue
+      try {
+        const snap = await db.doc(`artifacts/${appId}/public/settings`).get()
+        const data = snap.exists ? snap.data() : {}
+        token = (data && data.telegramBotToken) ? String(data.telegramBotToken).trim() : ''
+        if (token) break
+      } catch (_) {}
+    }
+  }
   if (token) {
     telegramTokenCache = { token, expiresAt: Date.now() + TELEGRAM_CACHE_TTL_MS }
   }
@@ -2955,6 +3281,19 @@ async function getSettingsCached() {
     return data
   } catch {
     return {}
+  }
+}
+
+/** Сценарий бота из Firestore (artifacts/APP_ID/public/settings.telegramBotScenario). Используется в sendMainMenu и buildMainKeyboard. */
+async function getTelegramScenario() {
+  const s = await getSettingsCached()
+  const raw = s.telegramBotScenario
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    welcomeMessage: typeof raw.welcomeMessage === 'string' ? raw.welcomeMessage : '',
+    menuMessage: typeof raw.menuMessage === 'string' ? raw.menuMessage : '',
+    menuButtons: Array.isArray(raw.menuButtons) ? raw.menuButtons : [],
+    callbackResponses: raw.callbackResponses && typeof raw.callbackResponses === 'object' ? raw.callbackResponses : {},
   }
 }
 
@@ -2998,14 +3337,15 @@ function getBaseUrlForTelegram() {
   return (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '') || null
 }
 
-/** Отправить главное меню с кнопкой «Открыть панель» (Web App) */
+/** Отправить главное меню (текст и кнопки из сценария или дефолт) */
 async function sendMainMenu(botToken, chatId) {
   const baseUrl = getBaseUrlForTelegram()
   const appUrl = baseUrl ? `${baseUrl}/` : null
-  const text = `🚀 <b>VPN Панель</b>\n\n<b>Доступные действия:</b>\n• Создать VPN конфиг\n• Управлять подписками\n• Статистика трафика`
-  const replyMarkup = appUrl
-    ? { inline_keyboard: [[{ text: '🛠️ Открыть панель', web_app: { url: appUrl } }]] }
-    : null
+  const scenario = await getTelegramScenario()
+  const text = (scenario && scenario.menuMessage && scenario.menuMessage.trim())
+    ? scenario.menuMessage.trim()
+    : `🚀 <b>VPN Панель</b>\n\n<b>Доступные действия:</b>\n• Создать VPN конфиг\n• Управлять подписками\n• Статистика трафика`
+  const replyMarkup = buildMainKeyboard(appUrl || undefined, scenario)
   await sendTelegramMessage(botToken, chatId, text, { reply_markup: replyMarkup })
 }
 
@@ -3082,155 +3422,46 @@ async function handleCallbackQuery(botToken, callbackQuery) {
   }
 }
 
-/** POST /api/telegram/webhook — единая точка входа: привязка, команды, Mini App, callback_query */
-app.post('/api/telegram/webhook', verifyTelegramWebhookSecret, express.json(), async (req, res) => {
-  const update = req.body
-  res.status(200).send()
-  if (!update) return
+app.use('/api/telegram', createTelegramRouter({
+  getDb: () => db,
+  getAdmin: () => admin,
+  initFirebaseAdmin,
+  getTelegramToken,
+  getTelegramBotInfo,
+  sendTelegramMessage,
+  answerCallbackQuery,
+  editMessageText,
+  buildMainKeyboard: async (appUrl) => buildMainKeyboard(appUrl, await getTelegramScenario()),
+  getScenario: getTelegramScenario,
+  findScenarioFromBotBuilder: (database, appId, triggerType, triggerValue) =>
+    findScenarioBotBuilder(database, appId, triggerType, triggerValue),
+  logTelegramUpdate: (update) => {
+    const id = update?.update_id
+    const kind = update?.callback_query ? 'callback_query' : update?.message ? 'message' : 'other'
+    console.log('[Telegram] update', { update_id: id, kind })
+  },
+  validateTelegramInitDataWithReasonAsync,
+  validateTelegramWidgetData,
+  logTelegramAuth,
+  verifyIdToken,
+  verifyTelegramWebhookSecret,
+  APP_ID,
+  TELEGRAM_WEBHOOK_SECRET,
+  TELEGRAM_SESSION_TTL_MS,
+  getBaseUrlForTelegram,
+  sendMainMenu,
+  handleMiniAppData,
+  getWebhookUrl,
+  callN8NWebhook,
+  randomUUID,
+  crypto,
+}))
 
-  const botToken = await getTelegramToken()
-  if (!botToken) {
-    console.warn('⚠️ Telegram webhook: обновление пропущено (токен бота не настроен). Настройте токен в админке или TELEGRAM_BOT_TOKEN.')
-    return
-  }
-  if (!db) {
-    console.warn('⚠️ Telegram webhook: обновление пропущено (Firestore недоступен). Настройте Firebase в server/.env.')
-    return
-  }
-
-  try {
-    if (update.callback_query) {
-      await handleCallbackQuery(botToken, update.callback_query)
-      return
-    }
-
-    const message = update.message || update.edited_message
-    if (!message || !message.from) return
-
-    const chatId = message.chat?.id
-    const fromId = String(message.from.id)
-    const text = (message.text || '').trim()
-
-    if (message.web_app_data) {
-      await handleMiniAppData(botToken, message)
-      return
-    }
-
-    if (text.startsWith('/start ')) {
-      const token = text.slice(7).trim()
-      if (!token) return
-      try {
-        const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
-        const snap = await bindRef.get()
-        if (!snap.exists) {
-          await sendTelegramMessage(botToken, chatId, 'Ссылка привязки недействительна или истекла. Получите новую в личном кабинете.')
-          return
-        }
-        const { userId, expiresAt } = snap.data()
-        if (expiresAt && Date.now() > expiresAt) {
-          await bindRef.delete()
-          await sendTelegramMessage(botToken, chatId, 'Ссылка привязки истекла. Получите новую в личном кабинете.')
-          return
-        }
-        const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`)
-        await userRef.update({ tgId: fromId, updatedAt: new Date().toISOString() })
-        await bindRef.delete()
-        await sendTelegramMessage(botToken, chatId, '✅ Аккаунт успешно привязан к Telegram. Вы будете получать уведомления об оплате и напоминания о продлении подписки.')
-        console.log('✅ Telegram: пользователь привязан', { userId, tgId: fromId })
-      } catch (err) {
-        console.error('❌ Telegram webhook bind:', err.message)
-        await sendTelegramMessage(botToken, chatId, 'Ошибка привязки. Попробуйте позже или обратитесь в поддержку.')
-      }
-      return
-    }
-
-    if (text === '/start') {
-      await sendMainMenu(botToken, chatId)
-      await sendTelegramMessage(botToken, chatId, 'Чтобы привязать аккаунт SKYFLOW: личный кабинет → Профиль → Telegram → «Привязать».')
-      return
-    }
-
-    if (text === '/menu') {
-      await sendMainMenu(botToken, chatId)
-      return
-    }
-  } catch (err) {
-    console.error('❌ Telegram webhook:', err.message)
-  }
-})
-
-/** GET /api/telegram/bind-link — ссылка для привязки (авторизованный пользователь) */
-app.get('/api/telegram/bind-link', async (req, res) => {
-  const authResult = await verifyIdToken(req, res)
-  if (!authResult?.ok) return
-  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-  const botToken = await getTelegramToken()
-  if (!botToken) return res.status(503).json({ success: false, error: 'Telegram-бот не настроен' })
-  try {
-    const token = randomUUID().replace(/-/g, '').slice(0, 24)
-    const expiresAt = Date.now() + 15 * 60 * 1000
-    const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
-    await bindRef.set({ userId: authResult.uid, expiresAt, createdAt: new Date().toISOString() })
-    const botInfo = await getTelegramBotInfo(botToken)
-    const username = botInfo.username || 'YourBot'
-    res.json({ success: true, link: `https://t.me/${username}?start=${token}`, expiresIn: 900 })
-  } catch (err) {
-    console.error('❌ GET /api/telegram/bind-link:', err.message)
-    res.status(500).json({ success: false, error: err.message })
-  }
-})
-
-/** POST /api/telegram/unbind — отвязать Telegram */
-app.post('/api/telegram/unbind', async (req, res) => {
-  const authResult = await verifyIdToken(req, res)
-  if (!authResult?.ok) return
-  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-  try {
-    const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${authResult.uid}`)
-    await userRef.update({ tgId: null, updatedAt: new Date().toISOString() })
-    res.json({ success: true })
-  } catch (err) {
-    console.error('❌ POST /api/telegram/unbind:', err.message)
-    res.status(500).json({ success: false, error: err.message })
-  }
-})
-
-/** POST /api/telegram/send-reminders — напоминания об истечении (cron; секрет в заголовке) */
-app.post('/api/telegram/send-reminders', express.json(), async (req, res) => {
-  const secret = req.headers['x-telegram-secret'] || req.body?.secret || ''
-  if (TELEGRAM_WEBHOOK_SECRET && secret !== TELEGRAM_WEBHOOK_SECRET) {
-    return res.status(401).json({ success: false, error: 'Неверный секрет' })
-  }
-  const botToken = await getTelegramToken()
-  if (!db || !botToken) return res.status(200).json({ success: true, sent: 0, message: 'Telegram не настроен' })
-  try {
-    const now = Date.now()
-    const oneDay = 24 * 60 * 60 * 1000
-    const inSevenDays = now + 7 * oneDay
-    const inOneDay = now + oneDay
-    const usersSnap = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).get()
-    let sent = 0
-    for (const doc of usersSnap.docs) {
-      const u = doc.data()
-      const tgId = u.tgId && String(u.tgId).trim()
-      if (!tgId) continue
-      const exp = u.expiresAt ? (typeof u.expiresAt === 'number' ? u.expiresAt : new Date(u.expiresAt).getTime()) : 0
-      if (exp <= 0 || exp > inSevenDays) continue
-      const tariffName = u.tariffName || 'Подписка'
-      const daysLeft = Math.floor((exp - now) / oneDay)
-      let text
-      if (exp <= now) text = `⚠️ Подписка «${tariffName}» истекла. Оплатите продление в личном кабинете.`
-      else if (exp <= inOneDay) text = `⏰ Подписка «${tariffName}» истекает сегодня! Оплатите продление в личном кабинете.`
-      else text = `📅 Подписка «${tariffName}» истекает через ${daysLeft} дн. Оплатите продление в личном кабинете.`
-      const result = await sendTelegramMessage(botToken, tgId, text)
-      if (result.ok) sent++
-    }
-    res.json({ success: true, sent })
-  } catch (err) {
-    console.error('❌ POST /api/telegram/send-reminders:', err.message)
-    res.status(500).json({ success: false, error: err.message })
-  }
-})
+app.use('/api/bot-builder', createBotBuilderRouter({
+  ensureAdmin,
+  getDb: () => db,
+  APP_ID,
+}))
 
 /** GET /api/admin/telegram/status — текущие настройки (только админ). Токен не возвращаем; отдаём username бота и Chat ID админа для отображения. */
 app.get('/api/admin/telegram/status', async (req, res) => {
@@ -3256,8 +3487,9 @@ app.get('/api/admin/telegram/status', async (req, res) => {
 
 /** PATCH /api/admin/telegram/settings — сохранить токен бота в Firestore (только админ). Быстрая настройка без .env.
  * Сохранённый токен используется для: webhook привязки, уведомлений об оплате, напоминаний (send-reminders), тестовых сообщений.
+ * Важно: маршрут с express.json() чтобы body гарантированно парсился.
  */
-app.patch('/api/admin/telegram/settings', async (req, res) => {
+app.patch('/api/admin/telegram/settings', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
@@ -3277,18 +3509,66 @@ app.patch('/api/admin/telegram/settings', async (req, res) => {
       update.telegramAdminChatId = adminChatId || null
       settingsCache = { data: null, expiresAt: 0 }
     }
-    if (Object.keys(update).length) {
-      await settingsRef.set(update, { merge: true })
-      if (token !== undefined) {
-        console.log('✅ Telegram: токен сохранён в Firestore (artifacts/%s/public/settings). Будет использоваться для уведомлений и привязки.', APP_ID)
-      }
-      if (adminChatId !== undefined) {
-        console.log('✅ Telegram: adminChatId для уведомлений о тикетах сохранён в Firestore.')
-      }
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ success: false, error: 'Укажите token или adminChatId в теле запроса (JSON)' })
     }
-    res.json({ success: true, configured: Boolean(token !== undefined ? token : (await getTelegramToken())), savedTo: 'firestore' })
+    await settingsRef.set(update, { merge: true })
+    if (token !== undefined) {
+      console.log('✅ Telegram: токен сохранён в Firestore (artifacts/%s/public/settings). Будет использоваться для уведомлений и привязки.', APP_ID)
+    }
+    if (adminChatId !== undefined) {
+      console.log('✅ Telegram: adminChatId для уведомлений о тикетах сохранён в Firestore.')
+    }
+    const configured = Boolean(token !== undefined ? (token && token.length > 0) : (await getTelegramToken()))
+    res.json({ success: true, configured, savedTo: 'firestore' })
   } catch (err) {
     console.error('❌ PATCH /api/admin/telegram/settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** GET /api/admin/telegram/scenario — сценарий бота (только админ). */
+app.get('/api/admin/telegram/scenario', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  try {
+    const scenario = await getTelegramScenario()
+    res.json({
+      success: true,
+      scenario: scenario || {
+        welcomeMessage: '',
+        menuMessage: '',
+        menuButtons: [],
+        callbackResponses: {},
+      },
+    })
+  } catch (err) {
+    console.error('❌ GET /api/admin/telegram/scenario:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** PATCH /api/admin/telegram/scenario — сохранить сценарий бота в Firestore (только админ). */
+app.patch('/api/admin/telegram/scenario', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const body = req.body || {}
+  const scenario = body.scenario != null ? body.scenario : body
+  try {
+    const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+    const normalized = {
+      welcomeMessage: typeof scenario.welcomeMessage === 'string' ? scenario.welcomeMessage : '',
+      menuMessage: typeof scenario.menuMessage === 'string' ? scenario.menuMessage : '',
+      menuButtons: Array.isArray(scenario.menuButtons) ? scenario.menuButtons : [],
+      callbackResponses: scenario.callbackResponses && typeof scenario.callbackResponses === 'object' ? scenario.callbackResponses : {},
+    }
+    await settingsRef.set({ telegramBotScenario: normalized }, { merge: true })
+    settingsCache = { data: null, expiresAt: 0 }
+    console.log('✅ Telegram: сценарий бота сохранён в Firestore.')
+    res.json({ success: true, savedTo: 'firestore' })
+  } catch (err) {
+    console.error('❌ PATCH /api/admin/telegram/scenario:', err.message)
     res.status(500).json({ success: false, error: err.message })
   }
 })
@@ -3344,16 +3624,17 @@ app.patch('/api/admin/ai/settings', express.json(), async (req, res) => {
   }
 })
 
-/** POST /api/admin/telegram/set-webhook — установить webhook в Telegram (secret_token + allowed_updates) */
+/** POST /api/admin/telegram/set-webhook — единственная точка установки webhook (polling не используется; у бота только один webhook). */
 app.post('/api/admin/telegram/set-webhook', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   const botToken = await getTelegramToken()
   if (!botToken) return res.status(400).json({ success: false, error: 'Сначала сохраните токен бота' })
-  const baseUrl = req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
+  const baseFromEnv = (process.env.TELEGRAM_WEBHOOK_BASE_URL || process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '')
+  const baseUrl = baseFromEnv || (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host']
     ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
-    : (process.env.PUBLIC_URL || process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`)
-  const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/telegram/webhook`
+    : `${req.protocol}://${req.get('host')}`)
+  const webhookUrl = `${baseUrl.replace(/\/+$/, '')}/api/telegram/webhook`
   const opts = {
     allowed_updates: ['message', 'callback_query'],
     secret_token: TELEGRAM_WEBHOOK_SECRET && TELEGRAM_WEBHOOK_SECRET.trim() ? TELEGRAM_WEBHOOK_SECRET.trim() : undefined,
@@ -3697,6 +3978,53 @@ app.post('/api/notify/support-reply', express.json(), async (req, res) => {
   } catch (err) {
     console.error('❌ POST /api/notify/support-reply:', err.message)
     return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * POST /api/notify/discount-assigned — отправить клиенту в Telegram сообщение о назначенной скидке (только админ).
+ * Body: { userId, percent, validFrom, validTo } — validFrom/validTo в мс или ISO-строках.
+ */
+app.post('/api/notify/discount-assigned', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const { userId, percent, validFrom, validTo } = req.body || {}
+  const uid = (userId ?? '').toString().trim()
+  if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
+  const percentNum = Math.min(100, Math.max(0, Number(percent) || 0))
+  const fromMs = validFrom != null ? (typeof validFrom === 'number' ? validFrom : new Date(validFrom).getTime()) : null
+  const toMs = validTo != null ? (typeof validTo === 'number' ? validTo : new Date(validTo).getTime()) : null
+  const fromStr = fromMs != null && !isNaN(fromMs) ? new Date(fromMs).toLocaleDateString('ru-RU') : ''
+  const toStr = toMs != null && !isNaN(toMs) ? new Date(toMs).toLocaleDateString('ru-RU') : ''
+  const botToken = await getTelegramToken()
+  const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`).get()
+  const rawTgId = userSnap.exists && userSnap.data() && userSnap.data().tgId != null
+    ? userSnap.data().tgId
+    : null
+  const tgId = rawTgId !== null && rawTgId !== undefined
+    ? (typeof rawTgId === 'number' ? String(rawTgId) : String(rawTgId).trim())
+    : ''
+  if (!botToken || !tgId) {
+    return res.status(200).json({
+      success: true,
+      sent: false,
+      reason: !botToken ? 'Telegram бот не настроен (укажите токен в настройках или TELEGRAM_BOT_TOKEN)' : 'У пользователя не привязан Telegram',
+    })
+  }
+  const text = `🎁 <b>Вам назначена персональная скидка ${percentNum}%</b>\n\nДействует с ${escapeHtml(fromStr) || '—'} по ${escapeHtml(toStr) || '—'}.\n\nПри оплате подписки скидка применится автоматически.`
+  try {
+    const result = await sendTelegramMessage(botToken, tgId, text)
+    if (result.ok) {
+      console.log('📨 Уведомление о скидке отправлено в Telegram', { userId: uid })
+      return res.json({ success: true, sent: true })
+    }
+    const errMsg = result.error || 'Ошибка Telegram'
+    console.warn('⚠️ POST /api/notify/discount-assigned: Telegram не отправил', { userId: uid, error: errMsg })
+    return res.status(200).json({ success: true, sent: false, reason: errMsg })
+  } catch (err) {
+    console.error('❌ POST /api/notify/discount-assigned:', err.message)
+    return res.status(200).json({ success: true, sent: false, reason: err.message || 'Ошибка отправки в Telegram' })
   }
 })
 
@@ -6535,7 +6863,16 @@ app.listen(PORT, HOST, () => {
   console.log(`📡 http://${HOST}:${PORT}`)
   console.log(`🔗 n8n: ${N8N_BASE_URL}`)
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
-  
+
+  // Загрузка кэша сценариев bot-builder при старте (если Firebase уже инициализирован)
+  setTimeout(() => {
+    if (db) {
+      loadScenariosIntoCache(db, APP_ID)
+        .then(() => console.log('Bot-builder: кэш сценариев загружен'))
+        .catch((e) => console.warn('Bot-builder: загрузка кэша', e.message))
+    }
+  }, 2000)
+
   // Периодическая очистка устаревших флагов активации (каждые 10 минут)
   setInterval(async () => {
     try {

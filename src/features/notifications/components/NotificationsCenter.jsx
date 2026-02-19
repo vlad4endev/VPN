@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Bell, ChevronDown, X, Sparkles, CreditCard, Megaphone, MessageCircle } from 'lucide-react'
+import { Bell, ChevronDown, X, Sparkles, CreditCard, Megaphone, MessageCircle, ExternalLink } from 'lucide-react'
 import { useNotifications } from '../hooks/useNotifications.js'
 import { NOTIFICATION_TYPES, NOTIFICATION_TYPE_LABELS } from '../constants.js'
 import { formatDate } from '../../../shared/utils/formatDate.js'
@@ -12,6 +12,7 @@ const PADDING = 16
 const ICON_BY_TYPE = {
   [NOTIFICATION_TYPES.admin_broadcast]: Megaphone,
   [NOTIFICATION_TYPES.subscription]: CreditCard,
+  [NOTIFICATION_TYPES.subscription_reminder]: CreditCard,
   [NOTIFICATION_TYPES.feature]: Sparkles,
   [NOTIFICATION_TYPES.interaction]: MessageCircle,
 }
@@ -157,6 +158,28 @@ export default function NotificationsCenter({ userId, className = '' }) {
                       __html: detail.overview.replace(/\n/g, '<br />'),
                     }}
                   />
+                </div>
+              )}
+              {detail.data?.buttons && Array.isArray(detail.data.buttons) && detail.data.buttons.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-700 flex flex-wrap gap-2">
+                  {detail.data.buttons.map((btn, i) => (
+                    btn.url ? (
+                      <a
+                        key={i}
+                        href={btn.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
+                      >
+                        {btn.label || 'Ссылка'}
+                        <ExternalLink size={14} />
+                      </a>
+                    ) : (
+                      <span key={i} className="inline-flex items-center px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm">
+                        {btn.label || ''}
+                      </span>
+                    )
+                  ))}
                 </div>
               )}
             </div>

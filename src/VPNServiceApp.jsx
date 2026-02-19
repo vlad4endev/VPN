@@ -515,7 +515,7 @@ export default function VPNServiceApp() {
         servers: servers, // Сохраняем серверы вместе с настройками
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id, // Сохраняем ID админа, который внес изменения
-      }))
+      }), { merge: true })
       logger.info('Admin', 'Глобальные настройки успешно сохранены', { 
         adminId: currentUser.id,
         message: 'Настройки применены ко всем пользователям системы'

@@ -1,12 +1,16 @@
 /**
  * Модуль для работы с Telegram Bot API
- * Отправка сообщений пользователям, привязка аккаунта по токену
+ * Отправка сообщений пользователям, привязка аккаунта по токену.
+ *
+ * Режим получения обновлений: только webhook. Polling (getUpdates) нигде не используется.
+ * У бота может быть установлен только один webhook (ограничение Telegram API); setWebhook заменяет предыдущий URL.
  */
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
 
 /**
- * Отправить сообщение пользователю по Telegram ID
+ * Отправить ответ через Telegram API: POST https://api.telegram.org/bot<TOKEN>/sendMessage
+ *
  * @param {string} botToken - токен бота (TELEGRAM_BOT_TOKEN)
  * @param {string} chatId - Telegram chat_id (числовой или строковый)
  * @param {string} text - текст сообщения
@@ -98,7 +102,10 @@ export async function getTelegramBotInfo(botToken) {
 }
 
 /**
- * Установить webhook для бота (Telegram API setWebhook)
+ * Установить webhook для бота (Telegram API setWebhook).
+ * У бота может быть только один webhook; повторный вызов заменяет предыдущий URL.
+ * Вызывать только из одного места (например POST /api/admin/telegram/set-webhook). Polling не используется.
+ *
  * @param {string} botToken
  * @param {string} webhookUrl - полный URL, например https://your-domain.com/api/telegram/webhook
  * @param {{ secret_token?: string, allowed_updates?: string[] }} [opts]
@@ -151,16 +158,17 @@ export async function getTelegramWebhookInfo(botToken) {
 }
 
 /**
- * Ответ на callback_query (answerCallbackQuery) — чтобы убрать "часики" у кнопки
+ * Ответ на callback_query (answerCallbackQuery) — убрать "часики" у кнопки, опционально показать уведомление.
  * @param {string} botToken
  * @param {string} callbackQueryId
  * @param {{ text?: string, show_alert?: boolean }} [opts]
+ * @returns {Promise<{ ok?: boolean }>}
  */
 export async function answerCallbackQuery(botToken, callbackQueryId, opts = {}) {
-  if (!botToken || !callbackQueryId) return
+  if (!botToken || !callbackQueryId) return { ok: false }
   const url = `${TELEGRAM_API_BASE}${botToken}/answerCallbackQuery`
   try {
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -169,7 +177,48 @@ export async function answerCallbackQuery(botToken, callbackQueryId, opts = {}) 
         show_alert: opts.show_alert === true,
       }),
     })
-  } catch (_) {}
+    const data = await res.json().catch(() => ({}))
+    return data.ok ? { ok: true } : { ok: false }
+  } catch (_) {
+    return { ok: false }
+  }
+}
+
+/**
+ * Редактировать текст сообщения (editMessageText).
+ * @param {string} botToken
+ * @param {string|number} chatId
+ * @param {number} messageId
+ * @param {string} text
+ * @param {{ parse_mode?: string, reply_markup?: object }} [opts]
+ * @returns {Promise<{ ok: boolean, result?: object, error?: string }>}
+ */
+export async function editMessageText(botToken, chatId, messageId, text, opts = {}) {
+  if (!botToken || chatId == null || messageId == null || text == null) {
+    return { ok: false, error: 'botToken, chatId, messageId и text обязательны' }
+  }
+  const url = `${TELEGRAM_API_BASE}${botToken}/editMessageText`
+  const body = {
+    chat_id: String(chatId),
+    message_id: Number(messageId),
+    text: String(text),
+    parse_mode: opts.parse_mode || 'HTML',
+  }
+  if (opts.reply_markup) body.reply_markup = opts.reply_markup
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!data.ok) {
+      return { ok: false, error: data.description || res.statusText }
+    }
+    return { ok: true, result: data.result }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
 }
 
 /**

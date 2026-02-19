@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { Shield, Globe, Check, Zap, Star, Quote, ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import Footer from './Footer.jsx'
+import TelegramLoginWidget from '../../features/auth/components/TelegramLoginWidget.jsx'
 
 /** Порог символов: показывать «Читать далее» для длинных отзывов */
 const REVIEW_EXPAND_THRESHOLD = 150
@@ -27,11 +28,12 @@ function getPrices(pricePerMonth) {
  * @param {Object} props
  * @param {Function} props.onSetView - Переключение view ('login', 'register')
  * @param {Array<{ id: string, author: string, rating: number, text: string, date?: string }>} [props.reviews] - Одобренные отзывы
- * @param {Function} [props.onTelegramSignIn] - Вход через Telegram Mini App
+ * @param {Function} [props.onTelegramSignIn] - Вход через Telegram Mini App (кнопка в TMA)
+ * @param {Function} [props.onTelegramWidgetAuth] - Вход через Login Widget (с обычного сайта)
  * @param {boolean} [props.telegramSignInLoading] - Загрузка при входе через Telegram
  * @param {boolean} [props.isTelegramApp] - Открыто в Telegram Mini App
  */
-export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn, telegramSignInLoading = false, isTelegramApp = false }) {
+export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn, onTelegramWidgetAuth, onTelegramWidgetError, telegramSignInLoading = false, isTelegramApp = false }) {
   const [activeTariff, setActiveTariff] = useState('Super')
   const [expandedReviewIds, setExpandedReviewIds] = useState(() => new Set())
   const reviewsScrollRef = useRef(null)
@@ -97,6 +99,12 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
                   )}
                   Войти через Telegram
                 </button>
+              )}
+              {!isTelegramApp && onTelegramWidgetAuth && (import.meta.env?.VITE_TELEGRAM_BOT_USERNAME || '').trim() && (
+                <div className="flex flex-col items-center gap-2">
+                  <TelegramLoginWidget onAuth={onTelegramWidgetAuth} onError={onTelegramWidgetError} />
+                  <span className="text-xs text-slate-500">Войти или зарегистрироваться через Telegram</span>
+                </div>
               )}
               <button onClick={() => onSetView('register')} className="w-full sm:w-64 min-h-[48px] sm:min-h-[52px] bg-blue-600 hover:bg-blue-500 active:bg-blue-600 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-[0.98] touch-manipulation">
                 Начать работу

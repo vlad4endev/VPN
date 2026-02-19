@@ -86,7 +86,14 @@ export const notificationsService = {
         callback(list)
       },
       (err) => {
-        logger.warn('Notifications', 'Подписка недоступна (правила или индекс Firestore)', { userId, code: err?.code || err?.message })
+        const code = err?.code || err?.message
+        logger.warn(
+          'Notifications',
+          code === 'failed-precondition'
+            ? 'Подписка недоступна: нужен составной индекс Firestore (userId + createdAt). Выполните: firebase deploy --only firestore:indexes'
+            : 'Подписка недоступна (правила или индекс Firestore)',
+          { userId, code }
+        )
         callback([])
       }
     )
@@ -115,18 +122,98 @@ export const notificationsService = {
   },
 
   /**
-   * Рассылка уведомлений нескольким пользователям через бэкенд (обходит Firestore rules).
-   * Требуется авторизованный админ (Firebase ID token в заголовке).
-   * @param {string[]} userIds
-   * @param {{ type: string, title: string, body: string, overview?: string }} payload
+   * Список шаблонов уведомлений (админ).
    */
-  async broadcastViaApi(userIds, payload) {
-    if (!Array.isArray(userIds) || userIds.length === 0) throw new Error('userIds обязателен')
-    const { type, title, body, overview = null } = payload
-    if (!type || !title || !body) throw new Error('type, title, body обязательны')
+  async getTemplates() {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
     const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/templates`, {
+      headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    const data = await res.json()
+    return data.templates || []
+  },
+
+  async createTemplate(payload) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/templates`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [APP_ID_HEADER]: APP_ID,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+    const data = await res.json()
+    return data.id
+  },
+
+  async updateTemplate(id, payload) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [APP_ID_HEADER]: APP_ID,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+  },
+
+  async deleteTemplate(id) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+  },
+
+  /**
+   * Рассылка уведомлений через бэкенд (шаблоны, фильтры, кнопки).
+   * @param {string[]} [userIds] - при recipientFilter === 'userIds'
+   * @param {{ type?: string, title?: string, body?: string, overview?: string, templateId?: string, recipientFilter?: 'userIds'|'all'|'plan'|'tariff', plan?: string, tariffId?: string, buttons?: { label: string, url: string }[] }} payload
+   */
+  async broadcastViaApi(userIds, payload) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const body = {
+      type: payload.type || 'admin_broadcast',
+      title: payload.title != null ? String(payload.title).trim() : '',
+      body: payload.body != null ? String(payload.body).trim() : '',
+      overview: payload.overview != null ? String(payload.overview).trim() || null : undefined,
+      templateId: payload.templateId || undefined,
+      recipientFilter: payload.recipientFilter || (Array.isArray(userIds) && userIds.length > 0 ? 'userIds' : 'all'),
+      plan: payload.plan || undefined,
+      tariffId: payload.tariffId || undefined,
+      buttons: Array.isArray(payload.buttons) ? payload.buttons : undefined,
+    }
+    if (body.recipientFilter === 'userIds' && Array.isArray(userIds) && userIds.length > 0) {
+      body.userIds = userIds
+    }
+    if (!body.templateId && (!body.title || !body.body)) throw new Error('Укажите title и body или выберите шаблон')
     const res = await fetch(`${base}/api/admin/notifications/broadcast`, {
       method: 'POST',
       headers: {
@@ -134,18 +221,48 @@ export const notificationsService = {
         Authorization: `Bearer ${token}`,
         [APP_ID_HEADER]: APP_ID,
       },
-      body: JSON.stringify({
-        userIds,
-        type,
-        title,
-        body,
-        overview: overview != null ? overview : undefined,
-      }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       throw new Error(data.error || res.statusText || 'Ошибка рассылки')
     }
+    return res.json()
+  },
+
+  /**
+   * Отправить одно уведомление пользователю (из карточки пользователя).
+   * @param {string} userId
+   * @param {{ templateId?: string, type?: string, title?: string, body?: string, overview?: string, buttons?: { label: string, url: string }[] }} payload
+   */
+  async sendToOne(userId, payload) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const body = {
+      userId: String(userId || '').trim(),
+      templateId: payload.templateId || undefined,
+      type: payload.type || 'admin_broadcast',
+      title: payload.title != null ? String(payload.title).trim() : '',
+      body: payload.body != null ? String(payload.body).trim() : '',
+      overview: payload.overview != null ? String(payload.overview).trim() || null : undefined,
+      buttons: Array.isArray(payload.buttons) ? payload.buttons : undefined,
+    }
+    if (!body.templateId && (!body.title || !body.body)) throw new Error('Укажите title и body или выберите шаблон')
+    const res = await fetch(`${base}/api/admin/notifications/send-one`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [APP_ID_HEADER]: APP_ID,
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText || 'Ошибка отправки')
+    }
+    return res.json()
   },
 
   /**
