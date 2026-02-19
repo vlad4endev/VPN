@@ -3,13 +3,15 @@ import { Bot, CheckCircle2, XCircle, RefreshCw, ChevronDown, ChevronUp } from 'l
 import { getAiStatus, saveAiSettings, sendAiChat } from '../services/aiAdminService.js'
 import logger from '../../../shared/utils/logger.js'
 
-const AI_MODELS = [
-  { value: 'deepseek-chat', label: 'deepseek-chat (обычный)' },
-  { value: 'deepseek-reasoner', label: 'deepseek-reasoner (режим рассуждений, 128K)' },
-]
+const API_KEY_PLACEHOLDERS = {
+  deepseek: 'sk-… (platform.deepseek.com/api_keys)',
+  openai: 'sk-… (platform.openai.com/api-keys)',
+  openrouter: 'sk-or-… (openrouter.ai/keys)',
+  gemini: 'Ключ из aistudio.google.com/apikey',
+}
 
 /**
- * Панель настройки ИИ (DeepSeek): API-ключ, модель, параметры взаимодействия, тест.
+ * Панель настройки ИИ: провайдер (DeepSeek, OpenAI, OpenRouter, Gemini), API-ключ, модель, тест.
  */
 const AIPanel = () => {
   const [statusLoading, setStatusLoading] = useState(true)
@@ -17,6 +19,9 @@ const AIPanel = () => {
   const [configured, setConfigured] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
+  const [provider, setProvider] = useState('deepseek')
+  const [providers, setProviders] = useState([])
+  const [models, setModels] = useState([{ value: 'deepseek-chat', label: 'deepseek-chat' }])
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -38,6 +43,9 @@ const AIPanel = () => {
     try {
       const data = await getAiStatus()
       setConfigured(data.configured)
+      setProvider(data.provider || 'deepseek')
+      setProviders(data.providers || [])
+      setModels(data.models || [{ value: 'deepseek-chat', label: 'deepseek-chat' }])
       setModel(data.model || 'deepseek-chat')
       setTemperature(data.temperature != null ? data.temperature : 0.7)
       setMaxTokens(data.maxTokens != null ? data.maxTokens : 2048)
@@ -62,9 +70,10 @@ const AIPanel = () => {
     setSuccess(null)
     setSaving(true)
     try {
-      await saveAiSettings({ apiKey: apiKeyInput })
+      await saveAiSettings({ provider, apiKey: apiKeyInput })
       setApiKeyInput('')
-      setSuccess('API-ключ сохранён. Используется для запросов к DeepSeek.')
+      const name = providers.find((p) => p.id === provider)?.name || provider
+      setSuccess(`API-ключ ${name} сохранён.`)
       setTimeout(() => setSuccess(null), 5000)
       await loadStatus(true)
     } catch (err) {
@@ -130,7 +139,7 @@ const AIPanel = () => {
       <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
         <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
           <Bot className="w-5 h-5" />
-          ИИ (DeepSeek)
+          ИИ
         </h2>
         <button
           type="button"
@@ -155,6 +164,12 @@ const AIPanel = () => {
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Текущие настройки</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div>
+              <span className="text-slate-500 block">Провайдер</span>
+              <span className="text-slate-200 font-medium">
+                {statusLoading ? '…' : (providers.find((p) => p.id === provider)?.name || provider)}
+              </span>
+            </div>
+            <div>
               <span className="text-slate-500 block">API-ключ</span>
               <span className="text-slate-200 font-medium">
                 {statusLoading ? '…' : configured ? 'Задан (скрыт)' : 'Не введён'}
@@ -175,35 +190,60 @@ const AIPanel = () => {
           </div>
         </section>
 
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs text-slate-500 mb-1">API-ключ DeepSeek</label>
-            <input
-              type="password"
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder="sk-… (platform.deepseek.com/api_keys)"
-              className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
-            />
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Провайдер</label>
+            <select
+              value={provider}
+              onChange={async (e) => {
+                const next = e.target.value
+                setProvider(next)
+                try {
+                  await saveAiSettings({ provider: next })
+                  await loadStatus(true)
+                } catch (err) {
+                  setError(err.message || 'Ошибка смены провайдера')
+                }
+              }}
+              className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm focus:ring-2 focus:ring-blue-500"
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <button
-            type="button"
-            onClick={handleSaveApiKey}
-            disabled={saving}
-            className="h-[38px] px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
-          >
-            {saving ? '…' : 'Сохранить ключ'}
-          </button>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs text-slate-500 mb-1">API-ключ {providers.find((p) => p.id === provider)?.name || provider}</label>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder={API_KEY_PLACEHOLDERS[provider] || 'Введите API-ключ'}
+                className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveApiKey}
+              disabled={saving}
+              className="h-[38px] px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+            >
+              {saving ? '…' : 'Сохранить ключ'}
+            </button>
+          </div>
         </div>
 
         <div className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm ${configured ? 'bg-green-900/20 text-green-300' : 'bg-amber-900/20 text-amber-300'}`}>
           {configured ? (
             <span className="flex items-center gap-2 text-green-300">
-              <CheckCircle2 className="w-4 h-4" /> Сервис подключён
+              <CheckCircle2 className="w-4 h-4" /> Сервис подключён ({providers.find((p) => p.id === provider)?.name || provider})
             </span>
           ) : (
             <span className="flex items-center gap-2 text-amber-300">
-              <XCircle className="w-4 h-4" /> Введите API-ключ в поле выше или задайте DEEPSEEK_API_KEY в server/.env
+              <XCircle className="w-4 h-4" /> Введите API-ключ выбранного провайдера или задайте переменную в server/.env (DEEPSEEK_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY)
             </span>
           )}
         </div>
@@ -226,7 +266,7 @@ const AIPanel = () => {
                   onChange={(e) => setModel(e.target.value)}
                   className="w-full min-h-[38px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm focus:ring-2 focus:ring-blue-500"
                 >
-                  {AI_MODELS.map((m) => (
+                  {models.map((m) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
                     </option>

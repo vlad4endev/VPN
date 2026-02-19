@@ -11,6 +11,7 @@
  */
 
 import express from 'express'
+import compression from 'compression'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { createPayment } from './paymentService.js'
@@ -20,6 +21,8 @@ import { getPayment, getAllPayments } from './storage.js'
 dotenv.config()
 
 const app = express()
+
+app.use(compression())
 
 // Middleware
 app.use(cors({

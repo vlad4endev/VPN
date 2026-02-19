@@ -24,11 +24,16 @@ import crypto, { randomUUID } from 'crypto'
 import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery, editMessageText } from './lib/telegram.js'
 import { buildMainKeyboard } from './lib/telegram.keyboard.js'
 import { createTelegramRouter } from './routes/telegram.routes.js'
+import { handleWebhook } from './controllers/telegram.controller.js'
 import { createBotBuilderRouter } from './bot-builder/botbuilder.routes.js'
 import { findScenario as findScenarioBotBuilder, loadScenariosIntoCache } from './bot-builder/botbuilder.service.js'
+import { createAnalyticsRouter } from './analytics/analytics.routes.js'
+import { updateLastActiveAt } from './analytics/metrics.service.js'
+import { getUserAnalytics as getAnalyticsUser } from './analytics/analytics.service.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
-import { chat as deepseekChat } from './lib/deepseek.js'
+import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
+import { getRedis, closeRedis, redisGet, redisSet } from './lib/redis.js'
 
 dotenv.config()
 
@@ -133,8 +138,7 @@ async function initFirebaseAdmin() {
   }
 }
 
-// Инициализируем Firebase Admin SDK при старте
-initFirebaseAdmin()
+// Firebase инициализируется после app.listen (см. блок Server Start), чтобы не блокировать первый ответ
 
 const app = express()
 
@@ -216,6 +220,49 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 // Метрики запросов (latency, 4xx/5xx, activeRequests)
 app.use(metricsMiddleware({ isWebhookPath }))
+
+// ========== Rate limiting (in-memory, по IP) ==========
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10) || 60000
+const RATE_LIMIT_MAX_GENERAL = parseInt(process.env.RATE_LIMIT_MAX_GENERAL || '300', 10) || 300
+const RATE_LIMIT_MAX_WEBHOOK = parseInt(process.env.RATE_LIMIT_MAX_WEBHOOK || '60', 10) || 60
+const rateLimitStore = new Map()
+function getClientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown'
+}
+function rateLimitMiddleware(req, res, next) {
+  const ip = getClientIp(req)
+  const isWebhook = /\/api\/telegram\/webhook\/?$/.test(req.path || '')
+  const max = isWebhook ? RATE_LIMIT_MAX_WEBHOOK : RATE_LIMIT_MAX_GENERAL
+  const key = `${ip}:${isWebhook ? 'wh' : 'api'}`
+  const now = Date.now()
+  let entry = rateLimitStore.get(key)
+  if (!entry || now >= entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS }
+    rateLimitStore.set(key, entry)
+  }
+  entry.count += 1
+  if (entry.count > max) {
+    res.setHeader('Retry-After', Math.ceil(RATE_LIMIT_WINDOW_MS / 1000))
+    return res.status(429).json({ success: false, error: 'Too many requests' })
+  }
+  next()
+}
+app.use(rateLimitMiddleware)
+
+// ========== Логирование времени ответа (опционально: LOG_REQUEST_MS=1 или NODE_ENV=development) ==========
+const LOG_REQUEST_MS = process.env.LOG_REQUEST_MS === '1' || process.env.LOG_REQUEST_MS === 'true' || process.env.NODE_ENV === 'development'
+function requestTimeLogMiddleware(req, res, next) {
+  if (!LOG_REQUEST_MS) return next()
+  const start = Date.now()
+  res.on('finish', () => {
+    const ms = Date.now() - start
+    const path = req.path || req.url?.split('?')[0] || '-'
+    if (ms >= 500) console.log(`[slow] ${req.method} ${path} ${res.statusCode} ${ms}ms`)
+    else if (process.env.LOG_REQUEST_MS === '1' || process.env.LOG_REQUEST_MS === 'true') console.log(`${req.method} ${path} ${res.statusCode} ${ms}ms`)
+  })
+  next()
+}
+app.use(requestTimeLogMiddleware)
 
 // ========== Telegram Mini App: валидация initData (опционально, не ломает старых клиентов) ==========
 const TELEGRAM_BOT_TOKEN_ENV = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
@@ -388,12 +435,14 @@ app.get('/api/auth/resolve-login', async (req, res) => {
   const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
   const qLower = q.toLowerCase()
   try {
-    const byLogin = await usersRef.where('login', '==', qLower).limit(1).get()
+    const [byLogin, byEmail] = await Promise.all([
+      usersRef.where('login', '==', qLower).limit(1).get(),
+      usersRef.where('email', '==', qLower).limit(1).get(),
+    ])
     if (!byLogin.empty) {
       const email = byLogin.docs[0].data().email
       if (email) return res.json({ email })
     }
-    const byEmail = await usersRef.where('email', '==', qLower).limit(1).get()
     if (!byEmail.empty) {
       const email = byEmail.docs[0].data().email
       if (email) return res.json({ email })
@@ -420,16 +469,12 @@ app.get('/api/auth/check-identifier', async (req, res) => {
   const appId = process.env.APP_ID || 'skyputh'
   const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
   try {
-    let loginAvailable = true
-    let emailAvailable = true
-    if (login) {
-      const snap = await usersRef.where('login', '==', login).limit(1).get()
-      loginAvailable = snap.empty
-    }
-    if (email) {
-      const snap = await usersRef.where('email', '==', email).limit(1).get()
-      emailAvailable = snap.empty
-    }
+    const [loginSnap, emailSnap] = await Promise.all([
+      login ? usersRef.where('login', '==', login).limit(1).get() : Promise.resolve({ empty: true }),
+      email ? usersRef.where('email', '==', email).limit(1).get() : Promise.resolve({ empty: true }),
+    ])
+    const loginAvailable = login ? loginSnap.empty : true
+    const emailAvailable = email ? emailSnap.empty : true
     return res.json({ loginAvailable, emailAvailable })
   } catch (err) {
     console.error('❌ GET /api/auth/check-identifier:', err.message)
@@ -466,6 +511,90 @@ app.post('/api/auth/set-password-by-login', express.json(), async (req, res) => 
     console.error('❌ POST /api/auth/set-password-by-login:', err.message)
     return res.status(500).json({ error: err.message || 'Ошибка установки пароля' })
   }
+})
+
+/** Кэш ответа /api/init по uid (TTL 60 с), снижает чтения Firestore при частых запросах. */
+const initResponseCache = new Map() // uid -> { user, tariffs, expiresAt }
+const INIT_CACHE_TTL_MS = 60 * 1000
+
+/**
+ * Агрегированная загрузка данных для инициализации фронта (один запрос вместо нескольких).
+ * GET /api/init — требуется Authorization: Bearer <Firebase ID token>.
+ * Ответ: { user, tariffs } — минимальный набор полей для дашборда.
+ */
+app.get('/api/init', async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  if (!db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  const uid = authResult.uid
+  const cached = initResponseCache.get(uid)
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({ success: true, user: cached.user, tariffs: cached.tariffs })
+  }
+  const redisKey = `init:${uid}`
+  const redisCached = await redisGet(redisKey)
+  if (redisCached) {
+    try {
+      const { user, tariffs } = JSON.parse(redisCached)
+      initResponseCache.set(uid, { user, tariffs, expiresAt: Date.now() + INIT_CACHE_TTL_MS })
+      return res.json({ success: true, user, tariffs })
+    } catch (_) { /* invalid JSON — идём в БД */ }
+  }
+  const appId = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+  const tariffsRef = db.collection(`artifacts/${appId}/public/data/tariffs`)
+  try {
+    const [userSnap, tariffsSnap] = await Promise.all([
+      usersRef.doc(uid).get(),
+      tariffsRef.limit(500).get(),
+    ])
+    const userDoc = userSnap.exists ? userSnap.data() : null
+    const user = !userDoc
+      ? null
+      : {
+          id: uid,
+          email: userDoc.email ?? '',
+          name: userDoc.name ?? '',
+          login: userDoc.login ?? '',
+          expiresAt: userDoc.expiresAt ?? null,
+          tariffId: userDoc.tariffId ?? null,
+          tariffName: userDoc.tariffName ?? '',
+          plan: userDoc.plan ?? '',
+        }
+    const tariffs = tariffsSnap.docs.map((d) => {
+      const data = d.data() || {}
+      return {
+        id: d.id,
+        name: data.name ?? d.id,
+        active: data.active !== false,
+      }
+    })
+    initResponseCache.set(uid, { user, tariffs, expiresAt: Date.now() + INIT_CACHE_TTL_MS })
+    await redisSet(redisKey, JSON.stringify({ user, tariffs }), Math.floor(INIT_CACHE_TTL_MS / 1000))
+    return res.json({ success: true, user, tariffs })
+  } catch (err) {
+    console.error('❌ GET /api/init:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * Heartbeat для аналитики: обновить lastActiveAt при входе в приложение или подключении VPN.
+ * POST /api/analytics/heartbeat — требуется Authorization: Bearer <Firebase ID token>.
+ */
+app.post('/api/analytics/heartbeat', express.json(), async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  if (!db) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  }
+  const appId = process.env.APP_ID || 'skyputh'
+  const ok = await updateLastActiveAt(db, appId, authResult.uid)
+  return res.json({ success: true, updated: ok })
 })
 
 // ========== Конфигурация n8n ==========
@@ -597,6 +726,7 @@ async function createNotification(params) {
 }
 
 const NOTIFICATION_TEMPLATES_PATH = `artifacts/${process.env.APP_ID || 'skyputh'}/public/data/notification_templates`
+const SCHEDULED_MAILINGS_PATH = `artifacts/${process.env.APP_ID || 'skyputh'}/public/data/scheduled_mailings`
 
 /** Подстановка переменных в шаблон. Переменные: {{user.name}}, {{user.email}}, {{user.login}}, {{user.phone}}, {{user.tariffName}}, {{user.plan}}, {{user.expiresAt}}, {{user.subId}}, {{paymentLink}}. */
 function substituteTemplate(template, user, extra = {}) {
@@ -652,31 +782,46 @@ async function sendWebPushToUser(userId, payload) {
   const col = db.collection(`artifacts/${APP_ID}/public/data/push_subscriptions`)
   const snap = await col.where('userId', '==', uid).get()
   const errors = []
-  let sent = 0
-  for (const doc of snap.docs) {
-    const data = doc.data()
-    const sub = {
-      endpoint: data.endpoint,
-      keys: { p256dh: data.keys?.p256dh || data.p256dh, auth: data.keys?.auth || data.auth },
-      expirationTime: data.expirationTime || null,
-    }
-    if (!sub.endpoint || !sub.keys.p256dh || !sub.keys.auth) continue
-    try {
-      await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 86400 })
-      sent++
-    } catch (err) {
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        try { await doc.ref.delete() } catch (_) {}
+  const payloadStr = JSON.stringify(payload)
+  const sendOpts = { TTL: 86400 }
+  const results = await Promise.all(
+    snap.docs.map(async (doc) => {
+      const data = doc.data()
+      const sub = {
+        endpoint: data.endpoint,
+        keys: { p256dh: data.keys?.p256dh || data.p256dh, auth: data.keys?.auth || data.auth },
+        expirationTime: data.expirationTime || null,
       }
-      errors.push(err.message || String(err))
-    }
-  }
+      if (!sub.endpoint || !sub.keys.p256dh || !sub.keys.auth) return { sent: 0, error: null }
+      try {
+        await webpush.sendNotification(sub, payloadStr, sendOpts)
+        return { sent: 1, error: null }
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          try { await doc.ref.delete() } catch (_) {}
+        }
+        return { sent: 0, error: err.message || String(err) }
+      }
+    })
+  )
+  let sent = 0
+  results.forEach((r) => {
+    if (r.sent) sent++
+    if (r.error) errors.push(r.error)
+  })
   return { sent, errors }
 }
 
 /** Кэш uid→admin (только положительные результаты, TTL 5 мин). Снижает Firestore reads. */
 const adminCache = new Map() // uid -> { expiresAt: number }
 const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000
+
+/** Кэш результата проверки токена (хэш токена → { uid, expiresAt }), TTL 2 мин. Снижает повторные verifyIdToken. */
+const ID_TOKEN_CACHE_TTL_MS = 2 * 60 * 1000
+const idTokenCache = new Map() // tokenHash -> { uid, expiresAt }
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex')
+}
 
 /**
  * Проверить Firebase ID token и убедиться, что пользователь — админ (claim или роль в Firestore).
@@ -791,7 +936,75 @@ async function ensureAdmin(req, res) {
 }
 
 /**
+ * Проверить, что uid — админ (без повторной проверки токена). Используется после verifyIdToken,
+ * когда токен уже проверен (напр. support-auto-reply). Возвращает { ok: true, uid } или 403 и { ok: false }.
+ */
+async function ensureAdminByUid(uid, req, res) {
+  if (!db) {
+    res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return { ok: false }
+  }
+  const cached = adminCache.get(uid)
+  if (cached && Date.now() < cached.expiresAt) {
+    return { ok: true, uid }
+  }
+  const clientAppId = (req.headers['x-app-id'] || req.headers['X-App-Id'] || '').trim() || null
+  const appIdsToTry = [
+    clientAppId,
+    APP_ID,
+    'skyputh',
+    'skypathvpn',
+    process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
+  ].filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i)
+  const isAdminRole = (value) => String(value ?? '').trim().toLowerCase() === 'admin'
+  let emailFromDoc = null
+  for (const appId of appIdsToTry) {
+    try {
+      const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
+      const snap = await userRef.get()
+      if (snap.exists) {
+        const data = snap.data()
+        if (!emailFromDoc && data.email) emailFromDoc = (data.email || '').trim().toLowerCase()
+        if (isAdminRole(data.role)) {
+          adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
+          return { ok: true, uid }
+        }
+      }
+    } catch (err) {
+      console.warn('ensureAdminByUid: ошибка чтения пользователя', { uid, appId, error: err.message })
+    }
+  }
+  if (emailFromDoc) {
+    for (const appId of appIdsToTry) {
+      try {
+        const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
+        const snap = await usersRef.where('email', '==', emailFromDoc).limit(5).get()
+        for (const doc of snap.docs) {
+          if (isAdminRole(doc.data().role)) {
+            adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
+            return { ok: true, uid }
+          }
+        }
+      } catch (err) {
+        console.warn('ensureAdminByUid: поиск по email', { appId, error: err.message })
+      }
+    }
+    const adminEmailsRaw = process.env.ADMIN_EMAILS || ''
+    if (adminEmailsRaw.trim()) {
+      const allowed = adminEmailsRaw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+      if (allowed.includes(emailFromDoc)) {
+        adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
+        return { ok: true, uid }
+      }
+    }
+  }
+  res.status(403).json({ success: false, error: 'Недостаточно прав' })
+  return { ok: false }
+}
+
+/**
  * Проверить Firebase ID token (любой пользователь). Возвращает { ok: true, uid } или 401 и { ok: false }.
+ * Результат кэшируется по хэшу токена на ID_TOKEN_CACHE_TTL_MS (2 мин), чтобы не вызывать verifyIdToken повторно.
  */
 async function verifyIdToken(req, res) {
   if (!admin) {
@@ -804,9 +1017,16 @@ async function verifyIdToken(req, res) {
     return { ok: false }
   }
   const idToken = authHeader.slice(7)
+  const key = hashToken(idToken)
+  const cached = idTokenCache.get(key)
+  if (cached && Date.now() < cached.expiresAt) {
+    return { ok: true, uid: cached.uid }
+  }
   try {
     const decoded = await admin.auth().verifyIdToken(idToken)
-    return { ok: true, uid: decoded.uid }
+    const uid = decoded.uid
+    idTokenCache.set(key, { uid, expiresAt: Date.now() + ID_TOKEN_CACHE_TTL_MS })
+    return { ok: true, uid }
   } catch (err) {
     res.status(401).json({ success: false, error: 'Неверный или истёкший токен' })
     return { ok: false }
@@ -903,6 +1123,77 @@ async function resolveRecipientIds(dbInst, appId, filter, plan, tariffId) {
   }
   const snap = await q.get()
   return snap.docs.map((d) => d.id).filter(Boolean)
+}
+
+/**
+ * Выполнить рассылку по уже известному списку userIds (и шаблону/тексту).
+ * @returns {{ sent: number, failed: number, total: number }}
+ */
+async function executeBroadcastPayload(dbInst, appId, paymentLink, opts) {
+  let userIds = Array.isArray(opts.userIds) ? opts.userIds.map((u) => String(u)) : []
+  const templateId = (opts.templateId || '').toString().trim()
+  const type = (opts.type || 'admin_broadcast').toString().trim()
+  let title = (opts.title || '').toString().trim()
+  let bodyText = (opts.body || '').toString().trim()
+  let overview = opts.overview != null ? String(opts.overview).trim() || null : null
+  let buttons = Array.isArray(opts.buttons) ? opts.buttons.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : []
+
+  let template = null
+  if (templateId) {
+    const tSnap = await dbInst.doc(`${NOTIFICATION_TEMPLATES_PATH}/${templateId}`).get()
+    if (!tSnap.exists) return { sent: 0, failed: 0, total: 0 }
+    template = { id: tSnap.id, ...tSnap.data() }
+    if (!title) title = template.titleTemplate || ''
+    if (!bodyText) bodyText = template.bodyTemplate || ''
+    if (overview == null && template.overviewTemplate != null) overview = template.overviewTemplate
+    if (buttons.length === 0 && Array.isArray(template.buttons) && template.buttons.length > 0) buttons = template.buttons
+  }
+  if (!title || !bodyText || userIds.length === 0) return { sent: 0, failed: 0, total: userIds.length }
+
+  const usersRef = dbInst.collection(`artifacts/${appId}/public/data/users_v4`)
+  const needUserData = !!(template || buttons.some((b) => (b.url || '').includes('{{')))
+  const BROADCAST_CHUNK = 8
+  let sent = 0
+  let failed = 0
+  for (let i = 0; i < userIds.length; i += BROADCAST_CHUNK) {
+    const chunk = userIds.slice(i, i + BROADCAST_CHUNK)
+    const results = await Promise.all(
+      chunk.map(async (uidStr) => {
+        let userData = { id: uidStr }
+        if (needUserData) {
+          try {
+            const uSnap = await usersRef.doc(uidStr).get()
+            if (uSnap.exists) userData = { id: uSnap.id, ...uSnap.data() }
+          } catch (_) {}
+        }
+        const extra = { paymentLink }
+        const finalTitle = substituteTemplate(title, userData, extra)
+        const finalBody = substituteTemplate(bodyText, userData, extra)
+        const finalOverview = overview != null ? substituteTemplate(overview, userData, extra) : null
+        const finalButtons = buttons.map((b) => ({ label: substituteTemplate(b.label, userData, extra), url: substituteTemplate(b.url, userData, extra) }))
+        const data = finalButtons.length > 0 ? { buttons: finalButtons } : null
+        const ok = await createNotification({
+          userId: uidStr,
+          type,
+          title: finalTitle,
+          body: finalBody,
+          overview: finalOverview,
+          data,
+        })
+        if (ok) {
+          const pushPayload = { title: finalTitle, body: finalBody.slice(0, 200), url: paymentLink, type: 'notification', notificationType: type }
+          await sendWebPushToUser(uidStr, pushPayload)
+          return { sent: 1, failed: 0 }
+        }
+        return { sent: 0, failed: 1 }
+      })
+    )
+    results.forEach((r) => {
+      sent += r.sent
+      failed += r.failed
+    })
+  }
+  return { sent, failed, total: userIds.length }
 }
 
 app.get('/api/admin/notifications/templates', async (req, res) => {
@@ -1036,41 +1327,16 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Обязательны title и body (или выберите шаблон)' })
   }
 
-  const linkUrl = paymentLink
-  let sent = 0
-  let failed = 0
-  const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
-  for (const uid of userIds) {
-    const uidStr = String(uid)
-    let userData = { id: uidStr }
-    if (template || buttons.some((b) => (b.url || '').includes('{{'))) {
-      try {
-        const uSnap = await usersRef.doc(uidStr).get()
-        if (uSnap.exists) userData = { id: uSnap.id, ...uSnap.data() }
-      } catch (_) {}
-    }
-    const extra = { paymentLink }
-    const finalTitle = substituteTemplate(title, userData, extra)
-    const finalBody = substituteTemplate(bodyText, userData, extra)
-    const finalOverview = overview != null ? substituteTemplate(overview, userData, extra) : null
-    const finalButtons = buttons.map((b) => ({ label: substituteTemplate(b.label, userData, extra), url: substituteTemplate(b.url, userData, extra) }))
-    const data = finalButtons.length > 0 ? { buttons: finalButtons } : null
-    const ok = await createNotification({
-      userId: uidStr,
-      type,
-      title: finalTitle,
-      body: finalBody,
-      overview: finalOverview,
-      data,
-    })
-    if (ok) {
-      sent += 1
-      const pushPayload = { title: finalTitle, body: finalBody.slice(0, 200), url: linkUrl, type: 'notification', notificationType: type }
-      await sendWebPushToUser(uidStr, pushPayload)
-    } else {
-      failed += 1
-    }
-  }
+  const result = await executeBroadcastPayload(db, appId, paymentLink, {
+    userIds,
+    templateId: templateId || undefined,
+    type,
+    title,
+    body: bodyText,
+    overview,
+    buttons,
+  })
+  const { sent, failed } = result
   if (failed > 0) {
     notifyAdminError({
       source: 'broadcast',
@@ -1133,6 +1399,224 @@ app.post('/api/admin/notifications/send-one', express.json(), async (req, res) =
 })
 
 /**
+ * Отправить произвольный текст пользователю в Telegram (только админ). Для офферов из AI-воронки.
+ * POST /api/admin/notifications/send-user-telegram — body: { userId, text }
+ */
+app.post('/api/admin/notifications/send-user-telegram', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const { userId, text } = req.body || {}
+  const uid = (userId ?? '').toString().trim()
+  const message = (text ?? '').toString().trim()
+  if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
+  if (!message) return res.status(400).json({ success: false, error: 'Укажите text' })
+  try {
+    const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`).get()
+    const rawTgId = userSnap.exists && userSnap.data() && userSnap.data().tgId != null ? userSnap.data().tgId : null
+    const tgId = rawTgId != null ? String(rawTgId).trim() : ''
+    if (!tgId) return res.json({ success: true, sent: false, reason: 'У пользователя не привязан Telegram' })
+    const botToken = await getTelegramToken()
+    if (!botToken) return res.json({ success: true, sent: false, reason: 'Telegram бот не настроен' })
+    const result = await sendTelegramMessage(botToken, tgId, message)
+    return res.json({ success: true, sent: result.ok, reason: result.ok ? undefined : (result.error || 'Ошибка отправки') })
+  } catch (err) {
+    console.error('❌ POST /api/admin/notifications/send-user-telegram:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * Отложенные рассылки: список (для календаря и списка).
+ * GET /api/admin/notifications/scheduled?from=ISO&to=ISO&status=pending
+ */
+app.get('/api/admin/notifications/scheduled', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  try {
+    const from = (req.query.from || '').toString().trim()
+    const to = (req.query.to || '').toString().trim()
+    const status = (req.query.status || '').toString().trim()
+    let q = db.collection(SCHEDULED_MAILINGS_PATH).orderBy('scheduledAt', 'asc')
+    if (from) q = q.where('scheduledAt', '>=', from)
+    if (to) q = q.where('scheduledAt', '<=', to)
+    const snap = await q.limit(300).get()
+    let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    if (status) list = list.filter((s) => s.status === status)
+    res.json({ success: true, scheduled: list })
+  } catch (err) {
+    console.error('GET /api/admin/notifications/scheduled:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * Отложенная рассылка: создать.
+ * POST /api/admin/notifications/scheduled
+ * Body: как broadcast + scheduledAt (ISO), name? (название для календаря)
+ */
+app.post('/api/admin/notifications/scheduled', express.json(), async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const appId = process.env.APP_ID || 'skyputh'
+  const body = req.body || {}
+  const scheduledAt = (body.scheduledAt || '').toString().trim()
+  if (!scheduledAt) return res.status(400).json({ success: false, error: 'Укажите scheduledAt (ISO дата и время)' })
+  const scheduledMs = new Date(scheduledAt).getTime()
+  if (Number.isNaN(scheduledMs) || scheduledMs <= Date.now()) {
+    return res.status(400).json({ success: false, error: 'scheduledAt должна быть в будущем' })
+  }
+  let userIds = Array.isArray(body.userIds) ? body.userIds.filter(Boolean) : []
+  const recipientFilter = (body.recipientFilter || (userIds.length > 0 ? 'userIds' : 'all')).toString()
+  const plan = (body.plan || '').toString().trim()
+  const tariffId = (body.tariffId || '').toString().trim()
+  const templateId = (body.templateId || '').toString().trim()
+  const type = (body.type || 'admin_broadcast').toString().trim()
+  const title = (body.title || '').toString().trim()
+  const bodyText = (body.body || '').toString().trim()
+  const overview = body.overview != null ? String(body.overview).trim() || null : null
+  const buttons = Array.isArray(body.buttons) ? body.buttons.filter((b) => b && (b.label || b.url)).map((b) => ({ label: String(b.label || '').trim(), url: String(b.url || '').trim() })) : []
+  if (recipientFilter !== 'userIds') {
+    userIds = await resolveRecipientIds(db, appId, recipientFilter, plan, tariffId)
+  }
+  if (userIds.length === 0 && recipientFilter === 'userIds') {
+    return res.status(400).json({ success: false, error: 'Нет получателей' })
+  }
+  let titleCheck = title
+  let bodyCheck = bodyText
+  if (templateId) {
+    const tSnap = await db.doc(`${NOTIFICATION_TEMPLATES_PATH}/${templateId}`).get()
+    if (!tSnap.exists) return res.status(404).json({ success: false, error: 'Шаблон не найден' })
+    const t = tSnap.data()
+    if (!titleCheck) titleCheck = t.titleTemplate || ''
+    if (!bodyCheck) bodyCheck = t.bodyTemplate || ''
+  }
+  if (!titleCheck || !bodyCheck) return res.status(400).json({ success: false, error: 'Укажите title и body или templateId' })
+  const name = (body.name || titleCheck || 'Рассылка').toString().trim().slice(0, 200)
+  try {
+    const now = new Date().toISOString()
+    const doc = await db.collection(SCHEDULED_MAILINGS_PATH).add({
+      name,
+      scheduledAt,
+      status: 'pending',
+      templateId: templateId || null,
+      type,
+      title: title || null,
+      body: bodyText || null,
+      overview,
+      buttons,
+      recipientFilter,
+      plan: plan || null,
+      tariffId: tariffId || null,
+      userIds: userIds.length > 0 ? userIds : null,
+      createdAt: now,
+      createdBy: authResult.uid,
+    })
+    res.status(201).json({ success: true, id: doc.id })
+  } catch (err) {
+    console.error('POST /api/admin/notifications/scheduled:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * Отложенная рассылка: обновить (только pending) или отменить.
+ * PATCH /api/admin/notifications/scheduled/:id — status: 'cancelled' или scheduledAt, name
+ */
+app.patch('/api/admin/notifications/scheduled/:id', express.json(), async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const { id } = req.params
+  const { status, scheduledAt: newScheduledAt, name: newName } = req.body || {}
+  try {
+    const ref = db.doc(`${SCHEDULED_MAILINGS_PATH}/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) return res.status(404).json({ success: false, error: 'Не найдено' })
+    const data = snap.data()
+    if (data.status !== 'pending') return res.status(400).json({ success: false, error: 'Можно изменить только запланированную рассылку' })
+    const updates = { updatedAt: new Date().toISOString() }
+    if (status === 'cancelled') updates.status = 'cancelled'
+    if (newScheduledAt != null) {
+      const ms = new Date(newScheduledAt).getTime()
+      if (!Number.isNaN(ms) && ms > Date.now()) updates.scheduledAt = new Date(ms).toISOString()
+    }
+    if (newName != null && String(newName).trim()) updates.name = String(newName).trim().slice(0, 200)
+    await ref.update(updates)
+    res.json({ success: true })
+  } catch (err) {
+    console.error('PATCH /api/admin/notifications/scheduled/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * Отложенная рассылка: удалить (отменить).
+ * DELETE /api/admin/notifications/scheduled/:id
+ */
+app.delete('/api/admin/notifications/scheduled/:id', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  const { id } = req.params
+  try {
+    const ref = db.doc(`${SCHEDULED_MAILINGS_PATH}/${id}`)
+    const snap = await ref.get()
+    if (!snap.exists) return res.status(404).json({ success: false, error: 'Не найдено' })
+    await ref.update({ status: 'cancelled', updatedAt: new Date().toISOString() })
+    res.json({ success: true })
+  } catch (err) {
+    console.error('DELETE /api/admin/notifications/scheduled/:id:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** Обработка отложенных рассылок: найти pending с scheduledAt <= now и выполнить. */
+async function processScheduledMailings() {
+  if (!db) return
+  const appId = process.env.APP_ID || 'skyputh'
+  const baseUrl = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
+  const paymentLink = baseUrl ? `${baseUrl}/#dashboard` : '/#dashboard'
+  const now = new Date().toISOString()
+  try {
+    const snap = await db.collection(SCHEDULED_MAILINGS_PATH).where('status', '==', 'pending').where('scheduledAt', '<=', now).limit(20).get()
+    for (const doc of snap.docs) {
+      const data = doc.data()
+      let userIds = Array.isArray(data.userIds) ? data.userIds : []
+      if (userIds.length === 0 && data.recipientFilter) {
+        userIds = await resolveRecipientIds(db, appId, data.recipientFilter, data.plan || '', data.tariffId || '')
+      }
+      if (userIds.length === 0) {
+        await doc.ref.update({ status: 'failed', sentAt: new Date().toISOString(), error: 'Нет получателей', updatedAt: new Date().toISOString() })
+        continue
+      }
+      const result = await executeBroadcastPayload(db, appId, paymentLink, {
+        userIds,
+        templateId: data.templateId || undefined,
+        type: data.type || 'admin_broadcast',
+        title: data.title || '',
+        body: data.body || '',
+        overview: data.overview || null,
+        buttons: data.buttons || [],
+      })
+      await doc.ref.update({
+        status: result.total > 0 ? 'sent' : 'failed',
+        sentAt: new Date().toISOString(),
+        sent: result.sent,
+        failed: result.failed,
+        total: result.total,
+        error: result.failed > 0 ? `Отправлено ${result.sent}, ошибок ${result.failed}` : null,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+  } catch (err) {
+    console.error('processScheduledMailings:', err.message)
+  }
+}
+
+/**
  * Проверка и алерты для подписок в проблемном состоянии
  * @param {string} subscriptionId - ID подписки
  * @param {Object} subscriptionData - Данные подписки
@@ -1189,8 +1673,8 @@ async function checkSubscriptionAlerts(subscriptionId, subscriptionData) {
     
     // Логируем алерты и уведомляем админа (Telegram + панель ошибок)
     if (alerts.length > 0) {
+      await Promise.all(alerts.map((alert) => logN8NEvent('subscription_alert', alert, 'warning', alert.message)))
       for (const alert of alerts) {
-        await logN8NEvent('subscription_alert', alert, 'warning', alert.message)
         console.warn(`🚨 n8n-webhook-proxy: Алерт: ${alert.message}`, alert)
         if (alert.severity === 'critical' || alert.severity === 'high') {
           notifyAdminError({
@@ -1462,10 +1946,11 @@ async function callN8NWebhook(webhookUrl, data, method = 'POST') {
 // ========== Routes ==========
 
 /**
- * Health Check (простой для скриптов запуска)
- * GET /health
+ * Health Check (простой для скриптов запуска / cold start).
+ * GET /health — без БД, для load balancer.
  */
 app.get('/health', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
   res.json({
     status: 'ok',
     service: 'n8n-webhook-proxy',
@@ -2031,9 +2516,9 @@ app.post('/api/promocodes/validate', async (req, res) => {
 app.post('/api/ai/chat', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ» или DEEPSEEK_API_KEY в .env' })
+  const config = await getActiveAiConfig()
+  if (!config.apiKey) {
+    return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ» или переменную окружения для выбранного провайдера' })
   }
   const body = req.body || {}
   const messages = body.messages
@@ -2044,15 +2529,15 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
     role: (m.role === 'system' || m.role === 'user' || m.role === 'assistant') ? m.role : 'user',
     content: typeof m.content === 'string' ? m.content : String(m.content || ''),
   }))
-  const settings = await getSettingsCached()
-  const opts = {
-    apiKey,
-    model: body.model || settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
-    temperature: body.temperature != null ? body.temperature : (settings.deepseekTemperature != null ? settings.deepseekTemperature : undefined),
-    max_tokens: body.max_tokens != null ? body.max_tokens : (settings.deepseekMaxTokens != null ? settings.deepseekMaxTokens : undefined),
-    timeout: body.timeout != null ? body.timeout : (settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : undefined),
+  const chatConfig = {
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: body.model || config.model,
+    temperature: body.temperature != null ? body.temperature : config.temperature,
+    max_tokens: body.max_tokens != null ? body.max_tokens : config.max_tokens,
+    timeout: body.timeout != null ? body.timeout : config.timeout,
   }
-  const result = await deepseekChat(normalized, opts)
+  const result = await unifiedChat(normalized, chatConfig)
   if (result.ok) {
     return res.json({ success: true, content: result.content, usage: result.usage })
   }
@@ -2060,11 +2545,11 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
   return res.status(status).json({ success: false, error: result.error, code: result.code })
 })
 
-const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): лимит трафика, использовано/остаток, срок в панели. Используй эти данные, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
+const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): по клиенту — лимит трафика, использовано/остаток, срок в панели; по серверу — список инбаундов/протоколов. Эти данные запрашиваются через webhook при каждой консультации. Используй их, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
 Задачи:
-1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui, дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия), если они есть.
+1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui (клиент и сервер), дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия, протоколы), если они есть.
 2) Если в вопросе упоминаются ошибки, логи, сбои подключения, неработающий VPN или ты видишь признаки технической проблемы — в начале ответа напиши ровно одну строку: ESCALATE: <краткая причина>. Затем пустая строка. Затем абзац для пользователя: предупреди, что обращение передано специалисту. Затем основной текст ответа.
-Формат ответа: только текст для ответа пользователю. При эскалации — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение, затем ответ. Не упоминай «данные из базы» или «3x-ui» в ответе пользователю — формулируй по-человечески («по нашим данным», «ваша подписка» и т.д.).`
+Формат ответа: только текст для ответа пользователю. При эскалации — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение, затем ответ. Не упоминай «данные из базы» или «3x-ui» в ответе пользователю — формулируй по-человечески («по нашим данным», «ваша подписка», «в панели» и т.д.).`
 
 /**
  * POST /api/ai/support-suggest — предложить ответ по тикету (ИИ анализирует вопрос, данные пользователя, даёт ответ; при признаках проблемы — эскалация админу).
@@ -2074,9 +2559,9 @@ const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдерж
 app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
+  const aiConfig = await getActiveAiConfig()
+  if (!aiConfig.apiKey) {
+    return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
   const ticketId = (req.body?.ticketId ?? '').toString().trim()
   if (!ticketId) return res.status(400).json({ success: false, error: 'Укажите ticketId' })
@@ -2094,7 +2579,7 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'У тикета не указан userId' })
     }
 
-    const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
+    const messagesSnap = await ticketRef.collection('messages').orderBy('createdAt').get()
     const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
 
     let userDataSafe = {}
@@ -2120,19 +2605,23 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
       .map((m) => `${m.from === 'support' ? 'Поддержка' : 'Пользователь'}: ${(m.text || '').trim()}`)
       .join('\n\n')
     const uFor3x = userSnap.exists ? userSnap.data() : {}
-    const context3xUi = await fetchOperatorContext3xUi(userId, uFor3x)
-    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+    const [clientCtx, serverCtx] = await Promise.all([
+      fetchOperatorContext3xUi(userId, uFor3x),
+      fetchServerContext3xUi(),
+    ])
+    const context3xUiBlock = `Клиент (3x-ui): ${clientCtx.contextLine}. Сервер (3x-ui): ${serverCtx.contextLine}`
+    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUiBlock}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
-    const settings = await getSettingsCached()
-    const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
-    const result = await deepseekChat(
+    const systemPrompt = (aiConfig.systemPromptPreset && String(aiConfig.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+    const result = await unifiedChat(
       [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
       {
-        apiKey,
-        model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+        provider: aiConfig.provider,
+        apiKey: aiConfig.apiKey,
+        model: aiConfig.model,
         temperature: 0.5,
         max_tokens: 1024,
-        timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
+        timeout: aiConfig.timeout,
       }
     )
 
@@ -2222,15 +2711,49 @@ async function ensureMichaelOperator() {
 }
 
 /**
- * Получить данные из панели VPN (3x-ui) для контекста оператора: трафик, срок в панели.
+ * Форматировать данные клиента 3x-ui в читаемый текст (для промпта и для отображения пользователю).
+ * @param {object} stats - объект из webhook get_client_stats (total, up, down, expiryTime и т.д.)
+ * @returns {{ contextLine: string, userSummary: string }}
+ */
+function formatClientStatsReadable(stats) {
+  if (!stats || typeof stats !== 'object') {
+    return { contextLine: 'Данные о клиенте не получены.', userSummary: 'Нет данных по трафику и подписке.' }
+  }
+  const total = stats.total != null ? Number(stats.total) : null
+  const up = stats.up != null ? Number(stats.up) : 0
+  const down = stats.down != null ? Number(stats.down) : 0
+  const usedBytes = up + down
+  const totalGB = total != null ? (total / (1024 ** 3)).toFixed(2) : null
+  const usedGB = (usedBytes / (1024 ** 3)).toFixed(2)
+  const remainingGB = total != null ? Math.max(0, (total - usedBytes) / (1024 ** 3)).toFixed(2) : null
+  const expiryTime = stats.expiryTime != null ? new Date(Number(stats.expiryTime) * 1000).toLocaleDateString('ru-RU') : (stats.expiryTime ?? 'не указано')
+  const contextLine = [
+    totalGB != null ? `Лимит трафика: ${totalGB} GB` : null,
+    `Использовано: ${usedGB} GB`,
+    remainingGB != null ? `Остаток: ${remainingGB} GB` : null,
+    `Срок в панели VPN: ${expiryTime}`,
+  ].filter(Boolean).join('; ')
+  const userSummary = [
+    totalGB != null ? `• Лимит трафика: ${totalGB} GB` : null,
+    `• Использовано: ${usedGB} GB`,
+    remainingGB != null ? `• Остаток: ${remainingGB} GB` : null,
+    `• Подписка в панели до: ${expiryTime}`,
+  ].filter(Boolean).join('\n')
+  return { contextLine, userSummary }
+}
+
+/**
+ * Получить данные клиента из панели VPN (3x-ui) через webhook: трафик, срок в панели.
  * @param {string} userId - uid пользователя в Firestore
  * @param {{ uuid?: string, email?: string, subId?: string }} userData - данные из users_v4
- * @returns {Promise<string>} Текст для вставки в промпт или "нет данных"
+ * @returns {Promise<{ contextLine: string, userSummary: string }>}
  */
 async function fetchOperatorContext3xUi(userId, userData) {
   const uuid = (userData?.uuid ?? '').toString().trim()
   const email = (userData?.email ?? userData?.login ?? '').toString().trim()
-  if (!uuid && !email) return 'Нет данных (нет uuid/email для запроса в 3x-ui).'
+  if (!uuid && !email) {
+    return { contextLine: 'Нет данных (нет uuid/email для запроса в 3x-ui).', userSummary: 'Нет идентификатора для запроса данных VPN.' }
+  }
   const webhookUrl = N8N_WEBHOOKS.getClientStats || getDefaultWebhooks().getClientStats
   const payload = {
     operation: 'get_client_stats',
@@ -2244,24 +2767,54 @@ async function fetchOperatorContext3xUi(userId, userData) {
   try {
     const result = await callN8NWebhook(webhookUrl, payload)
     const stats = result?.stats ?? result?.data ?? result
-    if (!stats || typeof stats !== 'object') return 'Запрос в 3x-ui выполнен, данных о клиенте не получено.'
-    const total = stats.total != null ? Number(stats.total) : null
-    const up = stats.up != null ? Number(stats.up) : 0
-    const down = stats.down != null ? Number(stats.down) : 0
-    const usedBytes = up + down
-    const totalGB = total != null ? (total / (1024 ** 3)).toFixed(2) : null
-    const usedGB = (usedBytes / (1024 ** 3)).toFixed(2)
-    const remainingGB = total != null ? Math.max(0, (total - usedBytes) / (1024 ** 3)).toFixed(2) : null
-    const expiryTime = stats.expiryTime != null ? new Date(Number(stats.expiryTime) * 1000).toLocaleDateString('ru-RU') : (stats.expiryTime ?? 'не указано')
-    const parts = []
-    if (totalGB != null) parts.push(`Лимит трафика: ${totalGB} GB`)
-    parts.push(`Использовано: ${usedGB} GB`)
-    if (remainingGB != null) parts.push(`Остаток: ${remainingGB} GB`)
-    parts.push(`Срок в панели VPN: ${expiryTime}`)
-    return parts.join('; ')
+    return formatClientStatsReadable(stats)
   } catch (err) {
     console.warn('🤖 Майкл: не удалось получить данные 3x-ui для контекста', err.message)
-    return `Запрос в 3x-ui не выполнен: ${err.message || 'ошибка'}`
+    const msg = err.message || 'ошибка'
+    return { contextLine: `Запрос в 3x-ui не выполнен: ${msg}`, userSummary: `Не удалось загрузить данные VPN: ${msg}` }
+  }
+}
+
+/**
+ * Получить данные сервера/панели 3x-ui через webhook (инбаунды, ноды) для контекста оператора.
+ * @returns {Promise<{ contextLine: string, userSummary: string }>}
+ */
+async function fetchServerContext3xUi() {
+  const webhookUrl = N8N_WEBHOOKS.getInbounds || getDefaultWebhooks().getInbounds
+  const payload = {
+    operation: 'get_inbounds',
+    category: 'get_server_data',
+    timestamp: new Date().toISOString(),
+  }
+  try {
+    const result = await callN8NWebhook(webhookUrl, payload, 'GET')
+    const raw = result?.inbounds ?? result?.data ?? result
+    const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.list) ? raw.list : (raw && raw.obj ? raw.obj : []))
+    if (!list.length) {
+      const hint = result && typeof result === 'object' ? ' (нет инбаундов или пустой ответ)' : ''
+      return { contextLine: `Сервер 3x-ui: запрос выполнен, инбаунды не получены${hint}.`, userSummary: '' }
+    }
+    const lines = []
+    const forUser = []
+    for (let i = 0; i < Math.min(list.length, 10); i++) {
+      const inv = list[i]
+      const tag = inv.tag || inv.remark || inv.id || `#${i + 1}`
+      const protocol = inv.protocol || inv.type || ''
+      const port = inv.port ?? inv.portList ?? ''
+      lines.push(`${tag}: ${protocol}${port ? `, порт ${port}` : ''}`)
+      forUser.push(`• ${tag}: ${protocol}${port ? `, порт ${port}` : ''}`)
+    }
+    if (list.length > 10) {
+      lines.push(`… и ещё ${list.length - 10} инбаундов`)
+      forUser.push(`• … всего ${list.length} серверов/инбаундов`)
+    }
+    const contextLine = `Сервер 3x-ui, инбаунды (${list.length}): ${lines.join('; ')}`
+    const userSummary = forUser.length ? `Серверы/протоколы в панели:\n${forUser.join('\n')}` : ''
+    return { contextLine, userSummary }
+  } catch (err) {
+    console.warn('🤖 Майкл: не удалось получить данные сервера 3x-ui', err.message)
+    const msg = err.message || 'ошибка'
+    return { contextLine: `Запрос данных сервера 3x-ui не выполнен: ${msg}`, userSummary: '' }
   }
 }
 
@@ -2285,10 +2838,10 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
     return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   }
 
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    console.warn('support-auto-reply: DeepSeek API ключ не задан (DEEPSEEK_API_KEY или настройки ИИ в админке)')
-    return res.status(503).json({ success: false, replied: false, reason: 'ai_unavailable', error: 'ИИ недоступен: задайте API-ключ DeepSeek' })
+  const aiConfig = await getActiveAiConfig()
+  if (!aiConfig.apiKey) {
+    console.warn('support-auto-reply: ИИ не настроен (задайте API-ключ в разделе «Интеграции → ИИ»)')
+    return res.status(503).json({ success: false, replied: false, reason: 'ai_unavailable', error: 'ИИ недоступен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
 
   try {
@@ -2304,7 +2857,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'У тикета не указан userId' })
     }
     if (userId !== authResult.uid) {
-      const adminOk = await ensureAdmin(req, res)
+      const adminOk = await ensureAdminByUid(authResult.uid, req, res)
       if (!adminOk?.ok) return
     }
 
@@ -2355,8 +2908,8 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
         })
         await ticketRef.update({ updatedAt: typingNow })
 
-        const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
-        console.log('support-auto-reply (фон): запрос к DeepSeek', { ticketId })
+        const messagesSnap = await ticketRef.collection('messages').orderBy('createdAt').get()
+        console.log('support-auto-reply (фон): запрос к ИИ', { ticketId })
         const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
 
         let userDataSafe = {}
@@ -2381,25 +2934,46 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
           .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
           .join('\n\n')
         const u = userSnap.data() || {}
-        const context3xUi = await fetchOperatorContext3xUi(userId, u)
-        const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+        const [clientCtx, serverCtx] = await Promise.all([
+          fetchOperatorContext3xUi(userId, u),
+          fetchServerContext3xUi(),
+        ])
+        const context3xUiBlock = `Клиент (3x-ui): ${clientCtx.contextLine}. Сервер (3x-ui): ${serverCtx.contextLine}`
+        const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUiBlock}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
-        const settings = await getSettingsCached()
-        const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
-        console.log('🤖 Майкл: запрос к DeepSeek...', { ticketId })
-        const result = await deepseekChat(
+        const dataSummaryParts = []
+        if (clientCtx.userSummary) dataSummaryParts.push('Данные по вашему аккаунту (VPN):\n' + clientCtx.userSummary)
+        if (serverCtx.userSummary) dataSummaryParts.push(serverCtx.userSummary)
+        const dataSummaryText = dataSummaryParts.join('\n\n')
+        if (dataSummaryText) {
+          const summaryNow = new Date().toISOString()
+          await ticketRef.collection('messages').add({
+            from: 'support',
+            userId: AI_SUPPORT_USER_ID,
+            text: '📊 ' + dataSummaryText,
+            isDataSummary: true,
+            createdAt: summaryNow,
+          })
+          await ticketRef.update({ updatedAt: summaryNow })
+        }
+
+        const bgAiConfig = await getActiveAiConfig()
+        const systemPrompt = (bgAiConfig.systemPromptPreset && String(bgAiConfig.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+        console.log('🤖 Майкл: запрос к ИИ...', { ticketId, provider: bgAiConfig.provider })
+        const result = await unifiedChat(
           [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
           {
-            apiKey,
-            model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
+            provider: bgAiConfig.provider,
+            apiKey: bgAiConfig.apiKey,
+            model: bgAiConfig.model,
             temperature: 0.5,
             max_tokens: 1024,
-            timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
+            timeout: bgAiConfig.timeout,
           }
         )
 
         if (!result.ok) {
-          console.error('🤖 Майкл: ошибка DeepSeek', { ticketId, code: result.code, error: result.error })
+          console.error('🤖 Майкл: ошибка ИИ', { ticketId, provider: bgAiConfig.provider, code: result.code, error: result.error })
           await typingRef.update({ text: 'Не удалось сформировать ответ. Специалист ответит позже.', isTyping: false })
           return
         }
@@ -2478,6 +3052,7 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
   const rawExpiresAt = payload.expiresAt
   const rawSubId = payload.subId != null ? String(payload.subId).trim() : ''
   const rawUuid = payload.uuid != null ? String(payload.uuid).trim() : ''
+  const rawServiceStartDate = payload.serviceStartDate
   const rawDevices = payload.devices != null ? (typeof payload.devices === 'number' ? payload.devices : parseInt(String(payload.devices), 10)) : null
 
   const login = (rawLogin || rawEmail).trim().toLowerCase()
@@ -2530,6 +3105,15 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
     }
     const devices = (rawDevices != null && Number.isFinite(rawDevices) && rawDevices >= 1) ? Math.min(99, Math.max(1, rawDevices)) : 1
     const nowIso = new Date().toISOString()
+    let serviceStartDate = null
+    if (rawServiceStartDate !== undefined && rawServiceStartDate !== null && rawServiceStartDate !== '') {
+      if (typeof rawServiceStartDate === 'number' && Number.isFinite(rawServiceStartDate)) {
+        serviceStartDate = rawServiceStartDate
+      } else if (typeof rawServiceStartDate === 'string') {
+        const ms = Date.parse(rawServiceStartDate)
+        if (Number.isFinite(ms)) serviceStartDate = ms
+      }
+    }
     const userData = {
       email,
       login,
@@ -2547,6 +3131,7 @@ async function createOneUser(adminInst, dbInst, appId, payload) {
       createdAt: nowIso,
       updatedAt: nowIso,
     }
+    if (serviceStartDate != null) userData.serviceStartDate = serviceStartDate
     if (rawTgId) userData.tgId = rawTgId
     if (rawPaymentStatus && ['test_period', 'paid', 'unpaid'].includes(rawPaymentStatus)) userData.paymentStatus = rawPaymentStatus
     const userDocRef = dbInst.doc(`artifacts/${appId}/public/data/users_v4/${createdUid}`)
@@ -2653,6 +3238,7 @@ async function updateUserFromNocoDBRow(dbInst, appId, uid, data) {
   if (data.uuid !== undefined && String(data.uuid).trim() !== '') updates.uuid = String(data.uuid).trim()
   if (data.expiresAt !== undefined) updates.expiresAt = data.expiresAt
   if (data.devices !== undefined && Number.isFinite(data.devices)) updates.devices = Math.min(99, Math.max(1, data.devices))
+  if (data.serviceStartDate !== undefined) updates.serviceStartDate = data.serviceStartDate
   await userRef.update(updates)
 }
 
@@ -2674,6 +3260,26 @@ function normalizeSubscriptionStatus(value) {
 
 /** Парсит дату «действует до» из строки (ISO, DD.MM.YYYY, timestamp) в миллисекунды или null. */
 function parseExpiresAt(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? value : value * 1000
+  }
+  const s = String(value).trim()
+  if (!s) return null
+  const iso = Date.parse(s)
+  if (Number.isFinite(iso)) return iso
+  const ddmmyy = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/)
+  if (ddmmyy) {
+    const [, d, m, y] = ddmmyy
+    const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10)
+    const ms = Date.UTC(year, parseInt(m, 10) - 1, parseInt(d, 10))
+    return Number.isFinite(ms) ? ms : null
+  }
+  return null
+}
+
+/** Парсит дату создания строки (ISO, DD.MM.YYYY, timestamp) в миллисекунды или null. Используется для serviceStartDate. */
+function parseDateOrTimestamp(value) {
   if (value === undefined || value === null || value === '') return null
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value > 1e12 ? value : value * 1000
@@ -2774,6 +3380,74 @@ app.post('/api/admin/users', async (req, res) => {
     }
     console.error('❌ POST /api/admin/users:', err.message)
     return res.status(500).json({ success: false, error: err.message || 'Ошибка создания пользователя' })
+  }
+})
+
+/**
+ * POST /api/admin/users/:userId/assign-discount — назначить персональную скидку пользователю (только админ).
+ * Body: { percent: number, validFrom: string|number (ISO или мс), validTo: string|number }.
+ * Обновляет документ пользователя, создаёт уведомление в приложении, при возможности отправляет в Telegram.
+ */
+app.post('/api/admin/users/:userId/assign-discount', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  const uid = (req.params.userId ?? '').toString().trim()
+  if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
+  const { percent, validFrom, validTo } = req.body || {}
+  const percentNum = Math.min(100, Math.max(0, Number(percent) || 0))
+  const fromMs = validFrom != null ? (typeof validFrom === 'number' ? validFrom : new Date(validFrom).getTime()) : null
+  const toMs = validTo != null ? (typeof validTo === 'number' ? validTo : new Date(validTo).getTime()) : null
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) {
+    return res.status(400).json({ success: false, error: 'Укажите корректные validFrom и validTo (даты действия скидки)' })
+  }
+  try {
+    const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`)
+    const userSnap = await userRef.get()
+    if (!userSnap.exists) return res.status(404).json({ success: false, error: 'Пользователь не найден' })
+    await userRef.update({
+      discount: percentNum / 100,
+      discountValidFrom: fromMs,
+      discountValidTo: toMs,
+      updatedAt: new Date().toISOString(),
+    })
+    const fromStr = new Date(fromMs).toLocaleDateString('ru-RU')
+    const toStr = new Date(toMs).toLocaleDateString('ru-RU')
+    const notifTitle = 'Вам назначена персональная скидка'
+    const notifBody = `Скидка ${percentNum}% действует с ${fromStr} по ${toStr}. При оплате подписки скидка применится автоматически.`
+    await createNotification({
+      userId: uid,
+      type: 'personal_discount',
+      title: notifTitle,
+      body: notifBody,
+      overview: `Скидка ${percentNum}% до ${toStr}`,
+    })
+    let telegramSent = false
+    let telegramReason = null
+    const botToken = await getTelegramToken()
+    const rawTgId = userSnap.data().tgId
+    const tgId = rawTgId != null ? String(rawTgId).trim() : ''
+    if (botToken && tgId) {
+      const text = `🎁 <b>Вам назначена персональная скидка ${percentNum}%</b>\n\nДействует с ${escapeHtml(fromStr)} по ${escapeHtml(toStr)}.\n\nПри оплате подписки скидка применится автоматически.`
+      try {
+        const result = await sendTelegramMessage(botToken, tgId, text)
+        telegramSent = result.ok
+        if (!result.ok) telegramReason = result.error || 'Ошибка Telegram'
+      } catch (err) {
+        telegramReason = err.message || 'Ошибка отправки'
+      }
+    } else {
+      telegramReason = !botToken ? 'Telegram бот не настроен' : 'У пользователя не привязан Telegram'
+    }
+    return res.json({
+      success: true,
+      updated: true,
+      telegramSent,
+      reason: telegramReason || undefined,
+    })
+  } catch (err) {
+    console.error('❌ POST /api/admin/users/:userId/assign-discount:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
   }
 })
 
@@ -2928,6 +3602,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
   const mapDevices = (body.devicesColumn || body.devices_column || '').toString().trim()
   const mapUuid = (body.uuidColumn || body.uuid_column || '').toString().trim()
   const mapSubscriptionStatus = (body.subscriptionStatusColumn || body.subscriptionStatus_column || body.statusColumn || body.status_column || '').toString().trim()
+  const mapCreatedAt = (body.createdAtColumn || body.createdAt_column || body.serviceStartDateColumn || '').toString().trim()
   const skipEmptyRows = body.skipEmptyRows !== false
   const writeBackToNocoDB = body.writeBackToNocoDB !== false
   const writeBackLoginPasswordOnUpdate = body.writeBackLoginPasswordOnUpdate === true
@@ -3037,8 +3712,12 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
       const expiresAtMs = parseExpiresAt(expiresAtVal)
       const amountNum = amountVal ? parseFloat(String(amountVal).replace(',', '.')) : null
       const devicesNum = devicesVal ? parseInt(devicesVal, 10) : null
+      const createdAtVal = mapCreatedAt
+        ? (row[mapCreatedAt] ?? row[mapCreatedAt.toLowerCase()] ?? '').toString().trim()
+        : (row.CreatedAt ?? row.created_at ?? row.createdat ?? '').toString().trim()
+      const serviceStartDateMs = parseDateOrTimestamp(createdAtVal)
 
-      // При повторном импорте обновляем существующих по Telegram ID (не по логину)
+      // Если включена галка «Обновлять существующих по Telegram ID» — ищем по TgID и обновляем. Иначе — только добавляем новых (существующие по логину/email не трогаем).
       if (updateExistingUsers && tgId && String(tgId).trim() !== '') {
         const byTgId = await findUserByTgId(db, APP_ID, String(tgId).trim())
         if (byTgId.found && byTgId.uid) {
@@ -3055,6 +3734,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
               uuid: uuidVal || undefined,
               expiresAt: expiresAtMs,
               devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
+              serviceStartDate: serviceStartDateMs,
             })
             updated.push({
               rowIndex: i + 1,
@@ -3108,11 +3788,14 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
         continue
       }
 
+      // Режим «только новые»: уже есть в базе по логину/email — пропускаем, ничего не изменяем и не удаляем
       const duplicateCheck = await checkImportDuplicate(db, APP_ID, login, email)
       if (duplicateCheck.duplicate) {
         skipped.push({
           rowIndex: i + 1,
-          reason: duplicateCheck.reason === 'email' ? 'Дубликат (email уже зарегистрирован)' : 'Дубликат (логин уже существует)',
+          reason: updateExistingUsers
+            ? (duplicateCheck.reason === 'email' ? 'Дубликат (email уже зарегистрирован)' : 'Дубликат (логин уже существует)')
+            : 'Уже в базе (добавляются только новые строки)',
           row: { login, email },
         })
         continue
@@ -3139,6 +3822,7 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
           paymentStatus: paymentStatusVal || undefined,
           expiresAt: expiresAtMs,
           devices: Number.isFinite(devicesNum) && devicesNum >= 1 ? devicesNum : undefined,
+          serviceStartDate: serviceStartDateMs,
         })
         const createdUid = result.user.id
         created.push({
@@ -3252,14 +3936,14 @@ async function getTelegramToken() {
   const settings = await getSettingsCached()
   let token = (settings && settings.telegramBotToken) ? String(settings.telegramBotToken).trim() : ''
   if (!token && db) {
-    for (const appId of TELEGRAM_SETTINGS_APP_IDS) {
-      if (appId === APP_ID) continue
-      try {
-        const snap = await db.doc(`artifacts/${appId}/public/settings`).get()
-        const data = snap.exists ? snap.data() : {}
-        token = (data && data.telegramBotToken) ? String(data.telegramBotToken).trim() : ''
-        if (token) break
-      } catch (_) {}
+    const otherIds = TELEGRAM_SETTINGS_APP_IDS.filter((id) => id !== APP_ID)
+    const snaps = await Promise.all(
+      otherIds.map((appId) => db.doc(`artifacts/${appId}/public/settings`).get())
+    )
+    for (const snap of snaps) {
+      const data = snap.exists ? snap.data() : {}
+      token = (data && data.telegramBotToken) ? String(data.telegramBotToken).trim() : ''
+      if (token) break
     }
   }
   if (token) {
@@ -3268,16 +3952,28 @@ async function getTelegramToken() {
   return token
 }
 
-/** Загрузить settings из Firestore с кэшированием. */
+/** Загрузить settings из Firestore с кэшированием (in-memory + Redis при наличии REDIS_URL). */
 async function getSettingsCached() {
   if (settingsCache.data && Date.now() < settingsCache.expiresAt) {
     return settingsCache.data
   }
+  const redisKey = `settings:${APP_ID}`
+  try {
+    const cached = await redisGet(redisKey)
+    if (cached) {
+      const data = JSON.parse(cached)
+      settingsCache = { data, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS }
+      return data
+    }
+  } catch (_) {}
   if (!db) return {}
   try {
     const snap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
     const data = snap.exists ? snap.data() : {}
     settingsCache = { data, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS }
+    try {
+      await redisSet(redisKey, JSON.stringify(data), Math.floor(SETTINGS_CACHE_TTL_MS / 1000))
+    } catch (_) {}
     return data
   } catch {
     return {}
@@ -3297,13 +3993,51 @@ async function getTelegramScenario() {
   }
 }
 
-/** API-ключ DeepSeek: приоритет 1) DEEPSEEK_API_KEY (env), 2) настройки в Firestore (из админки). */
-async function getDeepSeekApiKey() {
-  const fromEnv = process.env.DEEPSEEK_API_KEY && String(process.env.DEEPSEEK_API_KEY).trim()
+/** API-ключ по провайдеру: env (DEEPSEEK_API_KEY, OPENAI_API_KEY, …) или Firestore (deepseekApiKey, openaiApiKey, …). */
+function getApiKeyForProvider(providerId, s) {
+  const envKeys = {
+    deepseek: 'DEEPSEEK_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    openrouter: 'OPENROUTER_API_KEY',
+    gemini: 'GEMINI_API_KEY',
+  }
+  const settingKeys = {
+    deepseek: 'deepseekApiKey',
+    openai: 'openaiApiKey',
+    openrouter: 'openrouterApiKey',
+    gemini: 'geminiApiKey',
+  }
+  const fromEnv = process.env[envKeys[providerId]] && String(process.env[envKeys[providerId]]).trim()
   if (fromEnv) return fromEnv
+  const key = settingKeys[providerId] && s[settingKeys[providerId]] != null ? String(s[settingKeys[providerId]]).trim() : ''
+  return key || ''
+}
+
+/**
+ * Активная конфигурация ИИ: провайдер, ключ, модель, параметры. Для поддержки, чата и аналитики.
+ * @returns {Promise<{ provider: string, apiKey: string, model: string, temperature: number, max_tokens: number, timeout: number, systemPromptPreset: string }>}
+ */
+async function getActiveAiConfig() {
   const s = await getSettingsCached()
-  const fromSettings = s.deepseekApiKey != null ? String(s.deepseekApiKey).trim() : ''
-  return fromSettings || ''
+  const provider = (s.aiProvider && PROVIDERS[s.aiProvider]) ? s.aiProvider : 'deepseek'
+  const apiKey = getApiKeyForProvider(provider, s)
+  const def = PROVIDERS[provider]
+  const model = (s.aiModel && String(s.aiModel).trim()) || s.deepseekModel || process.env.DEEPSEEK_MODEL || def?.defaultModel || 'deepseek-chat'
+  return {
+    provider,
+    apiKey,
+    model,
+    temperature: s.aiTemperature != null ? Number(s.aiTemperature) : (s.deepseekTemperature != null ? Number(s.deepseekTemperature) : 0.7),
+    max_tokens: s.aiMaxTokens != null ? Number(s.aiMaxTokens) : (s.deepseekMaxTokens != null ? Number(s.deepseekMaxTokens) : 2048),
+    timeout: s.aiTimeoutSeconds != null ? Number(s.aiTimeoutSeconds) : (s.deepseekTimeoutSeconds != null ? Number(s.deepseekTimeoutSeconds) : 60),
+    systemPromptPreset: (s.aiSystemPromptPreset != null ? String(s.aiSystemPromptPreset) : '') || (s.deepseekSystemPromptPreset != null ? String(s.deepseekSystemPromptPreset) : '') || '',
+  }
+}
+
+/** Для обратной совместимости: ключ DeepSeek (если провайдер deepseek). */
+async function getDeepSeekApiKey() {
+  const config = await getActiveAiConfig()
+  return config.provider === 'deepseek' ? config.apiKey : ''
 }
 
 /**
@@ -3422,6 +4156,83 @@ async function handleCallbackQuery(botToken, callbackQuery) {
   }
 }
 
+const TELEGRAM_WEBHOOK_CONCURRENCY = Math.max(1, parseInt(process.env.TELEGRAM_WEBHOOK_CONCURRENCY || '10', 10))
+function createWebhookConcurrencyLimiter(maxConcurrent) {
+  let running = 0
+  const queue = []
+  function run(fn) {
+    return new Promise((resolve, reject) => {
+      const task = () => Promise.resolve(fn()).then(resolve, reject)
+      if (running < maxConcurrent) {
+        running += 1
+        task().finally(() => {
+          running -= 1
+          if (queue.length) {
+            running += 1
+            const next = queue.shift()
+            next()
+          }
+        })
+        return
+      }
+      queue.push(() => {
+        running += 1
+        task().finally(() => {
+          running -= 1
+          if (queue.length) {
+            running += 1
+            const next = queue.shift()
+            next()
+          }
+        })
+      })
+    })
+  }
+  return run
+}
+const runWithWebhookConcurrency = createWebhookConcurrencyLimiter(TELEGRAM_WEBHOOK_CONCURRENCY)
+
+/** Общие deps для обработки webhook (роут и воркер BullMQ). */
+function getWebhookDeps() {
+  return {
+    getTelegramToken,
+    getDb: () => db,
+    sendTelegramMessage,
+    sendMainMenu,
+    handleMiniAppData,
+    answerCallbackQuery,
+    editMessageText,
+    buildMainKeyboard: async (appUrl) => buildMainKeyboard(appUrl, await getTelegramScenario()),
+    getScenario: getTelegramScenario,
+    findScenarioFromBotBuilder: (database, appId, triggerType, triggerValue) =>
+      findScenarioBotBuilder(database, appId, triggerType, triggerValue),
+    logTelegramUpdate: (update) => {
+      const id = update?.update_id
+      const kind = update?.callback_query ? 'callback_query' : update?.message ? 'message' : 'other'
+      console.log('[Telegram] update', { update_id: id, kind })
+    },
+    getBaseUrlForTelegram,
+    APP_ID,
+    randomUUID,
+  }
+}
+
+let telegramQueue = null
+let telegramWorker = null
+async function enqueueWebhook(update) {
+  if (telegramQueue) {
+    await telegramQueue.add('telegram-update', { update }, { removeOnComplete: { count: 100 } })
+    return
+  }
+  await runWithWebhookConcurrency(() => handleWebhook(update, getWebhookDeps()))
+}
+
+const LOG_TMA_TIMING = process.env.LOG_TMA_TIMING === '1' || process.env.LOG_TMA_TIMING === 'true' || LOG_REQUEST_MS
+function logTmaTiming(path, ms) {
+  if (!LOG_TMA_TIMING) return
+  console.log(`[TMA] ${path} ${ms}ms`)
+}
+
 app.use('/api/telegram', createTelegramRouter({
   getDb: () => db,
   getAdmin: () => admin,
@@ -3445,6 +4256,8 @@ app.use('/api/telegram', createTelegramRouter({
   logTelegramAuth,
   verifyIdToken,
   verifyTelegramWebhookSecret,
+  enqueueWebhook,
+  runWithWebhookConcurrency,
   APP_ID,
   TELEGRAM_WEBHOOK_SECRET,
   TELEGRAM_SESSION_TTL_MS,
@@ -3455,12 +4268,27 @@ app.use('/api/telegram', createTelegramRouter({
   callN8NWebhook,
   randomUUID,
   crypto,
+  redisGet,
+  redisSet,
+  logTmaTiming,
 }))
 
 app.use('/api/bot-builder', createBotBuilderRouter({
   ensureAdmin,
   getDb: () => db,
   APP_ID,
+}))
+
+app.use('/api/analytics', createAnalyticsRouter({
+  ensureAdmin,
+  getDb: () => db,
+  APP_ID,
+  redisGet,
+  redisSet,
+  getTelegramToken,
+  sendTelegramMessage,
+  getActiveAiConfig,
+  unifiedChat,
 }))
 
 /** GET /api/admin/telegram/status — текущие настройки (только админ). Токен не возвращаем; отдаём username бота и Chat ID админа для отображения. */
@@ -3573,51 +4401,63 @@ app.patch('/api/admin/telegram/scenario', express.json(), async (req, res) => {
   }
 })
 
-/** GET /api/admin/ai/status — статус настройки ИИ (DeepSeek). Токен не возвращаем. Только админ. */
+/** GET /api/admin/ai/status — статус настройки ИИ (провайдер, модель, параметры). Токен не возвращаем. Только админ. */
 app.get('/api/admin/ai/status', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  const settings = await getSettingsCached()
+  const config = await getActiveAiConfig()
+  const models = PROVIDER_MODELS[config.provider] || PROVIDER_MODELS.deepseek
+  const providers = Object.keys(PROVIDERS).map((id) => ({ id, name: PROVIDERS[id].name }))
   res.json({
     success: true,
-    configured: Boolean(apiKey && apiKey.length > 0),
-    model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-    temperature: settings.deepseekTemperature != null ? Number(settings.deepseekTemperature) : 0.7,
-    maxTokens: settings.deepseekMaxTokens != null ? Number(settings.deepseekMaxTokens) : 2048,
-    timeoutSeconds: settings.deepseekTimeoutSeconds != null ? Number(settings.deepseekTimeoutSeconds) : 60,
-    systemPromptPreset: settings.deepseekSystemPromptPreset != null ? String(settings.deepseekSystemPromptPreset) : '',
+    configured: Boolean(config.apiKey && config.apiKey.length > 0),
+    provider: config.provider,
+    providers,
+    model: config.model,
+    models,
+    temperature: config.temperature,
+    maxTokens: config.max_tokens,
+    timeoutSeconds: config.timeout,
+    systemPromptPreset: config.systemPromptPreset || '',
   })
 })
 
-/** PATCH /api/admin/ai/settings — сохранить настройки ИИ в Firestore (токен, модель, параметры). Только админ. */
+/** PATCH /api/admin/ai/settings — сохранить настройки ИИ в Firestore. Только админ. */
 app.patch('/api/admin/ai/settings', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   const body = req.body || {}
   const update = {}
-  if (body.apiKey !== undefined) {
-    update.deepseekApiKey = body.apiKey ? String(body.apiKey).trim() : null
-    update.deepseekApiKeyUpdatedAt = body.apiKey ? new Date().toISOString() : null
+  const currentConfig = await getActiveAiConfig()
+  if (body.provider !== undefined && PROVIDERS[body.provider]) {
+    update.aiProvider = body.provider
   }
-  if (body.model !== undefined) update.deepseekModel = body.model ? String(body.model).trim() || null : null
-  if (body.temperature !== undefined) update.deepseekTemperature = body.temperature != null ? Number(body.temperature) : null
-  if (body.maxTokens !== undefined) update.deepseekMaxTokens = body.maxTokens != null ? Number(body.maxTokens) : null
-  if (body.timeoutSeconds !== undefined) update.deepseekTimeoutSeconds = body.timeoutSeconds != null ? Number(body.timeoutSeconds) : null
-  if (body.systemPromptPreset !== undefined) update.deepseekSystemPromptPreset = body.systemPromptPreset != null ? String(body.systemPromptPreset) : null
+  if (body.apiKey !== undefined) {
+    const key = String(body.apiKey).trim()
+    const provider = (body.provider && PROVIDERS[body.provider]) ? body.provider : currentConfig.provider
+    const settingKeys = { deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey', gemini: 'geminiApiKey' }
+    if (settingKeys[provider]) {
+      update[settingKeys[provider]] = key || null
+      update[settingKeys[provider] + 'UpdatedAt'] = key ? new Date().toISOString() : null
+    }
+  }
+  if (body.model !== undefined) update.aiModel = body.model ? String(body.model).trim() || null : null
+  if (body.temperature !== undefined) update.aiTemperature = body.temperature != null ? Number(body.temperature) : null
+  if (body.maxTokens !== undefined) update.aiMaxTokens = body.maxTokens != null ? Number(body.maxTokens) : null
+  if (body.timeoutSeconds !== undefined) update.aiTimeoutSeconds = body.timeoutSeconds != null ? Number(body.timeoutSeconds) : null
+  if (body.systemPromptPreset !== undefined) update.aiSystemPromptPreset = body.systemPromptPreset != null ? String(body.systemPromptPreset) : null
   if (Object.keys(update).length === 0) {
-    return res.json({ success: true, configured: Boolean(await getDeepSeekApiKey()) })
+    const config = await getActiveAiConfig()
+    return res.json({ success: true, configured: Boolean(config.apiKey) })
   }
   try {
     settingsCache = { data: null, expiresAt: 0 }
     const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
     await settingsRef.set(update, { merge: true })
-    const configured = Boolean(await getDeepSeekApiKey())
-    if (update.deepseekApiKey !== undefined) {
-      console.log('✅ ИИ (DeepSeek): настройки сохранены в Firestore (artifacts/%s/public/settings).', APP_ID)
-    }
-    res.json({ success: true, configured, savedTo: 'firestore' })
+    const config = await getActiveAiConfig()
+    console.log('✅ ИИ: настройки сохранены (провайдер %s)', config.provider)
+    res.json({ success: true, configured: Boolean(config.apiKey), savedTo: 'firestore' })
   } catch (err) {
     console.error('❌ PATCH /api/admin/ai/settings:', err.message)
     res.status(500).json({ success: false, error: err.message })
@@ -3760,8 +4600,10 @@ async function notifyAdminError(opts) {
       const snapshot = await col.orderBy('createdAt', 'desc').get()
       if (snapshot.docs.length > ADMIN_ERRORS_LIMIT) {
         const toDelete = snapshot.docs.slice(ADMIN_ERRORS_LIMIT)
-        for (const doc of toDelete) {
-          await doc.ref.delete().catch(() => {})
+        const DELETE_BATCH = 10
+        for (let i = 0; i < toDelete.length; i += DELETE_BATCH) {
+          const batch = toDelete.slice(i, i + DELETE_BATCH)
+          await Promise.all(batch.map((doc) => doc.ref.delete().catch(() => {})))
         }
       }
     } catch (err) {
@@ -3827,8 +4669,9 @@ app.post('/api/notify/support-ticket', express.json(), async (req, res) => {
   }
 })
 
-/** GET /api/push-vapid-public — публичный ключ VAPID для подписки на push (без авторизации). При отсутствии ключей возвращает 200 и success: false, чтобы клиент не получал 503. */
+/** GET /api/push-vapid-public — публичный ключ VAPID для подписки на push (без авторизации). Кэшируется клиентом 1 ч. */
 app.get('/api/push-vapid-public', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600')
   if (!VAPID_PUBLIC) return res.json({ success: false, publicKey: null, error: 'Web Push не настроен' })
   res.json({ success: true, publicKey: VAPID_PUBLIC })
 })
@@ -3873,12 +4716,10 @@ app.post('/api/report-error', express.json(), async (req, res) => {
   const stack = body.stack != null ? String(body.stack).slice(0, 2000) : null
   const severity = ['low', 'medium', 'high', 'critical'].includes(body.severity) ? body.severity : 'medium'
   let userId = null
-  const authHeader = req.headers.authorization
-  if (authHeader && authHeader.startsWith('Bearer ') && admin) {
-    try {
-      const decoded = await admin.auth().verifyIdToken(authHeader.slice(7))
-      userId = decoded.uid
-    } catch (_) {}
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    const authResult = await verifyIdToken(req, res)
+    if (authResult?.ok) userId = authResult.uid
+    else return // verifyIdToken уже отправил 401
   }
   try {
     const result = await notifyAdminError({ source, message, context, stack, severity, userId })
@@ -6858,23 +7699,54 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3001
 const HOST = process.env.HOST || '0.0.0.0'
 
-app.listen(PORT, HOST, () => {
+let server = null
+let activationLocksIntervalId = null
+
+server = app.listen(PORT, HOST, () => {
   console.log('🚀 n8n Webhook Proxy Server')
   console.log(`📡 http://${HOST}:${PORT}`)
   console.log(`🔗 n8n: ${N8N_BASE_URL}`)
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
 
-  // Загрузка кэша сценариев bot-builder при старте (если Firebase уже инициализирован)
-  setTimeout(() => {
-    if (db) {
-      loadScenariosIntoCache(db, APP_ID)
-        .then(() => console.log('Bot-builder: кэш сценариев загружен'))
-        .catch((e) => console.warn('Bot-builder: загрузка кэша', e.message))
+  // Тяжёлые инициализации после listen: Firebase не блокирует первый ответ
+  setImmediate(() => {
+    initFirebaseAdmin().catch((err) => console.warn('Firebase init:', err.message))
+  })
+
+  // Очередь Telegram webhook (BullMQ + Redis): при наличии REDIS_URL — обновления в очередь, ответ 200 мгновенно
+  setImmediate(async () => {
+    try {
+      const redis = await getRedis()
+      if (!redis) return
+      const { Queue, Worker } = await import('bullmq')
+      telegramQueue = new Queue('telegram-webhook', { connection: redis })
+      telegramWorker = new Worker(
+        'telegram-webhook',
+        async (job) => {
+          const update = job.data?.update
+          if (update) await handleWebhook(update, getWebhookDeps())
+        },
+        { connection: redis, concurrency: TELEGRAM_WEBHOOK_CONCURRENCY }
+      )
+      telegramWorker.on('error', (err) => console.error('Telegram worker error:', err.message))
+      console.log('Telegram webhook: очередь BullMQ включена')
+    } catch (e) {
+      console.warn('Telegram webhook: BullMQ недоступен, используется in-memory лимитер:', e?.message || e)
     }
-  }, 2000)
+  })
+
+  // Загрузка кэша сценариев bot-builder при старте (если Firebase уже инициализирован)
+  function tryLoadScenarios() {
+    if (!db) return
+    loadScenariosIntoCache(db, APP_ID)
+      .then(() => console.log('Bot-builder: кэш сценариев загружен'))
+      .catch((e) => console.warn('Bot-builder: загрузка кэша', e.message))
+  }
+  setTimeout(tryLoadScenarios, 2000)
+  setTimeout(tryLoadScenarios, 6000)
 
   // Периодическая очистка устаревших флагов активации (каждые 10 минут)
-  setInterval(async () => {
+  activationLocksIntervalId = setInterval(async () => {
     try {
       await cleanupExpiredActivationLocks()
     } catch (error) {
@@ -6883,7 +7755,7 @@ app.listen(PORT, HOST, () => {
       })
     }
   }, 10 * 60 * 1000) // 10 минут
-  
+
   // Первая очистка через 1 минуту после старта
   setTimeout(async () => {
     try {
@@ -6894,4 +7766,52 @@ app.listen(PORT, HOST, () => {
       })
     }
   }, 60 * 1000) // 1 минута
+
+  // Отложенные рассылки: каждую минуту проверяем и отправляем запланированные
+  const SCHEDULED_MAILINGS_INTERVAL_MS = Math.max(60000, parseInt(process.env.SCHEDULED_MAILINGS_INTERVAL_MS || '60000', 10))
+  setInterval(() => {
+    processScheduledMailings().catch((e) => console.warn('processScheduledMailings:', e.message))
+  }, SCHEDULED_MAILINGS_INTERVAL_MS)
+
+  // Keep-alive: уменьшает повторные TCP handshake при частых запросах
+  if (server && typeof server.keepAliveTimeout !== 'undefined') {
+    server.keepAliveTimeout = 65000
+    server.headersTimeout = 66000
+  }
 })
+
+async function gracefulShutdown(signal) {
+  console.log(`\n${signal} received, shutting down gracefully...`)
+  if (activationLocksIntervalId) {
+    clearInterval(activationLocksIntervalId)
+    activationLocksIntervalId = null
+  }
+  try {
+    if (telegramWorker) await telegramWorker.close()
+    if (telegramQueue) await telegramQueue.close()
+  } catch (e) {
+    console.warn('BullMQ close:', e?.message)
+  }
+  try {
+    await closeRedis()
+  } catch (e) {
+    console.warn('Redis close:', e?.message)
+  }
+  if (server) {
+    server.close((err) => {
+      if (err) console.error('Error closing server:', err)
+      else console.log('Server closed')
+      process.exit(err ? 1 : 0)
+    })
+    const forceExit = setTimeout(() => {
+      console.warn('Forcing exit after 15s')
+      process.exit(1)
+    }, 15000)
+    forceExit.unref?.()
+  } else {
+    process.exit(0)
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))

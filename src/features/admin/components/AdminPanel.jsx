@@ -25,6 +25,7 @@ import ImportFromNocoDBModal from './ImportFromNocoDBModal.jsx'
 import TelegramSection from './TelegramSection.jsx'
 import AIPanel from './AIPanel.jsx'
 import ErrorsPanel from './ErrorsPanel.jsx'
+import AnalyticsFunnelPanel from './AnalyticsFunnelPanel.jsx'
 
 const AdminPanel = ({
   currentUser,
@@ -1109,6 +1110,15 @@ const AdminPanel = ({
 
         {adminTab === 'ai' && (
           <AIPanel />
+        )}
+
+        {adminTab === 'analytics-funnel' && (
+          <AnalyticsFunnelPanel
+            users={users}
+            tariffs={tariffs}
+            formatDate={formatDate}
+            onCopy={onHandleCopy}
+          />
         )}
 
         {adminTab === 'errors' && (

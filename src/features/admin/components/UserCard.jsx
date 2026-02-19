@@ -1219,11 +1219,11 @@ const UserCard = ({
                   {editingUser.plan === 'premium' ? 'Премиум' : editingUser.plan || 'Бесплатный'}
                 </div>
               </div>
-              {user.createdAt && (
+              {(user.serviceStartDate != null || user.createdAt) && (
                 <div>
                   <label className="block text-slate-300 text-sm font-medium mb-2">Дата регистрации</label>
                   <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                    {formatDate?.(user.createdAt) || new Date(user.createdAt).toLocaleString()}
+                    {formatDate?.(user.serviceStartDate ?? user.createdAt) || new Date(user.serviceStartDate ?? user.createdAt).toLocaleString()}
                   </div>
                 </div>
               )}

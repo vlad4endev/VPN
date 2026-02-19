@@ -187,6 +187,11 @@ service cloud.firestore {
       allow delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }
     
+    // Метрики пользователей для AI-воронки — только сервер (Admin SDK)
+    match /artifacts/{appId}/public/data/user_metrics/{userId} {
+      allow read, write: if false;
+    }
+    
     // Тикеты техподдержки — пользователь видит только свои, админ (claim или роль в Firestore) — все
     match /artifacts/{appId}/public/data/tickets/{ticketId} {
       allow read: if request.auth != null && (

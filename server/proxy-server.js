@@ -14,6 +14,7 @@
  */
 
 import express from 'express'
+import compression from 'compression'
 import axios from 'axios'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
@@ -27,6 +28,8 @@ import fs from 'fs'
 dotenv.config()
 
 const app = express()
+
+app.use(compression())
 
 // ========== Безопасность ==========
 

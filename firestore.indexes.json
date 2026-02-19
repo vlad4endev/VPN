@@ -31,6 +31,21 @@
         {"fieldPath": "tgId", "order": "ASCENDING"},
         {"fieldPath": "expiresAt", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "users_v4",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "telegramSessionToken", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "scheduled_mailings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "scheduledAt", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

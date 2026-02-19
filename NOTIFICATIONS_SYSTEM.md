@@ -47,6 +47,8 @@
 - **Рассылка** — отправка уведомлений по шаблону или произвольному тексту. Получатели: выбранные в таблице пользователи, все, по плану или по тарифу. Можно добавить инлайновые кнопки (например, «Оплатить» с ссылкой `{{paymentLink}}`).
 - **Отправка из карточки пользователя** — в карточке пользователя (админка) кнопка «Отправить уведомление» открывает модалку: выбор шаблона или свой заголовок/текст, отправка одному пользователю.
 
+- **Календарь рассылок** — вкладка «Календарь» в разделе Рассылка: просмотр запланированных рассылок по месяцам, создание отложенной рассылки (дата и время, шаблон или свой текст, получатели). Сервер раз в минуту проверяет отложенные рассылки и отправляет те, у которых наступило время. Запланированную рассылку можно отменить до наступления времени.
+
 Уведомления с кнопками отображаются в центре уведомлений (колокольчик) с кликабельными ссылками. Тип «Напоминание о подписке» удобен для шаблонов об истечении подписки со ссылкой на оплату.
 
 ### 4. Уведомления об оплате
@@ -72,12 +74,35 @@ src/
     ├── auth/
     │   └── hooks/
     │       └── useAuth.js                  # Запрос разрешений после регистрации
-    └── dashboard/
+    ├── dashboard/
+    │   ├── components/
+    │   │   └── Dashboard.jsx               # Интеграция уведомлений об оплате
+    │   └── hooks/
+    │       └── useSubscriptionNotifications.js  # Хук проверки подписок
+    └── notifications/
         ├── components/
-        │   └── Dashboard.jsx               # Интеграция уведомлений об оплате
-        └── hooks/
-            └── useSubscriptionNotifications.js  # Хук проверки подписок
+        │   ├── MailingsSection.jsx         # Админ: шаблоны + рассылка (фильтры, кнопки)
+        │   ├── NotificationsCenter.jsx     # Колокольчик, список, кнопки в уведомлениях
+        │   └── ...
+        └── services/
+            └── notificationsService.js     # getTemplates, broadcastViaApi, sendToOne
 ```
+
+### API рассылок (бэкенд)
+
+- `GET /api/admin/notifications/templates` — список шаблонов.
+- `POST /api/admin/notifications/templates` — создать шаблон (name, type, titleTemplate, bodyTemplate, overviewTemplate?, buttons?).
+- `PATCH /api/admin/notifications/templates/:id` — обновить шаблон.
+- `DELETE /api/admin/notifications/templates/:id` — удалить шаблон.
+- `POST /api/admin/notifications/broadcast` — рассылка. Body: `templateId?`, `recipientFilter` (userIds | all | plan | tariff), `plan?`, `tariffId?`, `userIds?`, `type?`, `title?`, `body?`, `overview?`, `buttons?`. Для каждого получателя подставляются переменные и при необходимости отправляется Web Push.
+- `POST /api/admin/notifications/send-one` — отправить одно уведомление пользователю (из карточки). Body: `userId`, `templateId?` или `title`, `body`, `overview?`, `buttons?`.
+
+- `GET /api/admin/notifications/scheduled?from=ISO&to=ISO&status=pending` — список отложенных рассылок (для календаря).
+- `POST /api/admin/notifications/scheduled` — создать отложенную рассылку. Body: как у broadcast + `scheduledAt` (ISO), `name?`.
+- `PATCH /api/admin/notifications/scheduled/:id` — изменить дату/время или отменить (status: 'cancelled').
+- `DELETE /api/admin/notifications/scheduled/:id` — отменить рассылку.
+
+Шаблоны хранятся в Firestore: `artifacts/{APP_ID}/public/data/notification_templates`. Отложенные рассылки: `artifacts/{APP_ID}/public/data/scheduled_mailings`. Для запросов по `status` и `scheduledAt` нужен составной индекс (см. `firestore.indexes.json`). Отправка по расписанию выполняется сервером каждую минуту (интервал задаётся `SCHEDULED_MAILINGS_INTERVAL_MS`, по умолчанию 60000).
 
 ### Компоненты
 

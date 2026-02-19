@@ -238,6 +238,12 @@ const VirtualizedUserTable = ({
                 </p>
               )}
             </div>
+            <div className="min-w-0 col-span-2">
+              <p className="text-slate-500 text-[9px] uppercase tracking-wide mb-0.5">Начало использования</p>
+              <p className="text-slate-300 text-[11px] break-words leading-tight">
+                {user.serviceStartDate ? data.formatDate(user.serviceStartDate) : '—'}
+              </p>
+            </div>
           </div>
 
           {/* Действия - компактные иконки на мобильных, текст на десктопе */}
@@ -318,7 +324,7 @@ const VirtualizedUserTable = ({
           }
         }}
       >
-        <div className="grid grid-cols-5 gap-3 sm:gap-4 px-4 sm:px-6 py-3 items-center min-h-[80px]">
+        <div className="grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 items-center min-h-[80px]">
           {/* Имя пользователя */}
           <div className="min-w-0">
             <div className="text-slate-200 font-medium text-sm truncate" title={user.name || user.email}>
@@ -369,6 +375,13 @@ const VirtualizedUserTable = ({
               {userStatus.status === 'inactive' && <AlertCircle className="w-3.5 h-3.5" />}
               <span>{userStatus.label}</span>
             </div>
+          </div>
+
+          {/* Начало использования (дата создания строки / новичок) */}
+          <div className="min-w-0">
+            <span className="text-slate-400 text-sm" title="Дата начала использования сервиса">
+              {user.serviceStartDate ? data.formatDate(user.serviceStartDate) : '—'}
+            </span>
           </div>
 
           {/* Срок действия */}
@@ -577,10 +590,11 @@ const VirtualizedUserTable = ({
       ) : (
         <>
           {/* Заголовок таблицы для десктопа */}
-          <div className="bg-slate-800/50 grid grid-cols-5 gap-3 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700">
+          <div className="bg-slate-800/50 grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700">
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Пользователь</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Роль</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Статус</div>
+            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider" title="Дата начала использования сервиса">Начало</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Срок действия</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Действия</div>
           </div>

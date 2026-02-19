@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, ArrowLeft, Loader2, User, Headphones } from 'lucide-react'
+import { Send, ArrowLeft, Loader2, User, Headphones, BarChart2 } from 'lucide-react'
 import { formatDate } from '../../../shared/utils/formatDate.js'
 
 const TicketChat = ({
@@ -98,6 +98,7 @@ const TicketChat = ({
           const isSupport = msg.from === 'support'
           const isMichael = isSupport && (msg.userId === 'michael' || msg.userId === 'ai')
           const isTyping = !!msg.isTyping
+          const isDataSummary = !!msg.isDataSummary
           const senderName = isSupport ? (isMichael ? 'Майкл' : 'Поддержка') : (isAdmin && ticket?.userName ? ticket.userName : 'Вы')
           return (
             <div
@@ -105,7 +106,9 @@ const TicketChat = ({
               className={`flex gap-3 ${isSupport ? 'flex-row-reverse' : ''}`}
             >
               <span className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center" title={senderName}>
-                {isSupport ? (
+                {isDataSummary ? (
+                  <BarChart2 size={16} className="text-emerald-400" />
+                ) : isSupport ? (
                   <Headphones size={16} className="text-blue-400" />
                 ) : (
                   <User size={16} className="text-slate-400" />
@@ -113,12 +116,16 @@ const TicketChat = ({
               </span>
               <div
                 className={`max-w-[80%] rounded-xl px-4 py-2 ${
-                  isSupport
+                  isDataSummary
+                    ? 'bg-slate-800/90 border border-emerald-700/50 text-slate-200'
+                    : isSupport
                     ? 'bg-blue-600/30 text-white'
                     : 'bg-slate-700 text-slate-200'
                 }`}
               >
-                <p className="text-xs font-medium opacity-90 mb-0.5">{senderName}</p>
+                {!isDataSummary && (
+                  <p className="text-xs font-medium opacity-90 mb-0.5">{senderName}</p>
+                )}
                 {isTyping ? (
                   <p className="text-sm flex items-center gap-1">
                     <span>{msg.text || 'Печатает'}</span>
@@ -131,10 +138,13 @@ const TicketChat = ({
                 ) : (
                   <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
                 )}
-                {!isTyping && (
+                {!isTyping && !isDataSummary && (
                   <p className="text-xs opacity-70 mt-1">
                     {formatDate(msg.createdAt)}
                   </p>
+                )}
+                {isDataSummary && (
+                  <p className="text-xs text-slate-500 mt-1.5">Данные панели VPN по вашему аккаунту</p>
                 )}
               </div>
             </div>

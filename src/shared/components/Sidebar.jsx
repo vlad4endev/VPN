@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal, TrendingDown } from 'lucide-react'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
 
@@ -99,7 +99,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <div className="flex-1 min-w-0">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYFLOW</h1>
           <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
-            {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : 'Личный кабинет'}
+            {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : view === 'analytics' ? 'Аналитика' : 'Личный кабинет'}
           </p>
         </div>
         {currentUser?.id && (
@@ -147,7 +147,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
     </div>
   )
 
-  /** На мобильных при нижней панели — только переключатель раздела (Кабинет/Админ/Финансы) и Выйти, без подразделов */
+  /** На мобильных при нижней панели — только переключатель раздела (Кабинет/Админ/Финансы/Аналитика) и Выйти, без подразделов */
   const compactNav = (
     <nav className="flex-1 space-y-1.5 sm:space-y-2 overflow-y-auto min-h-0">
       {canAccessAdmin(currentUser?.role) && (
@@ -170,6 +170,17 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
+        </button>
+      )}
+      {canAccessAdmin(currentUser?.role) && (
+        <button
+          onClick={() => handleNavClick('analytics')}
+          className={navItemClass(view === 'analytics')}
+          aria-label="Аналитика"
+          aria-selected={view === 'analytics'}
+        >
+          <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Аналитика</span>
         </button>
       )}
       <button
@@ -254,6 +265,19 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
+        </button>
+      )}
+
+      {/* Аналитика — для роли Админ (AI-воронка) */}
+      {canAccessAdmin(currentUser?.role) && (
+        <button
+          onClick={() => handleNavClick('analytics')}
+          className={navItemClass(view === 'analytics')}
+          aria-label="Аналитика"
+          aria-selected={view === 'analytics'}
+        >
+          <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Аналитика</span>
         </button>
       )}
 

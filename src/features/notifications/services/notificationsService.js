@@ -266,6 +266,88 @@ export const notificationsService = {
   },
 
   /**
+   * Список отложенных/запланированных рассылок.
+   * @param {{ from?: string, to?: string, status?: 'pending'|'sent'|'cancelled'|'failed' }} params — ISO даты для календаря
+   */
+  async getScheduled(params = {}) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const q = new URLSearchParams()
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
+    if (params.status) q.set('status', params.status)
+    const url = `${base}/api/admin/notifications/scheduled${q.toString() ? `?${q.toString()}` : ''}`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID } })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    const data = await res.json()
+    return data.scheduled || []
+  },
+
+  /**
+   * Создать отложенную рассылку (как broadcast + scheduledAt ISO и опционально name).
+   */
+  async createScheduled(payload) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/scheduled`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [APP_ID_HEADER]: APP_ID,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+    const data = await res.json()
+    return data.id
+  },
+
+  /**
+   * Обновить отложенную рассылку (только pending): status: 'cancelled', scheduledAt, name.
+   */
+  async updateScheduled(id, updates) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        [APP_ID_HEADER]: APP_ID,
+      },
+      body: JSON.stringify(updates),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+  },
+
+  /**
+   * Отменить отложенную рассылку.
+   */
+  async deleteScheduled(id) {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    if (!token) throw new Error('Требуется авторизация')
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+  },
+
+  /**
    * Рассылка уведомлений нескольким пользователям напрямую в Firestore (админ; требует правил Firestore).
    * @param {string[]} userIds
    * @param {{ type: string, title: string, body: string, overview?: string, data?: object }} payload

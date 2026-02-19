@@ -28,6 +28,7 @@ import PublicReviewPage from '../features/reviews/components/PublicReviewPage.js
 // Lazy load heavy views (Dashboard — статический импорт, как AdminPanel, из-за дубликата React в lazy-чанке)
 import Dashboard from '../features/dashboard/components/Dashboard.jsx'
 const FinancesDashboard = lazy(() => import('../features/admin/components/FinancesDashboard.jsx'))
+const AnalyticsFunnelPanel = lazy(() => import('../features/admin/components/AnalyticsFunnelPanel.jsx'))
 const SupportView = lazy(() => import('../features/support/components/SupportView.jsx'))
 import { AdminProviderWrapper } from '../features/admin/components/AdminProvider.jsx'
 // AdminPanel — статический импорт, чтобы избежать «Should have a queue» (две копии React в lazy-чанке и контексте)
@@ -460,6 +461,8 @@ export default function VPNServiceApp() {
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
   const telegramAuthTriedRef = useRef(false)
+  /** User из ответа POST /api/telegram/auth — используется в onAuthStateChanged чтобы не блокировать рендер на loadUserData. */
+  const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
   const isTelegramApp = typeof window !== 'undefined' && !!window.__TELEGRAM_INIT_DATA
@@ -748,6 +751,31 @@ export default function VPNServiceApp() {
         return
       }
       if (firebaseUser) {
+        // Telegram Mini App: если только что вошли по TMA и в ответе auth был user — используем его без loadUserData
+        const pendingTma = tmaUserFromAuthRef.current
+        if (pendingTma && pendingTma.uid === firebaseUser.uid && pendingTma.user) {
+          tmaUserFromAuthRef.current = null
+          const userData = pendingTma.user
+          const effectiveRole = userData.role || 'user'
+          const currentUserData = {
+            ...userData,
+            email: firebaseUser.email || userData.email,
+            photoURL: firebaseUser.photoURL || userData.photoURL || null,
+            name: firebaseUser.displayName || userData.name || '',
+            role: effectiveRole,
+          }
+          setCurrentUser(currentUserData)
+          setLoading(false)
+          setAuthChecking(false)
+          const savedView = localStorage.getItem('vpn_current_view')
+          if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome') {
+            setView(savedView)
+          } else {
+            setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+          }
+          logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole })
+          return
+        }
         // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
         try {
           let userData = await loadUserData(firebaseUser.uid, dbInstance)
@@ -1057,7 +1085,8 @@ export default function VPNServiceApp() {
         })
         .then((data) => {
           if (data.success && data.customToken) {
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken })
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
+            if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
@@ -1086,7 +1115,8 @@ export default function VPNServiceApp() {
         })
         .then((data) => {
           if (data.success && data.customToken) {
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', {})
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user })
+            if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
@@ -1871,7 +1901,8 @@ export default function VPNServiceApp() {
         logger.info('TelegramAuth', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
       }
       if (data.success && data.customToken) {
-        logger.info('TelegramAuth', 'Вход по кнопке: успех', { hasSessionToken: !!data.sessionToken })
+        logger.info('TelegramAuth', 'Вход по кнопке: успех', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
+        if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
         if (data.sessionToken && typeof localStorage !== 'undefined') {
           localStorage.setItem('tma_session_token', data.sessionToken)
           if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
@@ -2863,6 +2894,13 @@ export default function VPNServiceApp() {
         loadTariffs()
       }
       adminPanelLoadedRef.current = false
+    } else if (view === 'analytics' && canAccessAdmin(currentUser?.role)) {
+      if (!adminPanelLoadedRef.current) {
+        loadUsers()
+        loadTariffs()
+        adminPanelLoadedRef.current = true
+      }
+      financesLoadedRef.current = false
     } else {
       adminPanelLoadedRef.current = false
       financesLoadedRef.current = false
@@ -4244,6 +4282,47 @@ export default function VPNServiceApp() {
           </div>
         </div>
       </div>
+    )
+  }
+
+  // Раздел «Аналитика» (AI-воронка) — для роли Админ. Обёрнут в AdminViewWithContext, т.к. AnalyticsFunnelPanel открывает UserCard, которому нужен useAdminContext.
+  if (view === 'analytics') {
+    if (!currentUser || !canAccessAdmin(currentUser.role)) {
+      setView('dashboard')
+      return null
+    }
+    return (
+      <AdminViewWithContext
+        currentUser={currentUser}
+        users={users}
+        setUsers={setUsers}
+        setCurrentUser={setCurrentUser}
+        tariffs={tariffs}
+        setTariffs={setTariffs}
+        setError={setError}
+        setSuccess={setSuccess}
+        adminTab="analytics-funnel"
+        setAdminTab={() => {}}
+      >
+        <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
+          <SidebarNav
+            currentUser={currentUser}
+            view="analytics"
+            onSetView={setView}
+            onLogout={handleLogout}
+          />
+          <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+            <div className="w-full max-w-content mx-auto">
+              <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+                <AnalyticsFunnelPanel users={users} tariffs={tariffs} formatDate={formatDate} onCopy={handleCopy} />
+              </Suspense>
+            </div>
+            <div className="max-sm:hidden">
+              <Footer />
+            </div>
+          </div>
+        </div>
+      </AdminViewWithContext>
     )
   }
 

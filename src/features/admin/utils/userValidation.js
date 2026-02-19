@@ -163,6 +163,7 @@ export function normalizeUser(user) {
     ...(user.discount != null && { discount: Math.min(1, Math.max(0, Number(user.discount))) }),
     ...(user.discountValidFrom != null && { discountValidFrom: typeof user.discountValidFrom === 'number' ? user.discountValidFrom : new Date(user.discountValidFrom).getTime() }),
     ...(user.discountValidTo != null && { discountValidTo: typeof user.discountValidTo === 'number' ? user.discountValidTo : new Date(user.discountValidTo).getTime() }),
+    ...(user.serviceStartDate != null && { serviceStartDate: typeof user.serviceStartDate === 'number' ? user.serviceStartDate : new Date(user.serviceStartDate).getTime() }),
     telegramSessionToken: user.telegramSessionToken != null ? String(user.telegramSessionToken) : null,
     telegramSessionTokenExpiresAt: user.telegramSessionTokenExpiresAt != null
       ? (typeof user.telegramSessionTokenExpiresAt === 'string' ? user.telegramSessionTokenExpiresAt : new Date(user.telegramSessionTokenExpiresAt).toISOString())

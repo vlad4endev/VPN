@@ -21,7 +21,7 @@ async function getAuthHeaders() {
 
 /**
  * Статус настройки ИИ (без токена). Только админ.
- * @returns {Promise<{ configured: boolean, model: string, temperature: number, maxTokens: number, timeoutSeconds: number, systemPromptPreset: string }>}
+ * @returns {Promise<{ configured: boolean, provider: string, providers: Array<{id, name}>, model: string, models: Array<{value, label}>, temperature: number, maxTokens: number, timeoutSeconds: number, systemPromptPreset: string }>}
  */
 export async function getAiStatus() {
   const res = await fetch(`${getBaseUrl()}/api/admin/ai/status`, {
@@ -42,7 +42,10 @@ export async function getAiStatus() {
   }
   return {
     configured: Boolean(json.configured),
+    provider: json.provider ?? 'deepseek',
+    providers: Array.isArray(json.providers) ? json.providers : [{ id: 'deepseek', name: 'DeepSeek' }],
     model: json.model ?? 'deepseek-chat',
+    models: Array.isArray(json.models) ? json.models : [{ value: 'deepseek-chat', label: 'deepseek-chat' }],
     temperature: json.temperature != null ? Number(json.temperature) : 0.7,
     maxTokens: json.maxTokens != null ? Number(json.maxTokens) : 2048,
     timeoutSeconds: json.timeoutSeconds != null ? Number(json.timeoutSeconds) : 60,
@@ -52,11 +55,12 @@ export async function getAiStatus() {
 
 /**
  * Сохранить настройки ИИ в Firestore. Только админ.
- * @param {{ apiKey?: string, model?: string, temperature?: number, maxTokens?: number, timeoutSeconds?: number, systemPromptPreset?: string }} opts
+ * @param {{ provider?: string, apiKey?: string, model?: string, temperature?: number, maxTokens?: number, timeoutSeconds?: number, systemPromptPreset?: string }} opts
  * @returns {Promise<{ configured: boolean, savedTo: string }>}
  */
 export async function saveAiSettings(opts = {}) {
   const body = {}
+  if (opts.provider !== undefined) body.provider = opts.provider
   if (opts.apiKey !== undefined) body.apiKey = opts.apiKey ? String(opts.apiKey).trim() : ''
   if (opts.model !== undefined) body.model = opts.model != null ? String(opts.model).trim() : ''
   if (opts.temperature !== undefined) body.temperature = opts.temperature

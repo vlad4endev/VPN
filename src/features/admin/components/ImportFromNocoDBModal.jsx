@@ -35,6 +35,7 @@ const SERVICE_FIELDS = [
   { key: 'orderIdColumn', label: 'order_id', hint: 'ID заказа — создаётся запись платежа', required: false },
   { key: 'amountColumn', label: 'Сумма', hint: 'Сумма платежа (число)', required: false },
   { key: 'devicesColumn', label: 'Кол-во устройств', hint: 'Лимит устройств', required: false },
+  { key: 'createdAtColumn', label: 'Дата создания строки', hint: 'Дата начала использования сервиса (новичок/старожил)', required: false },
 ]
 
 const DEFAULT_MAPPING = {
@@ -52,6 +53,7 @@ const DEFAULT_MAPPING = {
   orderIdColumn: '',
   amountColumn: '',
   devicesColumn: '',
+  createdAtColumn: '',
 }
 
 const STORAGE_KEY = 'admin_nocodb_import_settings'
@@ -190,6 +192,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       orderIdColumn: guessColumn(columns, 'order_id', 'orderId', 'OrderId', 'order id'),
       amountColumn: guessColumn(columns, 'amount', 'Amount', 'сумма', 'Сумма', 'price', 'Price'),
       devicesColumn: guessColumn(columns, 'devices', 'Devices', 'устройства', 'Устройства', 'devicesCount'),
+      createdAtColumn: guessColumn(columns, 'CreatedAt', 'created_at', 'Дата создания', 'дата создания', 'Created Time', 'created_at'),
     }
   }, [columns])
 
@@ -339,6 +342,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     if (mapping.orderIdColumn?.trim()) params.orderIdColumn = mapping.orderIdColumn.trim()
     if (mapping.amountColumn?.trim()) params.amountColumn = mapping.amountColumn.trim()
     if (mapping.devicesColumn?.trim()) params.devicesColumn = mapping.devicesColumn.trim()
+    if (mapping.createdAtColumn?.trim()) params.createdAtColumn = mapping.createdAtColumn.trim()
     return params
   }, [connectForm, mapping, writeBack, updateExistingUsers, writeBackLoginPasswordOnUpdate])
 
