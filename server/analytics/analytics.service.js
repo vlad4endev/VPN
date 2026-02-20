@@ -60,6 +60,9 @@ export async function getFunnel(db, appId, redisGet, redisSet) {
       problemTicketsCount,
       hasProblemTickets: problemTicketsCount > 0,
       problemTicketSubjects: data.problemTicketSubjects || [],
+      totalPayments: data.totalPayments ?? 0,
+      supportTicketsCount: data.supportTicketsCount ?? 0,
+      lastActiveAt: data.lastActiveAt || null,
     })
   }
 

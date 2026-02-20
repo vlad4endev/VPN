@@ -19,6 +19,7 @@ export function useSupport(currentUser) {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
+  const [ticketFilter, setTicketFilter] = useState('active') // 'all' | 'active' | 'archived'
   const lastNotifiedCountRef = useRef(0)
   const pushSubscribedRef = useRef(false)
 
@@ -40,8 +41,8 @@ export function useSupport(currentUser) {
     setError(null)
     try {
       const list = isAdmin
-        ? await supportService.getAllTickets()
-        : await supportService.getTicketsByUser(currentUser.id)
+        ? await supportService.getAllTickets(ticketFilter)
+        : await supportService.getTicketsByUser(currentUser.id, ticketFilter)
       setTickets(list)
     } catch (err) {
       setError(err.message || 'Не удалось загрузить тикеты')
@@ -49,7 +50,7 @@ export function useSupport(currentUser) {
     } finally {
       setLoading(false)
     }
-  }, [currentUser?.id, isAdmin])
+  }, [currentUser?.id, isAdmin, ticketFilter])
 
   useEffect(() => {
     loadTickets()
@@ -256,6 +257,8 @@ export function useSupport(currentUser) {
     sending,
     error,
     isAdmin,
+    ticketFilter,
+    setTicketFilter,
     loadTickets,
     createTicket,
     createTicketAsAdmin,

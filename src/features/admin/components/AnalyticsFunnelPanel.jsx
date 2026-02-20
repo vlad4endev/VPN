@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingDown, RefreshCw, Loader2, AlertCircle, Users, Target, Zap, UserX, Send, Sparkles, X, Copy, Percent, Gift } from 'lucide-react'
-import { getFunnel, refreshMetrics, sendChurnOffer, getAiStrategy, assignDiscount, sendUserTelegram } from '../services/analyticsFunnelService.js'
+import { TrendingDown, Loader2, AlertCircle, Users, Target, Zap, UserX, Send, Sparkles, X, Copy, Percent, Gift } from 'lucide-react'
+import { getFunnel, refreshMetrics, sendChurnOffer, getAiStrategy, assignDiscount, sendUserTelegram, runAiFunnelAnalysis } from '../services/analyticsFunnelService.js'
 import { notificationsService } from '../../notifications/services/notificationsService.js'
 import { NOTIFICATION_TYPES } from '../../notifications/constants.js'
 import UserCard from './UserCard.jsx'
+
+/** Порядок сегментов (один раз, без дублей при рендере) */
+const SEGMENT_ORDER = ['new', 'active', 'risk', 'churning', 'lost']
 
 const SEGMENT_LABELS = {
   new: 'Новые',
@@ -61,7 +64,6 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [refreshingMetrics, setRefreshingMetrics] = useState(false)
   const [sendingOffer, setSendingOffer] = useState(null)
   const [aiModal, setAiModal] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
@@ -77,6 +79,9 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
   const [offerMessage, setOfferMessage] = useState('')
   const [offerSending, setOfferSending] = useState(false)
   const [offerStatus, setOfferStatus] = useState(null)
+  const [aiTableRows, setAiTableRows] = useState(null)
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
+  const [aiAnalysisProgressStep, setAiAnalysisProgressStep] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -95,16 +100,23 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
     load()
   }, [load])
 
-  const handleRefreshMetrics = async () => {
-    setRefreshingMetrics(true)
+  /** Обновить метрики и запустить ИИ-анализ воронки. Данные в таблице заменяются результатом ИИ. */
+  const handleRunAiFunnelAnalysis = async () => {
+    setAiAnalysisLoading(true)
+    setAiAnalysisProgressStep('Обновление метрик...')
     setError(null)
     try {
       await refreshMetrics({ limit: 2000 })
+      setAiAnalysisProgressStep('ИИ анализирует воронку (подписка, оплаты, тикеты)...')
+      const res = await runAiFunnelAnalysis({ limit: 30 })
+      if (res.rows && Array.isArray(res.rows)) setAiTableRows(res.rows)
+      setAiAnalysisProgressStep('Загрузка воронки...')
       await load()
     } catch (e) {
-      setError(e.message || 'Ошибка обновления метрик')
+      setError(e.message || 'Ошибка ИИ-анализа воронки')
     } finally {
-      setRefreshingMetrics(false)
+      setAiAnalysisLoading(false)
+      setAiAnalysisProgressStep(null)
     }
   }
 
@@ -159,7 +171,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
     setOfferSending(true)
     setOfferStatus(null)
     try {
-      const res = await sendUserTelegram(aiModal.userId, text)
+      const res = await sendUserTelegram(aiModal.userId, text, { buttonText: 'Воспользоваться предложением' })
       setOfferStatus(res.sent ? { success: true } : { success: false, error: res.reason || 'Не отправлено' })
     } catch (e) {
       setOfferStatus({ error: e.message || 'Ошибка отправки в Telegram' })
@@ -264,14 +276,21 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
 
   const segments = data?.segments || {}
   const topByPriority = data?.topByPriority || []
-  const noSubscriptionOrExpiredRaw = data?.noSubscriptionOrExpired || []
-  // В таблицу — только пользователи с ролью "user" (админов и бухгалтеров не показываем)
-  const noSubscriptionOrExpired = noSubscriptionOrExpiredRaw.filter((row) => {
+  // Таблица строится только по результатам ИИ (старые данные воронки не показываем)
+  const tableRowsBase = aiTableRows || []
+  const filteredByRole = tableRowsBase.filter((row) => {
     const u = users.find((usr) => usr.id === row.userId)
     if (!u) return false
     const r = (u.role || '').toString().toLowerCase()
     return r === 'user' || r === ''
   })
+  const seenIds = new Set()
+  const tableRows = filteredByRole.filter((row) => {
+    if (seenIds.has(row.userId)) return false
+    seenIds.add(row.userId)
+    return true
+  })
+  const showAiColumns = tableRows.length > 0
   const avgChurn = data?.avgChurnScore ?? 0
   const forecast = data?.churnForecast || {}
   const totalUsers = data?.totalUsers ?? 0
@@ -285,31 +304,19 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
             AI-Воронка
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Сегменты, приоритет удержания и прогноз оттока. Сначала обновите метрики, если данных нет.
+            Сегменты, приоритет удержания и прогноз оттока. Нажмите «Обновить с ИИ-анализом» — данные в таблице обновятся и заменят предыдущие.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleRefreshMetrics}
-            disabled={refreshingMetrics}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm"
+            onClick={handleRunAiFunnelAnalysis}
+            disabled={aiAnalysisLoading || loading}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm"
+            title="Обновить метрики и запустить ИИ-анализ. Результат заменит данные в таблице."
           >
-            {refreshingMetrics ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-            Обновить метрики
-          </button>
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Обновить воронку
+            {aiAnalysisLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            Обновить с ИИ-анализом
           </button>
         </div>
       </div>
@@ -347,25 +354,37 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
         </div>
       </section>
 
-      {/* Таблица: без подписки или давно не продлевали (топ 50) */}
-      {noSubscriptionOrExpired.length > 0 && (
-        <section className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
-          <div className="px-3 py-2 border-b border-slate-800 bg-slate-800/30">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Без подписки или давно не продлевали · топ 50 по приоритету
-            </p>
-            <p className="text-[11px] text-slate-600 mt-0.5">
-              Приоритет — у кого были тикеты «не работало / не смогли воспользоваться». Клик по строке — карточка пользователя.
-            </p>
+      {/* Таблица: только данные от ИИ (сложность, причина). Без ИИ — пустое состояние. */}
+      <section className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+        <div className="px-3 py-2 border-b border-slate-800 bg-slate-800/50">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+            По анализу ИИ (сложность 1–5)
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Индекс сложности возврата и причина от ИИ. Клик по строке — карточка пользователя. Данные только после нажатия «Обновить с ИИ-анализом».
+          </p>
+        </div>
+        {tableRows.length === 0 ? (
+          <div className="px-4 py-12 text-center text-slate-500">
+            <Sparkles className="w-10 h-10 mx-auto mb-2 opacity-50" />
+            <p className="font-medium text-slate-400">Нет данных</p>
+            <p className="text-sm mt-1">Нажмите «Обновить с ИИ-анализом», чтобы загрузить таблицу.</p>
           </div>
-          <div className="overflow-x-auto max-h-[min(70vh,32rem)] overflow-y-auto">
-            <table className="w-full text-xs min-w-[640px]">
-              <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur border-b border-slate-700">
+        ) : (
+          <div className="overflow-x-auto overflow-y-auto max-h-[32rem]">
+            <table className="w-full text-xs min-w-[40rem]">
+              <thead className="sticky top-0 z-10 bg-slate-800 border-b border-slate-700">
                 <tr className="text-slate-400">
                   <th className="text-left py-1.5 pl-3 pr-2 font-medium w-[1%] whitespace-nowrap">#</th>
                   <th className="text-left py-1.5 pr-2 font-medium min-w-[120px]" title="Имя или email">Клиент</th>
                   <th className="text-left py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Статус подписки">Подписка</th>
                   <th className="text-left py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap">Сегмент</th>
+                  {showAiColumns && (
+                    <>
+                      <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Сложность возврата 1–5">Сложность</th>
+                      <th className="text-left py-1.5 pr-2 font-medium max-w-[180px]" title="Причина от ИИ">Причина</th>
+                    </>
+                  )}
                   <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Риск оттока 0–100">Churn</th>
                   <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Приоритет для возврата">Приор.</th>
                   <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Пожизненная ценность">LTV</th>
@@ -374,8 +393,17 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                 </tr>
               </thead>
               <tbody>
-                {noSubscriptionOrExpired.map((row, idx) => {
+                {tableRows.map((row, idx) => {
                   const sub = subscriptionStatus(row)
+                  const segment = showAiColumns ? (row.aiSegment ?? row.segment) : row.segment
+                  const priorityScore = showAiColumns ? (row.aiPriorityScore ?? row.priorityScore) : row.priorityScore
+                  const complexityIndex = row.complexityIndex
+                  const complexityClass =
+                    complexityIndex === 1 ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' :
+                    complexityIndex === 2 ? 'bg-emerald-600/20 border-emerald-600/50 text-emerald-400' :
+                    complexityIndex === 3 ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' :
+                    complexityIndex === 4 ? 'bg-orange-500/20 border-orange-500/50 text-orange-300' :
+                    'bg-red-500/20 border-red-500/50 text-red-300'
                   return (
                     <tr
                       key={row.userId}
@@ -398,19 +426,35 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                         </span>
                       </td>
                       <td className="py-1 pr-2">
-                        <span className={`inline-flex px-1.5 py-0.5 rounded border text-[11px] ${SEGMENT_COLORS[row.segment] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}>
-                          {SEGMENT_LABELS[row.segment] || row.segment}
+                        <span className={`inline-flex px-1.5 py-0.5 rounded border text-xs ${SEGMENT_COLORS[segment] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}>
+                          {SEGMENT_LABELS[segment] || segment}
                         </span>
                       </td>
+                      {showAiColumns && (
+                        <>
+                          <td className="py-1 pr-2 text-center">
+                            {complexityIndex != null ? (
+                              <span className={`inline-flex px-1.5 py-0.5 rounded border text-xs font-medium ${complexityClass}`} title="Сложность возврата 1–5">
+                                {complexityIndex}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="py-1 pr-2 text-slate-400 max-w-[180px] truncate" title={row.shortReason || ''}>
+                            {row.shortReason || '—'}
+                          </td>
+                        </>
+                      )}
                       <td className={`py-1 pr-2 text-right tabular-nums ${churnLevel(row.churnScore)}`}>
                         {row.churnScore ?? '—'}
                       </td>
-                      <td className="py-1 pr-2 text-right text-slate-300 tabular-nums">{row.priorityScore ?? '—'}</td>
+                      <td className="py-1 pr-2 text-right text-slate-300 tabular-nums">{priorityScore ?? '—'}</td>
                       <td className="py-1 pr-2 text-right text-slate-300 tabular-nums">{formatLTV(row.lifetimeValue)}</td>
                       <td className="py-1 pr-2 text-center">
                         {row.hasProblemTickets ? (
                           <span
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px]"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs"
                             title={Array.isArray(row.problemTicketSubjects) && row.problemTicketSubjects.length ? row.problemTicketSubjects.join(' · ') : ''}
                           >
                             {row.problemTicketsCount ?? 0}
@@ -448,26 +492,44 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
               </tbody>
             </table>
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
-      {/* Сегменты */}
+      {/* Сегменты — фиксированный порядок, без дублей */}
       <section className="rounded-xl bg-slate-900 border border-slate-800 px-4 py-3">
-        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mb-2">Сегменты</p>
-        <div className="flex flex-wrap gap-1.5">
-          {Object.entries(segments).map(([key, count]) => (
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Сегменты воронки</p>
+        <div className="flex flex-wrap gap-2">
+          {SEGMENT_ORDER.map((key) => (
             <span
               key={key}
               className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium tabular-nums ${SEGMENT_COLORS[key] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}
             >
-              {SEGMENT_LABELS[key] || key}: {count}
+              {SEGMENT_LABELS[key] || key}: {segments[key] ?? 0}
             </span>
           ))}
-          {Object.keys(segments).length === 0 && (
-            <p className="text-slate-500 text-xs">Нет данных. Нажмите «Обновить метрики».</p>
+          {totalUsers === 0 && (
+            <p className="text-slate-500 text-xs">Нет данных. Нажмите «Обновить с ИИ-анализом».</p>
           )}
         </div>
       </section>
+
+      {/* Попап процесса ИИ-анализа воронки */}
+      {aiAnalysisLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-sm w-full p-6 flex flex-col items-center gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Loader2 className="w-12 h-12 text-violet-400 animate-spin flex-shrink-0" />
+            <p className="text-slate-200 font-medium text-center">
+              {aiAnalysisProgressStep || 'Подготовка...'}
+            </p>
+            <p className="text-slate-500 text-sm text-center">
+              Подождите, это может занять до минуты.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Модалка: анализ ИИ — стратегия и сообщение */}
       {aiModal && (

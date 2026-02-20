@@ -2,7 +2,7 @@
  * Роуты AI-воронки аналитики. Все маршруты требуют роль admin.
  * Подключение: app.use('/api/analytics', createAnalyticsRouter(deps))
  *
- * @param {Object} deps — ensureAdmin, getDb, APP_ID, redisGet, redisSet, getTelegramToken?, sendTelegramMessage?, getActiveAiConfig?, unifiedChat?
+ * @param {Object} deps — ensureAdmin, getDb, APP_ID, redisGet, redisSet, getTelegramToken?, sendTelegramMessage?, getBaseUrlForTelegram?, getActiveAiConfig?, unifiedChat?
  */
 
 import express from 'express'
@@ -17,6 +17,7 @@ export function createAnalyticsRouter(deps) {
     redisSet,
     getTelegramToken,
     sendTelegramMessage,
+    getBaseUrlForTelegram,
     getActiveAiConfig,
     unifiedChat,
   } = deps
@@ -31,6 +32,7 @@ export function createAnalyticsRouter(deps) {
     req.redisSet = redisSet || (() => Promise.resolve())
     req.getTelegramToken = getTelegramToken || null
     req.sendTelegramMessage = sendTelegramMessage || null
+    req.getBaseUrlForTelegram = getBaseUrlForTelegram || null
     req.getActiveAiConfig = getActiveAiConfig || null
     req.unifiedChat = unifiedChat || null
     next()
@@ -47,6 +49,7 @@ export function createAnalyticsRouter(deps) {
   router.post('/refresh-metrics', withContext, requireAdmin, controller.refreshMetrics)
   router.post('/send-churn-offer/:id', withContext, requireAdmin, controller.sendChurnOffer)
   router.post('/ai-strategy', withContext, requireAdmin, controller.aiStrategy)
+  router.post('/ai-funnel-analysis', withContext, requireAdmin, controller.aiFunnelAnalysis)
 
   return router
 }

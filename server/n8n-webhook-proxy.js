@@ -1406,9 +1406,10 @@ app.post('/api/admin/notifications/send-user-telegram', express.json(), async (r
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-  const { userId, text } = req.body || {}
+  const { userId, text, buttonText } = req.body || {}
   const uid = (userId ?? '').toString().trim()
   const message = (text ?? '').toString().trim()
+  const inlineButtonLabel = (buttonText ?? 'Перейти в личный кабинет').toString().trim() || 'Перейти в личный кабинет'
   if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
   if (!message) return res.status(400).json({ success: false, error: 'Укажите text' })
   try {
@@ -1418,7 +1419,12 @@ app.post('/api/admin/notifications/send-user-telegram', express.json(), async (r
     if (!tgId) return res.json({ success: true, sent: false, reason: 'У пользователя не привязан Telegram' })
     const botToken = await getTelegramToken()
     if (!botToken) return res.json({ success: true, sent: false, reason: 'Telegram бот не настроен' })
-    const result = await sendTelegramMessage(botToken, tgId, message)
+    const baseUrl = getBaseUrlForTelegram()
+    const subscriptionUrl = baseUrl ? `${baseUrl}/#dashboard` : null
+    const options = subscriptionUrl
+      ? { reply_markup: { inline_keyboard: [[{ text: inlineButtonLabel, url: subscriptionUrl }]] } }
+      : {}
+    const result = await sendTelegramMessage(botToken, tgId, message, options)
     return res.json({ success: true, sent: result.ok, reason: result.ok ? undefined : (result.error || 'Ошибка отправки') })
   } catch (err) {
     console.error('❌ POST /api/admin/notifications/send-user-telegram:', err.message)
@@ -4287,6 +4293,7 @@ app.use('/api/analytics', createAnalyticsRouter({
   redisSet,
   getTelegramToken,
   sendTelegramMessage,
+  getBaseUrlForTelegram,
   getActiveAiConfig,
   unifiedChat,
 }))

@@ -124,18 +124,24 @@ export const supportService = {
   /**
    * Список тикетов пользователя.
    * @param {string} userId
+   * @param {'all'|'active'|'archived'} [filter='all'] - all, active (open+answered), archived (closed)
    * @returns {Promise<Array<{ id, ... }>>}
    */
-  async getTicketsByUser(userId) {
+  async getTicketsByUser(userId, filter = 'all') {
     if (!db || !userId) return []
 
     try {
       const ticketsRef = collection(db, TICKETS_PATH)
-      const q = query(
-        ticketsRef,
+      const constraints = [
         where('userId', '==', userId),
-        orderBy('updatedAt', 'desc')
-      )
+        orderBy('updatedAt', 'desc'),
+      ]
+      if (filter === 'active') {
+        constraints.unshift(where('status', 'in', ['open', 'answered']))
+      } else if (filter === 'archived') {
+        constraints.unshift(where('status', '==', 'closed'))
+      }
+      const q = query(ticketsRef, ...constraints)
       const snapshot = await getDocs(q)
       const list = []
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }))
@@ -306,14 +312,21 @@ export const supportService = {
 
   /**
    * Все тикеты (для админа).
+   * @param {'all'|'active'|'archived'} [filter='all'] - all, active (open+answered), archived (closed)
    * @returns {Promise<Array<{ id, ... }>>}
    */
-  async getAllTickets() {
+  async getAllTickets(filter = 'all') {
     if (!db) return []
 
     try {
       const ticketsRef = collection(db, TICKETS_PATH)
-      const q = query(ticketsRef, orderBy('updatedAt', 'desc'))
+      const constraints = [orderBy('updatedAt', 'desc')]
+      if (filter === 'active') {
+        constraints.unshift(where('status', 'in', ['open', 'answered']))
+      } else if (filter === 'archived') {
+        constraints.unshift(where('status', '==', 'closed'))
+      }
+      const q = query(ticketsRef, ...constraints)
       const snapshot = await getDocs(q)
       const list = []
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }))

@@ -32,6 +32,8 @@ const SupportView = ({
     sending,
     error,
     isAdmin,
+    ticketFilter,
+    setTicketFilter,
     loadTickets,
     createTicket,
     sendMessage,
@@ -107,12 +109,31 @@ const SupportView = ({
                 Новое обращение
               </button>
             </div>
+            <div className="flex items-center gap-1 p-2 border-b border-slate-700/50 flex-shrink-0">
+              {[
+                { value: 'active', label: 'Активные' },
+                { value: 'archived', label: 'Архив' },
+                { value: 'all', label: 'Все' },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTicketFilter(value)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    ticketFilter === value ? 'bg-blue-600 text-white' : 'bg-slate-700/80 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="flex-1 overflow-y-auto p-3 min-h-0">
               <TicketList
                 tickets={tickets}
                 selectedTicketId={selectedTicketId}
                 onSelectTicket={selectTicket}
                 loading={loading}
+                emptySubtext={ticketFilter === 'archived' ? 'Нет обращений в архиве' : ticketFilter === 'active' ? 'Нет активных обращений' : 'Нет обращений'}
               />
             </div>
           </section>

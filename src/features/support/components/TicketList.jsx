@@ -4,7 +4,7 @@ import { formatDate } from '../../../shared/utils/formatDate.js'
 const statusConfig = {
   open: { label: 'Открыт', color: 'text-amber-400', icon: Clock },
   answered: { label: 'Ответ дан', color: 'text-blue-400', icon: CheckCircle },
-  closed: { label: 'Закрыт', color: 'text-slate-400', icon: XCircle },
+  closed: { label: 'В архиве', color: 'text-slate-400', icon: XCircle },
 }
 
 const TicketList = ({ tickets, selectedTicketId, onSelectTicket, loading, emptySubtext }) => {

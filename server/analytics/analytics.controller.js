@@ -3,6 +3,7 @@
  */
 
 import * as analyticsService from './analytics.service.js'
+import { getPaymentAndTicketHistory } from './metrics.service.js'
 
 /**
  * Загрузить глобальный контекст для ИИ: тарифы (условия, цены, описания) и серверы без чувствительных данных (без IP/портов/логинов).
@@ -340,11 +341,167 @@ export async function sendChurnOffer(req, res) {
     if (!token) {
       return res.status(503).json({ success: false, error: 'Telegram бот не настроен' })
     }
-    await sendTelegramMessage(token, String(telegramId), text)
+    const getBaseUrl = req.getBaseUrlForTelegram || (() => (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '') || null)
+    const baseUrl = typeof getBaseUrl === 'function' ? getBaseUrl() : null
+    const subscriptionUrl = baseUrl ? `${baseUrl}/#dashboard` : null
+    const options = {}
+    if (subscriptionUrl) {
+      options.reply_markup = {
+        inline_keyboard: [[{ text: 'Воспользоваться предложением', url: subscriptionUrl }]],
+      }
+    }
+    await sendTelegramMessage(token, String(telegramId), text, options)
     res.json({ success: true, sent: true, message: 'Оффер отправлен в Telegram' })
   } catch (err) {
     console.error('POST /api/analytics/send-churn-offer:', err.message)
     res.status(500).json({ success: false, error: err.message })
+  }
+}
+
+/**
+ * POST /api/analytics/ai-funnel-analysis
+ * Загружает воронку, для каждого пользователя без подписки — историю платежей и тикетов, отправляет в ИИ.
+ * ИИ возвращает индекс сложности (1–5), сегмент, приоритет и краткую причину. Таблица строится по этому анализу.
+ */
+export async function aiFunnelAnalysis(req, res) {
+  const db = req.db
+  const appId = req.APP_ID || process.env.APP_ID || 'skyputh'
+  const getActiveAiConfig = req.getActiveAiConfig
+  const unifiedChat = req.unifiedChat
+  const redisGet = req.redisGet || (() => Promise.resolve(null))
+  const redisSet = req.redisSet || (() => Promise.resolve())
+
+  if (!getActiveAiConfig || !unifiedChat) {
+    return res.status(503).json({ success: false, error: 'ИИ не подключён' })
+  }
+  const config = await getActiveAiConfig()
+  if (!config?.apiKey) {
+    return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
+  }
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  const limit = Math.min(35, Math.max(1, parseInt(req.body?.limit || '30', 10) || 30))
+
+  try {
+    const funnel = await analyticsService.getFunnel(db, appId, redisGet, redisSet)
+    const baseRows = (funnel?.noSubscriptionOrExpired || []).slice(0, limit)
+    if (baseRows.length === 0) {
+      return res.json({
+        success: true,
+        rows: [],
+        segments: funnel?.segments || {},
+        totalUsers: funnel?.totalUsers ?? 0,
+        churnForecast: funnel?.churnForecast || {},
+        avgChurnScore: funnel?.avgChurnScore ?? 0,
+        message: 'Нет пользователей без подписки или с давно истёкшей подпиской',
+      })
+    }
+
+    const histories = await Promise.all(
+      baseRows.map((row) => getPaymentAndTicketHistory(db, appId, row.userId, { paymentsLimit: 5, ticketsLimit: 5 }))
+    )
+    const summaries = baseRows.map((row, i) => {
+      const h = histories[i] || { lastPayments: [], lastTickets: [] }
+      return {
+        userId: row.userId,
+        name: (row.name || '').slice(0, 50) || '—',
+        subscriptionExpiresAt: row.subscriptionExpiresAt || null,
+        lastActiveAt: row.lastActiveAt || null,
+        totalPayments: row.totalPayments ?? 0,
+        lifetimeValue: row.lifetimeValue ?? 0,
+        segment: row.segment,
+        churnScore: row.churnScore,
+        priorityScore: row.priorityScore,
+        supportTicketsCount: row.supportTicketsCount ?? 0,
+        problemTicketsCount: row.problemTicketsCount ?? 0,
+        problemTicketSubjects: Array.isArray(row.problemTicketSubjects) ? row.problemTicketSubjects.slice(0, 3) : [],
+        lastPayments: h.lastPayments,
+        lastTickets: h.lastTickets,
+      }
+    })
+
+    const globalContext = await loadGlobalContextForAi(db, appId)
+    const systemPrompt = `Ты — аналитик удержания клиентов VPN-сервиса. Получаешь данные по пользователям: подписка, активность, оплаты, тикеты поддержки.
+Задача: для каждого пользователя вернуть оценку сложности возврата и краткую причину.
+Ответь строго в формате JSON — один массив объектов, без markdown и без текста до/после:
+[{"userId":"...","complexityIndex":1,"segment":"new|active|risk|churning|lost","priorityScore":0-100,"shortReason":"одна короткая фраза на русском"}]
+Правила:
+- complexityIndex: 1 = легко вернуть, 5 = очень сложно вернуть (учитывай историю оплат, тикетов, давность неактивности).
+- segment оставь из данных или скорректируй по смыслу.
+- priorityScore: приоритет работы с клиентом 0–100 (выше = важнее вернуть первым).
+- shortReason: одна фраза, почему такой индекс (например: "Не платил полгода, были жалобы в поддержку").`
+
+    const userMessage = `Тарифы и серверы (контекст):\nТарифы:\n${globalContext.tariffsText}\n\nСерверы:\n${globalContext.serversText}\n\nДанные пользователей для анализа (${summaries.length}):\n${JSON.stringify(summaries, null, 0)}\n\nВерни массив из ${summaries.length} объектов с полями userId, complexityIndex, segment, priorityScore, shortReason.`
+
+    const chatConfig = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      temperature: 0.3,
+      max_tokens: 4096,
+      timeout: config?.timeout ?? 90,
+    }
+    const result = await unifiedChat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      chatConfig
+    )
+
+    if (!result.ok) {
+      const isTimeout = result.code === 'TIMEOUT' || (result.error && /timeout|ETIMEDOUT|ECONNABORTED/i.test(result.error))
+      const status = isTimeout ? 504 : 502
+      return res.status(status).json({
+        success: false,
+        error: isTimeout ? 'ИИ не успел ответить. Попробуйте ещё раз.' : (result.error || 'Ошибка ИИ'),
+        code: result.code,
+      })
+    }
+
+    const content = result?.content && typeof result.content === 'string' ? result.content : ''
+    let aiList = []
+    if (content) {
+      try {
+        const raw = content.replace(/```json?\s*|\s*```/g, '').trim()
+        aiList = JSON.parse(raw)
+        if (!Array.isArray(aiList)) aiList = []
+      } catch (_) {
+        console.warn('ai-funnel-analysis: не удалось распарсить JSON ответ ИИ')
+      }
+    }
+
+    const aiByUserId = new Map()
+    aiList.forEach((item) => {
+      const id = (item.userId || item.user_id || '').toString().trim()
+      if (id) aiByUserId.set(id, item)
+    })
+
+    const rows = baseRows
+      .map((row) => {
+        const ai = aiByUserId.get(row.userId) || {}
+        const complexityIndex = Math.min(5, Math.max(1, parseInt(ai.complexityIndex || ai.complexity_index || 3, 10) || 3))
+        return {
+          ...row,
+          complexityIndex,
+          aiSegment: ai.segment || row.segment,
+          aiPriorityScore: typeof ai.priorityScore === 'number' ? ai.priorityScore : (ai.priority_score != null ? Number(ai.priority_score) : row.priorityScore),
+          shortReason: (ai.shortReason || ai.short_reason || '').toString().trim().slice(0, 200) || null,
+        }
+      })
+      .sort((a, b) => (b.complexityIndex !== a.complexityIndex ? b.complexityIndex - a.complexityIndex : (b.aiPriorityScore || 0) - (a.aiPriorityScore || 0)))
+
+    return res.json({
+      success: true,
+      rows,
+      segments: funnel?.segments || {},
+      totalUsers: funnel?.totalUsers ?? 0,
+      churnForecast: funnel?.churnForecast || {},
+      avgChurnScore: funnel?.avgChurnScore ?? 0,
+    })
+  } catch (err) {
+    console.error('POST /api/analytics/ai-funnel-analysis:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
   }
 }
 

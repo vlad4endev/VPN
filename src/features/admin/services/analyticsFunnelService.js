@@ -113,17 +113,20 @@ export async function assignDiscount(userId, opts = {}) {
 }
 
 /**
- * POST /api/admin/notifications/send-user-telegram — отправить текст пользователю в Telegram.
+ * POST /api/admin/notifications/send-user-telegram — отправить текст пользователю в Telegram с инлайн-кнопкой.
  * @param {string} userId
  * @param {string} text
+ * @param {{ buttonText?: string }} [opts] — текст кнопки (по умолчанию «Перейти в личный кабинет»). Например: «Воспользоваться предложением», «Подключить подписку».
  */
-export async function sendUserTelegram(userId, text) {
+export async function sendUserTelegram(userId, text, opts = {}) {
   const base = getBaseUrl()
   const headers = await getAuthHeaders()
+  const body = { userId: String(userId || '').trim(), text: String(text || '').trim() }
+  if (opts.buttonText != null && String(opts.buttonText).trim()) body.buttonText = String(opts.buttonText).trim()
   const res = await fetch(`${base}/api/admin/notifications/send-user-telegram`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify({ userId: String(userId || '').trim(), text: String(text || '').trim() }),
+    body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || res.statusText)
@@ -161,4 +164,28 @@ export async function getAiStrategy(userId, opts = {}) {
   }
   const data = await res.json()
   return data
+}
+
+/**
+ * POST /api/analytics/ai-funnel-analysis — ИИ анализирует данные пользователей (подписка, оплаты, тикеты) и возвращает таблицу с индексами сложности.
+ * Сначала желательно вызвать refreshMetrics().
+ * @param {{ limit?: number }} [opts] — макс. пользователей для анализа (по умолчанию 30)
+ * @returns {Promise<{ success: boolean, rows: array, segments: object, totalUsers: number, churnForecast: object, avgChurnScore: number }>}
+ */
+export async function runAiFunnelAnalysis(opts = {}) {
+  const base = getBaseUrl()
+  const headers = await getAuthHeaders()
+  const res = await fetch(`${base}/api/analytics/ai-funnel-analysis`.replace(/\/+/g, '/'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ limit: Math.min(35, Math.max(1, Number(opts.limit) || 30)) }),
+  })
+  const contentType = res.headers.get('content-type') || ''
+  const isJson = contentType.includes('application/json')
+  if (!res.ok) {
+    const data = isJson ? await res.json().catch(() => ({})) : {}
+    throw new Error(data.error || data.message || res.statusText || 'Ошибка ИИ-анализа воронки')
+  }
+  if (!isJson) throw new Error('Сервер вернул не JSON')
+  return res.json()
 }

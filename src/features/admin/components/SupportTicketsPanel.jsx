@@ -19,6 +19,8 @@ const SupportTicketsPanel = ({ currentUser, users = [], loadUsers }) => {
     sending,
     error,
     isAdmin,
+    ticketFilter,
+    setTicketFilter,
     sendMessage,
     updateStatus,
     selectTicket,
@@ -136,13 +138,31 @@ const SupportTicketsPanel = ({ currentUser, users = [], loadUsers }) => {
       <div className="flex flex-col lg:flex-row min-h-[400px] lg:min-h-[500px]">
         {/* Список тикетов */}
         <div className="lg:w-80 xl:w-96 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-slate-700/50 flex flex-col">
+          <div className="flex items-center gap-1 p-2 border-b border-slate-700/50 flex-shrink-0">
+            {[
+              { value: 'active', label: 'Активные' },
+              { value: 'archived', label: 'Архив' },
+              { value: 'all', label: 'Все' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTicketFilter(value)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  ticketFilter === value ? 'bg-blue-600 text-white' : 'bg-slate-700/80 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="flex-1 overflow-y-auto p-3 min-h-[200px] lg:min-h-0">
             <TicketList
               tickets={tickets}
               selectedTicketId={selectedTicketId}
               onSelectTicket={selectTicket}
               loading={loading}
-              emptySubtext="Пока нет обращений от пользователей"
+              emptySubtext={ticketFilter === 'archived' ? 'Нет тикетов в архиве' : ticketFilter === 'active' ? 'Нет активных обращений' : 'Пока нет обращений'}
             />
           </div>
         </div>

@@ -55,7 +55,7 @@ const TicketChat = ({
     )
   }
 
-  const statusLabels = { open: 'Открыт', answered: 'Ответ дан', closed: 'Закрыт' }
+  const statusLabels = { open: 'Открыт', answered: 'Ответ дан', closed: 'Закрыт (в архив)' }
   const canReply = ticket.status !== 'closed'
 
   return (
@@ -87,7 +87,7 @@ const TicketChat = ({
           >
             <option value="open">Открыт</option>
             <option value="answered">Ответ дан</option>
-            <option value="closed">Закрыт</option>
+            <option value="closed">Закрыть и в архив</option>
           </select>
         )}
       </div>

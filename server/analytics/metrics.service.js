@@ -191,7 +191,7 @@ export async function aggregateUserMetrics(db, appId, userId) {
     lifetimeValue,
     supportTicketsCount,
     problemTicketsCount,
-    problemTicketSubjects: problemTicketSubjects.length ? problemTicketSubjects : undefined,
+    problemTicketSubjects: problemTicketSubjects.length ? problemTicketSubjects : [],
     trafficUsedBytes,
     planType,
   }
@@ -263,4 +263,42 @@ export async function refreshAllMetrics(db, appId, opts = {}) {
     )
   }
   return count
+}
+
+/**
+ * Загрузить историю платежей и тикетов для ИИ-анализа (последние N записей).
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {string} appId
+ * @param {string} userId
+ * @param {{ paymentsLimit?: number, ticketsLimit?: number }} [opts]
+ * @returns {Promise<{ lastPayments: Array<{ date: string, amount: number }>, lastTickets: Array<{ subject: string, createdAt: string }> }>}
+ */
+export async function getPaymentAndTicketHistory(db, appId, userId, opts = {}) {
+  const paymentsLimit = opts.paymentsLimit ?? 5
+  const ticketsLimit = opts.ticketsLimit ?? 5
+  if (!db || !appId || !userId) {
+    return { lastPayments: [], lastTickets: [] }
+  }
+  const paymentsRef = db.collection(getPaymentsPath(appId))
+  const ticketsRef = db.collection(getTicketsPath(appId))
+  const [paymentsSnap, ticketsSnap] = await Promise.all([
+    paymentsRef.where('userId', '==', userId).limit(50).get(),
+    ticketsRef.where('userId', '==', userId).limit(50).get(),
+  ])
+  const paymentsList = paymentsSnap.docs.map((d) => {
+    const x = d.data() || {}
+    const amount = Number(x.amount)
+    const createdAt = x.createdAt || x.date || ''
+    return { date: createdAt, amount: Number.isNaN(amount) ? 0 : amount, _ts: new Date(createdAt).getTime() }
+  })
+  paymentsList.sort((a, b) => (b._ts || 0) - (a._ts || 0))
+  const lastPayments = paymentsList.slice(0, paymentsLimit).map(({ date, amount }) => ({ date: date || '-', amount }))
+  const ticketsList = ticketsSnap.docs.map((d) => {
+    const x = d.data() || {}
+    const createdAt = x.createdAt || ''
+    return { subject: (x.subject || '').toString().slice(0, 150) || '-', createdAt, _ts: new Date(createdAt).getTime() }
+  })
+  ticketsList.sort((a, b) => (b._ts || 0) - (a._ts || 0))
+  const lastTickets = ticketsList.slice(0, ticketsLimit).map(({ subject, createdAt }) => ({ subject, createdAt: createdAt || '-' }))
+  return { lastPayments, lastTickets }
 }
