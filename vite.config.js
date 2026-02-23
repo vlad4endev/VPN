@@ -35,36 +35,42 @@ export default defineConfig(({ mode }) => {
     ],
 
     proxy: {
-      // Общий прокси для всех /api запросов
-      '/api': {
-        target: 'http://localhost:3001',
+      // Важно: более специфичные пути должны быть ПЕРЕД общим /api, иначе запросы
+      // типа /api/xui/panel/... попадают на бэкенд 3001 и дают 404.
+      // Прокси для 3x-ui панели (обновление клиента из админки и т.д.)
+      '/api/xui': {
+        target: env.XUI_HOST || 'http://localhost:2053',
         changeOrigin: true,
+        secure: false,
+        rewrite: (path) => {
+          let apiPath = path.replace(/^\/api\/xui/, '')
+          if (!apiPath.startsWith('/')) {
+            apiPath = '/' + apiPath
+          }
+          const targetUrl = env.XUI_HOST || 'http://localhost:2053'
+          try {
+            const url = new URL(targetUrl)
+            const panelPath = url.pathname
+            const cleanPanelPath = panelPath.endsWith('/') ? panelPath.slice(0, -1) : panelPath
+            return cleanPanelPath + apiPath
+          } catch {
+            return apiPath
+          }
+        },
         configure: (proxy, _options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('❌ API Proxy error:', err.message);
-            console.error('   Request:', req.method, req.url);
-            if (!res.headersSent) {
-              res.writeHead(502, {
-                'Content-Type': 'application/json',
-              });
-              res.end(JSON.stringify({
-                success: false,
-                error: `Backend proxy недоступен: ${err.message}`,
-                hint: 'Проверьте, что backend proxy запущен на http://localhost:3001'
-              }));
-            }
+          proxy.on('error', (err, _req, _res) => {
+            console.error('❌ XUI Proxy error:', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            if (req.headers.authorization) proxyReq.setHeader('Authorization', req.headers.authorization);
-            if (req.headers['x-app-id']) proxyReq.setHeader('X-App-Id', req.headers['x-app-id']);
-            console.log('🔄 API Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
+            const targetUrl = env.XUI_HOST || 'http://localhost:2053'
+            console.log('🔄 XUI Proxy Request:', req.method, req.url, '→', targetUrl);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('✅ API Proxy Response:', proxyRes.statusCode, req.url);
+            console.log('✅ XUI Proxy Response:', proxyRes.statusCode, req.url);
           });
         },
       },
-      // Прокси для Backend Proxy (новый)
+      // Прокси для Backend Proxy (VPN, client-stats, add-client и т.д.)
       '/api/vpn': {
         target: 'http://localhost:3001',
         changeOrigin: true,
@@ -111,36 +117,32 @@ export default defineConfig(({ mode }) => {
           });
         },
       },
-      // Прокси для прямого подключения к 3x-ui (старый, для обратной совместимости)
-      '/api/xui': {
-        target: env.XUI_HOST || 'http://localhost:2053',
+      // Общий прокси для остальных /api запросов (должен быть последним)
+      '/api': {
+        target: 'http://localhost:3001',
         changeOrigin: true,
-        secure: false,
-        rewrite: (path) => {
-          let apiPath = path.replace(/^\/api\/xui/, '')
-          if (!apiPath.startsWith('/')) {
-            apiPath = '/' + apiPath
-          }
-          const targetUrl = env.XUI_HOST || 'http://localhost:2053'
-          try {
-            const url = new URL(targetUrl)
-            const panelPath = url.pathname
-            const cleanPanelPath = panelPath.endsWith('/') ? panelPath.slice(0, -1) : panelPath
-            return cleanPanelPath + apiPath
-          } catch {
-            return apiPath
-          }
-        },
         configure: (proxy, _options) => {
-          proxy.on('error', (err, _req, _res) => {
-            console.error('❌ Proxy error:', err);
+          proxy.on('error', (err, req, res) => {
+            console.error('❌ API Proxy error:', err.message);
+            console.error('   Request:', req.method, req.url);
+            if (!res.headersSent) {
+              res.writeHead(502, {
+                'Content-Type': 'application/json',
+              });
+              res.end(JSON.stringify({
+                success: false,
+                error: `Backend proxy недоступен: ${err.message}`,
+                hint: 'Проверьте, что backend proxy запущен на http://localhost:3001'
+              }));
+            }
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            const targetUrl = env.XUI_HOST || 'http://localhost:2053'
-            console.log('🔄 Proxy Request:', req.method, req.url, '→', targetUrl);
+            if (req.headers.authorization) proxyReq.setHeader('Authorization', req.headers.authorization);
+            if (req.headers['x-app-id']) proxyReq.setHeader('X-App-Id', req.headers['x-app-id']);
+            console.log('🔄 API Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('✅ Proxy Response:', proxyRes.statusCode, req.url);
+            console.log('✅ API Proxy Response:', proxyRes.statusCode, req.url);
           });
         },
       },

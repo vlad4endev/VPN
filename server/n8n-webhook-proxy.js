@@ -17,6 +17,7 @@ import helmet from 'helmet'
 import dotenv from 'dotenv'
 import os from 'os'
 import path from 'path'
+import https from 'https'
 import { readFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
@@ -1406,10 +1407,9 @@ app.post('/api/admin/notifications/send-user-telegram', express.json(), async (r
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-  const { userId, text, buttonText } = req.body || {}
+  const { userId, text } = req.body || {}
   const uid = (userId ?? '').toString().trim()
   const message = (text ?? '').toString().trim()
-  const inlineButtonLabel = (buttonText ?? 'Перейти в личный кабинет').toString().trim() || 'Перейти в личный кабинет'
   if (!uid) return res.status(400).json({ success: false, error: 'Укажите userId' })
   if (!message) return res.status(400).json({ success: false, error: 'Укажите text' })
   try {
@@ -1419,12 +1419,7 @@ app.post('/api/admin/notifications/send-user-telegram', express.json(), async (r
     if (!tgId) return res.json({ success: true, sent: false, reason: 'У пользователя не привязан Telegram' })
     const botToken = await getTelegramToken()
     if (!botToken) return res.json({ success: true, sent: false, reason: 'Telegram бот не настроен' })
-    const baseUrl = getBaseUrlForTelegram()
-    const subscriptionUrl = baseUrl ? `${baseUrl}/#dashboard` : null
-    const options = subscriptionUrl
-      ? { reply_markup: { inline_keyboard: [[{ text: inlineButtonLabel, url: subscriptionUrl }]] } }
-      : {}
-    const result = await sendTelegramMessage(botToken, tgId, message, options)
+    const result = await sendTelegramMessage(botToken, tgId, message)
     return res.json({ success: true, sent: result.ok, reason: result.ok ? undefined : (result.error || 'Ошибка отправки') })
   } catch (err) {
     console.error('❌ POST /api/admin/notifications/send-user-telegram:', err.message)
@@ -2267,18 +2262,162 @@ app.post('/api/vpn/delete-client', async (req, res) => {
 })
 
 /**
+ * Fallback с детальным ответом для отладки и отображения ошибки в UI.
+ * @returns {Promise<{ success: true, data } | { success: false, step: string, error: string }>}
+ */
+async function getClientStatsFrom3xUiFallbackDetailed(body) {
+  if (!db) {
+    return { success: false, step: 'firestore', error: 'Firestore недоступен. Проверьте FIREBASE_PROJECT_ID и сервисный ключ.' }
+  }
+  const uuid = (body?.uuid || body?.clientId || '').toString().trim()
+  const email = (body?.email || '').toString().trim()
+  if (!uuid && !email) {
+    return { success: false, step: 'params', error: 'Не указаны uuid или email.' }
+  }
+
+  const APP_ID = process.env.APP_ID || 'skyputh'
+  const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+  const snap = await settingsRef.get()
+  const settings = snap?.data() || {}
+  const servers = Array.isArray(settings.servers) ? settings.servers : []
+  if (servers.length === 0) {
+    return { success: false, step: 'servers', error: 'В Firestore (artifacts/.../public/settings) нет массива servers или он пуст. Добавьте серверы 3x-ui в настройках админки.' }
+  }
+
+  const subscriptionServerData = body?.subscriptionServerData
+  let match = null
+  if (Array.isArray(subscriptionServerData) && subscriptionServerData.length > 0) {
+    const first = subscriptionServerData[0]
+    match = servers.find(
+      (s) =>
+        String(s?.serverIP || '').trim() === String(first?.ip || '').trim() &&
+        Number(s?.serverPort) === Number(first?.port)
+    )
+  }
+  if (!match) match = servers[0]
+  if (!match?.xuiUsername) {
+    return { success: false, step: 'server_config', error: `У сервера ${match?.serverIP}:${match?.serverPort} не указаны xuiUsername/xuiPassword в настройках.` }
+  }
+
+  const first = Array.isArray(subscriptionServerData) && subscriptionServerData.length > 0 ? subscriptionServerData[0] : null
+  const pathPart = (match.randompath || first?.path || '').toString().replace(/^\/+|\/+$/g, '')
+  const baseUrl = `${match.protocol || first?.protocol || 'https'}://${match.serverIP}:${match.serverPort}${pathPart ? `/${pathPart}` : ''}`.replace(/\/+$/, '')
+  const isHttps = baseUrl.startsWith('https')
+  const axiosConfig = {
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    validateStatus: () => true,
+    timeout: 12000,
+    ...(isHttps && { httpsAgent: new https.Agent({ rejectUnauthorized: false }) }),
+  }
+
+  try {
+    const loginRes = await axios.post(
+      `${baseUrl}/login`,
+      { username: match.xuiUsername, password: match.xuiPassword || '' },
+      { ...axiosConfig }
+    )
+    const setCookie = loginRes.headers['set-cookie']
+    const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : []
+    const sessionCookie = cookies.find((c) => c && c.includes('3x-ui='))
+    if (!sessionCookie) {
+      return { success: false, step: 'login', error: 'Не удалось войти в панель 3x-ui (нет cookie). Проверьте логин/пароль сервера в настройках.' }
+    }
+
+    const cookieValue = sessionCookie.split(';')[0]
+    const trafficsRes = await axios.get(`${baseUrl}/panel/api/inbounds/getClientTraffics`, {
+      headers: { Cookie: cookieValue, Accept: 'application/json' },
+      validateStatus: () => true,
+      timeout: 12000,
+      ...(isHttps && { httpsAgent: new https.Agent({ rejectUnauthorized: false }) }),
+    })
+    const data = trafficsRes.data
+    const list = Array.isArray(data) ? data : data?.obj ?? (data?.data ? (Array.isArray(data.data) ? data.data : [data.data]) : [])
+    const client = list.find((c) => (c && (c.email === email || c.id === uuid || String(c.id) === uuid)))
+    if (!client) {
+      return { success: false, step: 'client', error: `Клиент с email=${email} или id=${uuid} не найден в панели 3x-ui (в списке ${list.length} записей).` }
+    }
+
+    const totalGB = client.totalGB != null ? Number(client.totalGB) : null
+    const total = totalGB != null ? Math.round(totalGB * 1024 * 1024 * 1024) : (client.total != null ? Number(client.total) : null)
+    return {
+      success: true,
+      data: {
+        total: total ?? undefined,
+        up: client.up != null ? Number(client.up) : undefined,
+        down: client.down != null ? Number(client.down) : undefined,
+        expiryTime: client.expiryTime != null ? Number(client.expiryTime) : undefined,
+        lastSeen: client.lastSeen != null ? Number(client.lastSeen) : undefined,
+      },
+    }
+  } catch (err) {
+    const msg = err.message || String(err)
+    const isTimeout = msg.includes('timeout') || err.code === 'ECONNABORTED'
+    return {
+      success: false,
+      step: 'request',
+      error: isTimeout ? `Таймаут запроса к панели 3x-ui (${baseUrl}).` : `Ошибка запроса к 3x-ui: ${msg}`,
+    }
+  }
+}
+
+/**
+ * Fallback: получить статистику клиента напрямую из 3x-ui (возвращает только данные или null).
+ */
+async function getClientStatsFrom3xUiFallback(body) {
+  const result = await getClientStatsFrom3xUiFallbackDetailed(body)
+  return result.success ? result.data : null
+}
+
+/**
  * Получение статистики клиента
  * POST /api/vpn/client-stats
+ * Если n8n возвращает пустой массив, пробуем fallback: запрос в 3x-ui по данным из body и серверам из Firestore.
  */
 app.post('/api/vpn/client-stats', async (req, res) => {
   try {
     const webhookUrl = getWebhookUrl('getClientStats', req)
-    const result = await callN8NWebhook(webhookUrl, req.body)
+    let result = await callN8NWebhook(webhookUrl, req.body)
+    const isEmpty =
+      (Array.isArray(result) && result.length === 0) ||
+      (result && typeof result === 'object' && Array.isArray(result.data) && result.data.length === 0)
+    const hasUuidOrEmail = !!(req.body?.uuid || req.body?.clientId || req.body?.email)
+    if (isEmpty && hasUuidOrEmail) {
+      const fallback = await getClientStatsFrom3xUiFallback(req.body)
+      if (fallback && (fallback.total != null || fallback.up != null || fallback.down != null || fallback.expiryTime != null)) {
+        console.log('📊 client-stats: fallback 3x-ui вернул данные', { uuid: req.body?.uuid, email: req.body?.email })
+        result = fallback
+      } else if (isEmpty) {
+        console.log('📊 client-stats: n8n вернул пустой ответ, fallback не дал данных', {
+          uuid: req.body?.uuid,
+          email: req.body?.email,
+          hasSubscriptionServerData: !!(req.body?.subscriptionServerData?.length),
+        })
+      }
+    }
     res.json(result)
   } catch (error) {
     res.status(500).json({
       success: false,
       error: error.message || 'Ошибка получения статистики через n8n',
+    })
+  }
+})
+
+/**
+ * Прямое получение статистики из 3x-ui (без n8n). Используется, когда /client-stats вернул [].
+ * POST /api/vpn/client-stats-direct
+ * Body: тот же что у /client-stats (userId, email, uuid, subscriptionServerData, ...).
+ * Ответ: { success: true, data: { total, up, down, expiryTime, lastSeen } } или { success: false, step, error }.
+ */
+app.post('/api/vpn/client-stats-direct', express.json(), async (req, res) => {
+  try {
+    const result = await getClientStatsFrom3xUiFallbackDetailed(req.body)
+    res.json(result)
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      step: 'server',
+      error: error.message || 'Ошибка запроса к 3x-ui',
     })
   }
 })
@@ -2551,11 +2690,11 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
   return res.status(status).json({ success: false, error: result.error, code: result.code })
 })
 
-const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): по клиенту — лимит трафика, использовано/остаток, срок в панели; по серверу — список инбаундов/протоколов. Эти данные запрашиваются через webhook при каждой консультации. Используй их, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
+const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): лимит трафика, использовано/остаток, срок в панели. Используй эти данные, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
 Задачи:
-1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui (клиент и сервер), дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия, протоколы), если они есть.
+1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui, дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия), если они есть.
 2) Если в вопросе упоминаются ошибки, логи, сбои подключения, неработающий VPN или ты видишь признаки технической проблемы — в начале ответа напиши ровно одну строку: ESCALATE: <краткая причина>. Затем пустая строка. Затем абзац для пользователя: предупреди, что обращение передано специалисту. Затем основной текст ответа.
-Формат ответа: только текст для ответа пользователю. При эскалации — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение, затем ответ. Не упоминай «данные из базы» или «3x-ui» в ответе пользователю — формулируй по-человечески («по нашим данным», «ваша подписка», «в панели» и т.д.).`
+Формат ответа: только текст для ответа пользователю. При эскалации — первая строка ESCALATE: причина, затем пустая строка, затем предупреждение, затем ответ. Не упоминай «данные из базы» или «3x-ui» в ответе пользователю — формулируй по-человечески («по нашим данным», «ваша подписка» и т.д.).`
 
 /**
  * POST /api/ai/support-suggest — предложить ответ по тикету (ИИ анализирует вопрос, данные пользователя, даёт ответ; при признаках проблемы — эскалация админу).
@@ -2611,12 +2750,8 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
       .map((m) => `${m.from === 'support' ? 'Поддержка' : 'Пользователь'}: ${(m.text || '').trim()}`)
       .join('\n\n')
     const uFor3x = userSnap.exists ? userSnap.data() : {}
-    const [clientCtx, serverCtx] = await Promise.all([
-      fetchOperatorContext3xUi(userId, uFor3x),
-      fetchServerContext3xUi(),
-    ])
-    const context3xUiBlock = `Клиент (3x-ui): ${clientCtx.contextLine}. Сервер (3x-ui): ${serverCtx.contextLine}`
-    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUiBlock}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
+    const context3xUi = await fetchOperatorContext3xUi(userId, uFor3x)
+    const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
     const systemPrompt = (aiConfig.systemPromptPreset && String(aiConfig.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
     const result = await unifiedChat(
@@ -2717,14 +2852,12 @@ async function ensureMichaelOperator() {
 }
 
 /**
- * Форматировать данные клиента 3x-ui в читаемый текст (для промпта и для отображения пользователю).
- * @param {object} stats - объект из webhook get_client_stats (total, up, down, expiryTime и т.д.)
- * @returns {{ contextLine: string, userSummary: string }}
+ * Форматировать объект статистики 3x-ui (total, up, down, expiryTime) в строку для контекста агента.
+ * @param {{ total?: number, up?: number, down?: number, expiryTime?: number }} stats
+ * @returns {string}
  */
-function formatClientStatsReadable(stats) {
-  if (!stats || typeof stats !== 'object') {
-    return { contextLine: 'Данные о клиенте не получены.', userSummary: 'Нет данных по трафику и подписке.' }
-  }
+function format3xUiStatsToContextLine(stats) {
+  if (!stats || typeof stats !== 'object') return 'Данные о клиенте не получены.'
   const total = stats.total != null ? Number(stats.total) : null
   const up = stats.up != null ? Number(stats.up) : 0
   const down = stats.down != null ? Number(stats.down) : 0
@@ -2733,33 +2866,25 @@ function formatClientStatsReadable(stats) {
   const usedGB = (usedBytes / (1024 ** 3)).toFixed(2)
   const remainingGB = total != null ? Math.max(0, (total - usedBytes) / (1024 ** 3)).toFixed(2) : null
   const expiryTime = stats.expiryTime != null ? new Date(Number(stats.expiryTime) * 1000).toLocaleDateString('ru-RU') : (stats.expiryTime ?? 'не указано')
-  const contextLine = [
-    totalGB != null ? `Лимит трафика: ${totalGB} GB` : null,
-    `Использовано: ${usedGB} GB`,
-    remainingGB != null ? `Остаток: ${remainingGB} GB` : null,
-    `Срок в панели VPN: ${expiryTime}`,
-  ].filter(Boolean).join('; ')
-  const userSummary = [
-    totalGB != null ? `• Лимит трафика: ${totalGB} GB` : null,
-    `• Использовано: ${usedGB} GB`,
-    remainingGB != null ? `• Остаток: ${remainingGB} GB` : null,
-    `• Подписка в панели до: ${expiryTime}`,
-  ].filter(Boolean).join('\n')
-  return { contextLine, userSummary }
+  const parts = []
+  if (totalGB != null) parts.push(`Лимит трафика: ${totalGB} GB`)
+  parts.push(`Использовано: ${usedGB} GB`)
+  if (remainingGB != null) parts.push(`Остаток: ${remainingGB} GB`)
+  parts.push(`Срок в панели VPN: ${expiryTime}`)
+  return parts.join('; ')
 }
 
 /**
- * Получить данные клиента из панели VPN (3x-ui) через webhook: трафик, срок в панели.
+ * Получить данные из панели VPN (3x-ui) для контекста оператора (агент Майкл): трафик, срок в панели.
+ * Сначала запрос через n8n; при пустом ответе — fallback напрямую в 3x-ui (те же данные, что в разделе 3x-ui карточки пользователя).
  * @param {string} userId - uid пользователя в Firestore
- * @param {{ uuid?: string, email?: string, subId?: string }} userData - данные из users_v4
- * @returns {Promise<{ contextLine: string, userSummary: string }>}
+ * @param {{ uuid?: string, email?: string, subId?: string, subscriptionServerData?: Array<{ip,port,protocol,path}> }} userData - данные из users_v4
+ * @returns {Promise<string>} Текст для вставки в промпт или "нет данных"
  */
 async function fetchOperatorContext3xUi(userId, userData) {
   const uuid = (userData?.uuid ?? '').toString().trim()
   const email = (userData?.email ?? userData?.login ?? '').toString().trim()
-  if (!uuid && !email) {
-    return { contextLine: 'Нет данных (нет uuid/email для запроса в 3x-ui).', userSummary: 'Нет идентификатора для запроса данных VPN.' }
-  }
+  if (!uuid && !email) return 'Нет данных (нет uuid/email для запроса в 3x-ui).'
   const webhookUrl = N8N_WEBHOOKS.getClientStats || getDefaultWebhooks().getClientStats
   const payload = {
     operation: 'get_client_stats',
@@ -2772,55 +2897,42 @@ async function fetchOperatorContext3xUi(userId, userData) {
   }
   try {
     const result = await callN8NWebhook(webhookUrl, payload)
-    const stats = result?.stats ?? result?.data ?? result
-    return formatClientStatsReadable(stats)
+    let stats = result?.stats ?? result?.data ?? result
+    const hasUsefulStats = stats && typeof stats === 'object' && (stats.total != null || stats.up != null || stats.down != null || stats.expiryTime != null)
+    if (!hasUsefulStats && db) {
+      const fallbackBody = { userId, email: email || undefined, uuid: uuid || undefined, clientId: uuid || undefined }
+      if (Array.isArray(userData?.subscriptionServerData) && userData.subscriptionServerData.length > 0) {
+        fallbackBody.subscriptionServerData = userData.subscriptionServerData
+      } else {
+        const tariffId = userData?.tariffId || userData?.tariff_id || null
+        if (tariffId) {
+          const APP_ID = process.env.APP_ID || 'skyputh'
+          const settingsSnap = await db.doc(`artifacts/${APP_ID}/public/settings`).get()
+          const settings = settingsSnap?.data() || {}
+          const servers = Array.isArray(settings.servers) ? settings.servers : []
+          const forTariff = servers.filter((s) => (s.tariffIds || []).includes(tariffId))
+          const list = forTariff.length > 0 ? forTariff : servers
+          if (list.length > 0) {
+            fallbackBody.subscriptionServerData = list.map((s) => ({
+              ip: s.serverIP || '',
+              port: s.serverPort != null ? Number(s.serverPort) : null,
+              protocol: s.protocol || 'https',
+              path: (s.randompath || '').toString().trim(),
+            }))
+          }
+        }
+      }
+      const fallback = await getClientStatsFrom3xUiFallbackDetailed(fallbackBody)
+      if (fallback.success && fallback.data) {
+        stats = fallback.data
+        console.log('🤖 Майкл: контекст 3x-ui взят из fallback (как в карточке пользователя)', { userId, email: email || undefined })
+      }
+    }
+    if (!stats || typeof stats !== 'object') return 'Запрос в 3x-ui выполнен, данных о клиенте не получено.'
+    return format3xUiStatsToContextLine(stats)
   } catch (err) {
     console.warn('🤖 Майкл: не удалось получить данные 3x-ui для контекста', err.message)
-    const msg = err.message || 'ошибка'
-    return { contextLine: `Запрос в 3x-ui не выполнен: ${msg}`, userSummary: `Не удалось загрузить данные VPN: ${msg}` }
-  }
-}
-
-/**
- * Получить данные сервера/панели 3x-ui через webhook (инбаунды, ноды) для контекста оператора.
- * @returns {Promise<{ contextLine: string, userSummary: string }>}
- */
-async function fetchServerContext3xUi() {
-  const webhookUrl = N8N_WEBHOOKS.getInbounds || getDefaultWebhooks().getInbounds
-  const payload = {
-    operation: 'get_inbounds',
-    category: 'get_server_data',
-    timestamp: new Date().toISOString(),
-  }
-  try {
-    const result = await callN8NWebhook(webhookUrl, payload, 'GET')
-    const raw = result?.inbounds ?? result?.data ?? result
-    const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.list) ? raw.list : (raw && raw.obj ? raw.obj : []))
-    if (!list.length) {
-      const hint = result && typeof result === 'object' ? ' (нет инбаундов или пустой ответ)' : ''
-      return { contextLine: `Сервер 3x-ui: запрос выполнен, инбаунды не получены${hint}.`, userSummary: '' }
-    }
-    const lines = []
-    const forUser = []
-    for (let i = 0; i < Math.min(list.length, 10); i++) {
-      const inv = list[i]
-      const tag = inv.tag || inv.remark || inv.id || `#${i + 1}`
-      const protocol = inv.protocol || inv.type || ''
-      const port = inv.port ?? inv.portList ?? ''
-      lines.push(`${tag}: ${protocol}${port ? `, порт ${port}` : ''}`)
-      forUser.push(`• ${tag}: ${protocol}${port ? `, порт ${port}` : ''}`)
-    }
-    if (list.length > 10) {
-      lines.push(`… и ещё ${list.length - 10} инбаундов`)
-      forUser.push(`• … всего ${list.length} серверов/инбаундов`)
-    }
-    const contextLine = `Сервер 3x-ui, инбаунды (${list.length}): ${lines.join('; ')}`
-    const userSummary = forUser.length ? `Серверы/протоколы в панели:\n${forUser.join('\n')}` : ''
-    return { contextLine, userSummary }
-  } catch (err) {
-    console.warn('🤖 Майкл: не удалось получить данные сервера 3x-ui', err.message)
-    const msg = err.message || 'ошибка'
-    return { contextLine: `Запрос данных сервера 3x-ui не выполнен: ${msg}`, userSummary: '' }
+    return `Запрос в 3x-ui не выполнен: ${err.message || 'ошибка'}`
   }
 }
 
@@ -2940,28 +3052,8 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
           .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
           .join('\n\n')
         const u = userSnap.data() || {}
-        const [clientCtx, serverCtx] = await Promise.all([
-          fetchOperatorContext3xUi(userId, u),
-          fetchServerContext3xUi(),
-        ])
-        const context3xUiBlock = `Клиент (3x-ui): ${clientCtx.contextLine}. Сервер (3x-ui): ${serverCtx.contextLine}`
-        const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUiBlock}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
-
-        const dataSummaryParts = []
-        if (clientCtx.userSummary) dataSummaryParts.push('Данные по вашему аккаунту (VPN):\n' + clientCtx.userSummary)
-        if (serverCtx.userSummary) dataSummaryParts.push(serverCtx.userSummary)
-        const dataSummaryText = dataSummaryParts.join('\n\n')
-        if (dataSummaryText) {
-          const summaryNow = new Date().toISOString()
-          await ticketRef.collection('messages').add({
-            from: 'support',
-            userId: AI_SUPPORT_USER_ID,
-            text: '📊 ' + dataSummaryText,
-            isDataSummary: true,
-            createdAt: summaryNow,
-          })
-          await ticketRef.update({ updatedAt: summaryNow })
-        }
+        const context3xUi = await fetchOperatorContext3xUi(userId, u)
+        const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
         const bgAiConfig = await getActiveAiConfig()
         const systemPrompt = (bgAiConfig.systemPromptPreset && String(bgAiConfig.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
@@ -3752,6 +3844,25 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
               tariffName: tariffNameResolved || null,
               tariffId: tariffIdVal || null,
             })
+            // При наличии order_id — добавляем в историю платежей со статусом «успешно», дата = дата загрузки
+            if (orderIdVal && db) {
+              try {
+                const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+                const loadDateIso = new Date().toISOString()
+                await paymentsRef.add({
+                  orderId: orderIdVal,
+                  userId: byTgId.uid,
+                  amount: Number.isFinite(amountNum) && amountNum >= 0 ? amountNum : 0,
+                  status: 'completed',
+                  tariffName: tariffNameResolved || tariffNameVal || null,
+                  tariffId: tariffIdVal || null,
+                  createdAt: loadDateIso,
+                  source: 'nocodb_import',
+                })
+              } catch (payErr) {
+                console.warn('⚠️ Импорт NocoDB: не удалось создать запись платежа при обновлении по TgID', { orderId: orderIdVal, error: payErr.message })
+              }
+            }
             // При повторной загрузке: записать логин и пароль в таблицу NocoDB (если включена галка)
             if (writeBackLoginPasswordOnUpdate && writeBackToNocoDB && recordId != null && String(recordId).trim() !== '') {
               const updatePassword = generateRandomPassword(12)
@@ -3841,17 +3952,19 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
           tariffId: tariffIdVal || null,
         })
 
-        if (orderIdVal && Number.isFinite(amountNum) && amountNum > 0 && db) {
+        // При наличии order_id — добавляем в историю платежей со статусом «успешно», дата = дата загрузки
+        if (orderIdVal && db) {
           try {
             const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+            const loadDateIso = new Date().toISOString()
             await paymentsRef.add({
               orderId: orderIdVal,
               userId: createdUid,
-              amount: amountNum,
-              status: 'pending',
+              amount: Number.isFinite(amountNum) && amountNum >= 0 ? amountNum : 0,
+              status: 'completed',
               tariffName: tariffNameResolved || tariffNameVal || null,
               tariffId: tariffIdVal || null,
-              createdAt: new Date().toISOString(),
+              createdAt: loadDateIso,
               source: 'nocodb_import',
             })
           } catch (payErr) {
@@ -4293,7 +4406,6 @@ app.use('/api/analytics', createAnalyticsRouter({
   redisSet,
   getTelegramToken,
   sendTelegramMessage,
-  getBaseUrlForTelegram,
   getActiveAiConfig,
   unifiedChat,
 }))

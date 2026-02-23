@@ -509,5 +509,12 @@ export async function aiFunnelAnalysis(req, res) {
  * POST /api/analytics/ai-strategy — DeepSeek анализирует пользователя и генерирует стратегию + сообщение.
  */
 export async function aiStrategy(req, res) {
-  return runAiStrategy(req, res)
+  try {
+    return await runAiStrategy(req, res)
+  } catch (err) {
+    console.error('POST /api/analytics/ai-strategy (outer catch):', err.message)
+    if (!res.headersSent) {
+      return res.status(502).json({ success: false, error: err.message || 'Ошибка сервиса ИИ' })
+    }
+  }
 }

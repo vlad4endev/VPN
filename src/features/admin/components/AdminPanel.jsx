@@ -313,6 +313,7 @@ const AdminPanel = ({
                 onClose={handleCloseUserCard}
                 onCopy={onHandleCopy}
                 tariffs={tariffs}
+                servers={servers}
                 formatDate={formatDate}
               />
             )}

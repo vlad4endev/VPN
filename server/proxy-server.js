@@ -195,6 +195,40 @@ app.get('/health', (req, res) => {
   })
 })
 
+// Прокси к полному бэкенду (n8n-webhook-proxy), если задан BACKEND_URL.
+// Нужно, когда на 3001 запущен proxy-server (npm start из корня), а полный API — на другом порту.
+const BACKEND_URL = process.env.BACKEND_URL || process.env.N8N_PROXY_URL
+// пути относительно /api (в app.use('/api', ...) req.path будет /vpn/..., /payment/...)
+const BACKEND_API_PREFIXES = ['/vpn', '/payment', '/auth', '/admin', '/analytics', '/promocodes', '/ai', '/public', '/init', '/referral']
+if (BACKEND_URL) {
+  const backendBase = BACKEND_URL.replace(/\/+$/, '')
+  app.use('/api', (req, res, next) => {
+    if (!BACKEND_API_PREFIXES.some((p) => req.path.startsWith(p))) return next()
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+    const targetUrl = `${backendBase}/api${req.path}${query}`
+    axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'application/json',
+        'Accept': req.headers['accept'] || 'application/json',
+        ...(req.headers.authorization && { Authorization: req.headers.authorization }),
+        ...(req.headers['x-app-id'] && { 'X-App-Id': req.headers['x-app-id'] }),
+      },
+      validateStatus: () => true,
+      timeout: 60000,
+    })
+      .then((backendRes) => {
+        res.status(backendRes.status).json(backendRes.data)
+      })
+      .catch((err) => {
+        res.status(502).json({ success: false, error: err.message || 'Backend unavailable' })
+      })
+  })
+  console.log(`🔄 BACKEND_URL задан: запросы к ${BACKEND_API_PREFIXES.join(', ')} проксируются на ${backendBase}`)
+}
+
 // Прокси для всех запросов к 3x-ui
 // БЕЗОПАСНОСТЬ: Пароли 3x-ui хранятся на сервере, не в клиентском коде
 app.all('/api/xui/*', async (req, res) => {

@@ -375,11 +375,36 @@ class XUIService {
       }, error)
       
       throw new Error(
-        error.response?.data?.msg || 
+        error.response?.data?.msg ||
         error.response?.data?.error ||
-        error.message || 
+        error.message ||
         'Не удалось получить статистику клиента'
       )
+    }
+  }
+
+  /**
+   * Прямое получение статистики из 3x-ui (без n8n). Вызывать, когда getClientStats вернул [].
+   * @param {Object} data - те же поля что у getClientStats
+   * @returns {Promise<{ success: true, data } | { success: false, step: string, error: string }>}
+   */
+  async getClientStatsDirect(data) {
+    try {
+      const requestData = {
+        ...data,
+        operation: 'get_client_stats',
+        category: 'get_user_data',
+        timestamp: new Date().toISOString(),
+      }
+      const response = await this.api.post('/client-stats-direct', requestData)
+      return response.data
+    } catch (error) {
+      const status = error.response?.status
+      const errMsg =
+        status === 404
+          ? 'Эндпоинт /api/vpn/client-stats-direct не найден. Запустите полный бэкенд: cd server && npm start (или npm run start:all).'
+          : error.response?.data?.error || error.message || 'Ошибка запроса'
+      return { success: false, step: 'request', error: errMsg }
     }
   }
 

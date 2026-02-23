@@ -81,10 +81,16 @@ export async function getActiveSubscriptionByUserId(db, userId) {
     })
     return subs[0]
   } catch (error) {
+    const msg = error?.message || String(error)
+    const code = error?.code || error?.name
     console.error('❌ subscriptionUtils: Ошибка получения активной подписки', {
       userId,
-      error: error.message
+      error: msg,
+      code,
     })
+    if (msg.includes('permission') || msg.includes('insufficient') || code === 'permission-denied') {
+      console.warn('💡 subscriptionUtils: Если запросы идут с localhost — добавьте localhost в Firebase Console → Authentication → Authorized domains и проверьте правила Firestore для коллекции subscriptions.')
+    }
     return null
   }
 }

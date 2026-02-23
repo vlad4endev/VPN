@@ -156,11 +156,19 @@ export async function getAiStrategy(userId, opts = {}) {
   const isJson = contentType.includes('application/json')
   if (!res.ok) {
     const data = isJson ? await res.json().catch(() => ({})) : {}
-    const msg = data.error || data.message || res.statusText || `Ошибка ${res.status}`
+    let msg = data.error || data.message || data.msg
+    if (!msg) {
+      if (res.status === 502) msg = 'Сервис ИИ недоступен (502). Проверьте настройки ИИ в разделе «Интеграции» и повторите позже.'
+      else if (res.status === 503) msg = 'ИИ не настроен или недоступен. Задайте API-ключ в разделе «Интеграции → ИИ».'
+      else if (res.status === 504) msg = 'ИИ не успел ответить. Попробуйте ещё раз.'
+      else msg = res.statusText || `Ошибка ${res.status}`
+    }
     throw new Error(msg)
   }
   if (!isJson) {
-    throw new Error('Сервер вернул не JSON. Убедитесь, что backend запущен на порту из VITE_API_BASE_URL (или через proxy).')
+    throw new Error(res.status === 502
+      ? 'Сервис ИИ недоступен (502). Проверьте настройки ИИ и повторите позже.'
+      : 'Сервер вернул не JSON. Убедитесь, что backend запущен на порту из VITE_API_BASE_URL (или через proxy).')
   }
   const data = await res.json()
   return data

@@ -258,6 +258,21 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }
     
+    // Подписки (subscriptions) — пользователь читает только свои (где userId совпадает), админ — все
+    match /artifacts/{appId}/public/data/subscriptions/{subscriptionId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin() ||
+        isAdminFromFirestore()
+      );
+      allow create: if request.auth != null && (
+        request.resource.data.userId == request.auth.uid ||
+        isAdmin() ||
+        isAdminFromFirestore()
+      );
+      allow update, delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
+    }
+
     // Реферальные награды — только бэкенд (Admin SDK) пишет; клиент не имеет доступа
     match /artifacts/{appId}/public/data/referral_rewards/{rewardId} {
       allow read, write: if false;

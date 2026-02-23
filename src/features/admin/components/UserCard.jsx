@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import PropTypes from 'prop-types'
-import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Link2, Percent, Send, AtSign, ShieldOff, MessageSquare, Loader2 } from 'lucide-react'
+import { X, Save, RefreshCw, Copy, CheckCircle2, XCircle, AlertCircle, Mail, User, Phone, Key, Calendar, HardDrive, Smartphone, Percent, Send, AtSign, ShieldOff, MessageSquare, Loader2, CreditCard, Activity, ChevronLeft } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { useSubscriptionStatus } from '../../../shared/hooks/useSubscriptionStatus.js'
 import { USER_ROLE_OPTIONS, canAccessAdmin, canAccessFinances } from '../../../shared/constants/admin.js'
@@ -10,6 +10,51 @@ import { useAdminContext } from '../context/AdminContext.jsx'
 import { notificationsService } from '../../notifications/services/notificationsService.js'
 import { NOTIFICATION_TYPES } from '../../notifications/constants.js'
 import { notifyDiscountAssigned } from '../services/notifyDiscountService.js'
+import { dashboardService } from '../../dashboard/services/dashboardService.js'
+import { supportService } from '../../support/services/supportService.js'
+import XUIService from '../../vpn/services/XUIService.js'
+
+/** Проверка, что объект похож на статистику 3x-ui (есть хотя бы одно из полей). */
+function hasStatsFields(obj) {
+  return obj && typeof obj === 'object' && (
+    obj.total != null || obj.up != null || obj.down != null || obj.expiryTime != null
+  )
+}
+
+/**
+ * Извлекает объект статистики из ответа webhook/n8n (разные форматы).
+ * @param {*} res — ответ getClientStats (response.data с бэкенда)
+ * @returns {{ total?, up?, down?, expiryTime?, lastSeen? } | null}
+ */
+function normalizeClientStatsResponse(res) {
+  if (res == null) return null
+  const candidates = [
+    res?.stats,
+    res?.data,
+    res?.result,
+    res?.json,
+    res?.body,
+    res?.output,
+    res,
+  ].filter(Boolean)
+  for (const raw of candidates) {
+    if (Array.isArray(raw) && raw.length > 0) {
+      const item = raw[0]
+      const obj = item && typeof item === 'object' ? (item.json ?? item) : null
+      if (hasStatsFields(obj)) return obj
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      if (hasStatsFields(raw)) return raw
+      if (raw.data != null) {
+        const inner = Array.isArray(raw.data) ? raw.data[0] : raw.data
+        const obj = inner && typeof inner === 'object' ? (inner.json ?? inner) : null
+        if (hasStatsFields(obj)) return obj
+      }
+      if (raw.body && typeof raw.body === 'object' && hasStatsFields(raw.body)) return raw.body
+    }
+  }
+  return null
+}
 
 /**
  * Улучшенная карточка пользователя для редактирования админом
@@ -34,6 +79,7 @@ const UserCard = ({
   onClose,
   onCopy,
   tariffs = [],
+  servers = [],
   formatDate,
 }) => {
   // Получаем функции из контекста
@@ -41,7 +87,7 @@ const UserCard = ({
   
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
-    PropTypes.checkPropTypes(UserCardPropTypes, { user, onClose, onCopy, tariffs, formatDate }, 'prop', 'UserCard')
+    PropTypes.checkPropTypes(UserCardPropTypes, { user, onClose, onCopy, tariffs, servers, formatDate }, 'prop', 'UserCard')
   }
 
   if (!user) {
@@ -79,6 +125,105 @@ const UserCard = ({
   const [sendNotificationBody, setSendNotificationBody] = useState('')
   const [sendNotificationSending, setSendNotificationSending] = useState(false)
   const [sendNotificationError, setSendNotificationError] = useState(null)
+  // История оплат и обращений, данные 3x-ui
+  const [payments, setPayments] = useState([])
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
+  const [tickets, setTickets] = useState([])
+  const [ticketsLoading, setTicketsLoading] = useState(false)
+  const [clientStats3x, setClientStats3x] = useState(null)
+  const [clientStats3xLoading, setClientStats3xLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState('config')
+
+  const userId = user?.id || editingUser?.id
+  const totalPaymentsSum = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+
+  useEffect(() => {
+    if (!userId) return
+    setPaymentsLoading(true)
+    dashboardService.loadPayments(userId).then(setPayments).catch(() => setPayments([])).finally(() => setPaymentsLoading(false))
+  }, [userId])
+
+  useEffect(() => {
+    if (!userId) return
+    setTicketsLoading(true)
+    supportService.getTicketsByUser(userId).then(setTickets).catch(() => setTickets([])).finally(() => setTicketsLoading(false))
+  }, [userId])
+
+  const loadClientStats3x = useCallback(async () => {
+    const u = editingUser || user
+    if (!u?.uuid && !u?.email) {
+      setSaveError('Нет UUID или email для запроса в 3x-ui')
+      return
+    }
+    const subId = (u.subId || (u.subid && (Array.isArray(u.subid) ? u.subid[0] : u.subid)) || '').toString().trim()
+    const tariffId = u.tariffId || u.tariff_id
+    const tariff = tariffs.find(t => t.id === tariffId)
+    const subscriptionName = tariff?.name || tariff?.plan || u.plan || ''
+
+    // Серверы, привязанные к тарифу пользователя (tariffIds содержит tariffId)
+    const serversForTariff = (servers || []).filter(
+      s => (s.tariffIds || []).includes(tariffId)
+    )
+    // Данные сервера подписки: IP, порт, протокол и всё остальное
+    const subscriptionServerData = serversForTariff.length > 0
+      ? serversForTariff.map(s => ({
+          ip: s.serverIP || '',
+          port: s.serverPort != null ? Number(s.serverPort) : null,
+          protocol: s.protocol || 'http',
+          path: s.randompath || '',
+          name: s.name || '',
+          location: s.location || '',
+          inboundId: s.xuiInboundId || '',
+          username: s.xuiUsername || '',
+        }))
+      : null
+
+    // URL подписки (из тарифа или дефолт) — для обратной совместимости
+    const subscriptionServer = tariff?.subscriptionLink
+      ? String(tariff.subscriptionLink).trim().replace(/\/$/, '')
+      : (subId ? 'https://subs.skypath.fun:3458/vk198' : '')
+
+    setClientStats3xLoading(true)
+    setClientStats3x(null)
+    const payload = {
+      userId: u.id,
+      email: u.email || u.login,
+      uuid: u.uuid,
+      clientId: u.uuid,
+      subId: subId || undefined,
+      subscriptionName: subscriptionName || undefined,
+      subscriptionServer: subscriptionServer || undefined,
+      subscriptionServerData: subscriptionServerData || undefined,
+    }
+    try {
+      const xui = XUIService.getInstance()
+      const res = await xui.getClientStats(payload)
+      const stats = normalizeClientStatsResponse(res)
+      if (stats) {
+        setClientStats3x(stats)
+        return
+      }
+      // Ответ пустой или в неизвестном формате — запрашиваем напрямую через бэкенд (fallback)
+      const direct = await xui.getClientStatsDirect(payload)
+      if (direct?.success && direct?.data) {
+        setClientStats3x(direct.data)
+      } else {
+        setClientStats3x({ _error: direct?.error || 'Не удалось загрузить данные из 3x-ui' })
+      }
+    } catch (err) {
+      setClientStats3x({ _error: err.message || 'Ошибка запроса к 3x-ui' })
+    } finally {
+      setClientStats3xLoading(false)
+    }
+  }, [editingUser, user, tariffs, servers])
+
+  const apply3xUiExpiryToCard = useCallback(() => {
+    if (!clientStats3x?.expiryTime || !handleSaveUserCard) return
+    const expiryMs = Number(clientStats3x.expiryTime) * 1000
+    const updated = { ...editingUser, expiresAt: expiryMs }
+    setEditingUser(updated)
+    handleSaveUserCard(normalizeUser(updated)).catch(() => {})
+  }, [clientStats3x, editingUser, handleSaveUserCard])
 
   useEffect(() => {
     if (sendNotificationOpen) {
@@ -564,207 +709,175 @@ const UserCard = ({
     return null
   })()
 
+  const tabs = [
+    { id: 'config', label: 'Конфигурация', icon: Key },
+    { id: 'subscription', label: 'Подписка', icon: CheckCircle2 },
+    { id: 'payments', label: `Платежи (${payments.length})`, icon: CreditCard },
+    { id: 'tickets', label: `Обращения (${tickets.length})`, icon: MessageSquare },
+    { id: 'xui', label: '3x-ui', icon: Activity },
+    { id: 'other', label: 'Прочее', icon: User },
+  ]
+
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-4xl max-h-[90vh] min-h-0 overflow-y-auto my-4 mx-auto">
-        {/* Заголовок */}
-        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-4 sm:p-6 flex items-center justify-between z-10">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-200 flex items-center gap-2">
-              <User className="w-6 h-6" />
-              Карточка пользователя
-            </h2>
-            <p className="text-slate-400 text-sm mt-1">{user.email}</p>
+      <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-800 w-full max-w-5xl max-h-[90vh] min-h-0 flex flex-col my-4 mx-auto overflow-hidden">
+        {/* Шапка: назад, имя, статус, email, действия */}
+        <div className="flex-shrink-0 bg-slate-900 border-b border-slate-800 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
+              aria-label="Закрыть"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">
+                  {editingUser.name || editingUser.email || 'Клиент'}
+                </h2>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 ${
+                  userStatus.status === 'active' ? 'bg-emerald-900/50 text-emerald-300' :
+                  userStatus.status === 'expired' || userStatus.status === 'unpaid' ? 'bg-red-900/50 text-red-300' :
+                  userStatus.status === 'test_period' ? 'bg-amber-900/50 text-amber-300' :
+                  'bg-slate-700 text-slate-400'
+                }`}>
+                  {userStatus.status === 'active' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {(userStatus.status === 'expired' || userStatus.status === 'unpaid') && <XCircle className="w-3.5 h-3.5" />}
+                  {userStatus.label}
+                </span>
+              </div>
+              <p className="text-slate-400 text-sm mt-0.5 truncate">{user.email}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setSendNotificationOpen(true)}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium transition-colors"
-              title="Отправить уведомление пользователю"
+              title="Отправить уведомление"
             >
               <MessageSquare className="w-4 h-4" />
-              <span className="max-sm:hidden">Отправить уведомление</span>
+              <span className="max-sm:hidden">Уведомление</span>
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-200"
-              aria-label="Закрыть карточку"
+              className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+              aria-label="Закрыть"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Сообщение об ошибке */}
         {saveError && (
-          <div className="mx-6 mt-4 p-3 bg-red-900/30 border border-red-800 rounded text-red-300 text-sm">
+          <div className="flex-shrink-0 mx-4 mt-2 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">
             {saveError}
           </div>
         )}
 
-        {/* Контент */}
-        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-          {/* Основная информация */}
-          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-              <Mail className="w-5 h-5" />
-              Основная информация
-            </h3>
-            {/* Логин и пароль — отображение для быстрого просмотра */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 pb-4 border-b border-slate-700">
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Логин</label>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm">
-                    {editingUser.login || editingUser.email || '—'}
+        {/* Две колонки: левая — контакты и статистика, правая — вкладки */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Левая колонка — контакты и статистика */}
+          <aside className="hidden sm:flex flex-col w-64 lg:w-72 flex-shrink-0 border-r border-slate-800 bg-slate-900/50 overflow-y-auto">
+            <div className="p-4 border-b border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                Контакты
+              </h3>
+              <div className="space-y-2">
+                <button type="button" onClick={() => onCopy?.(editingUser.email || '')} className="w-full flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/80 border border-slate-700 hover:border-slate-600 text-left transition-colors group">
+                  <Mail className="w-4 h-4 text-slate-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-500">Email</p>
+                    <p className="text-sm text-slate-200 truncate">{editingUser.email || '—'}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onCopy?.(editingUser.login || editingUser.email || '')}
-                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2 shrink-0"
-                    title="Копировать логин"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
+                  <Copy className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 shrink-0" />
+                </button>
+                <button type="button" onClick={() => onCopy?.(editingUser.phone || '')} className="w-full flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/80 border border-slate-700 hover:border-slate-600 text-left transition-colors group">
+                  <Phone className="w-4 h-4 text-slate-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-500">Телефон</p>
+                    <p className="text-sm text-slate-200 truncate">{editingUser.phone || '—'}</p>
+                  </div>
+                  <Copy className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 shrink-0" />
+                </button>
+                <button type="button" onClick={() => onCopy?.(editingUser.tgId || '')} className="w-full flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/80 border border-slate-700 hover:border-slate-600 text-left transition-colors group">
+                  <Send className="w-4 h-4 text-slate-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-500">Telegram</p>
+                    <p className="text-sm text-slate-200 truncate">{editingUser.tgId ? `ID ${editingUser.tgId}` : '—'}</p>
+                  </div>
+                  <Copy className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 shrink-0" />
+                </button>
+                <div className="w-full flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/80 border border-slate-700">
+                  <AtSign className="w-4 h-4 text-slate-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-500">Логин</p>
+                    <p className="text-sm text-slate-200 truncate">{editingUser.login || editingUser.email || '—'}</p>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Пароль</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                  В системе не хранится (Firebase Auth). При импорте из NocoDB записывается в таблицу.
-                </div>
-                <p className="text-slate-500 text-xs mt-1">Для смены пароля создайте пользователя заново или задайте его при импорте.</p>
               </div>
             </div>
+            <div className="p-4">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Статистика</h3>
+              <div className="space-y-2">
+                <div className="p-3 rounded-lg bg-slate-800/80 border border-slate-700">
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5" /> Всего оплат
+                  </p>
+                  <p className="text-lg font-semibold text-slate-200 mt-0.5">
+                    {paymentsLoading ? '…' : `${totalPaymentsSum.toLocaleString('ru-RU')} ₽`}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded-lg bg-slate-800/80 border border-slate-700">
+                    <p className="text-xs text-slate-500">Платежей</p>
+                    <p className="text-base font-medium text-slate-200">{payments.length}</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-800/80 border border-slate-700">
+                    <p className="text-xs text-slate-500">Обращений</p>
+                    <p className="text-base font-medium text-slate-200">{tickets.length}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          {/* Правая колонка — вкладки и контент */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            <div className="flex-shrink-0 border-b border-slate-800 px-2 sm:px-4 overflow-x-auto">
+              <nav className="flex gap-0.5" role="tablist">
+                {tabs.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === id}
+                    onClick={() => setActiveTab(id)}
+                    className={`flex items-center gap-1.5 px-3 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                      activeTab === id
+                        ? 'text-sky-400 border-sky-500'
+                        : 'text-slate-400 border-transparent hover:text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              {activeTab === 'config' && (
+          <>
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <Key className="w-5 h-5" />
+              Конфигурация
+            </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Email</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200">
-                  {editingUser.email}
-                </div>
-                <p className="text-slate-500 text-xs mt-1">Email нельзя изменить</p>
-              </div>
-              <div>
-                <label htmlFor={fieldIds.login} className="block text-slate-300 text-sm font-medium mb-2">
-                  Логин (для входа) {errors.login && <span className="text-red-400 text-xs">({errors.login})</span>}
-                </label>
-                <input
-                  id={fieldIds.login}
-                  name="login"
-                  type="text"
-                  value={editingUser.login || ''}
-                  onChange={handleLoginChange}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.login ? 'border-red-500' : 'border-slate-700'
-                  }`}
-                  placeholder="уникальный логин"
-                />
-                <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
-                  <AtSign className="w-3.5 h-3.5" />
-                  Вход по логину или email; логин должен быть уникальным.
-                </p>
-              </div>
-              <div>
-                <label htmlFor={fieldIds.name} className="block text-slate-300 text-sm font-medium mb-2">
-                  Имя {errors.name && <span className="text-red-400 text-xs">({errors.name})</span>}
-                </label>
-                <input
-                  id={fieldIds.name}
-                  name="name"
-                  type="text"
-                  value={editingUser.name || ''}
-                  onChange={handleNameChange}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.name ? 'border-red-500' : 'border-slate-700'
-                  }`}
-                  placeholder="Имя пользователя"
-                />
-              </div>
-              <div>
-                <label htmlFor={fieldIds.phone} className="block text-slate-300 text-sm font-medium mb-2">
-                  Номер телефона {errors.phone && <span className="text-red-400 text-xs">({errors.phone})</span>}
-                </label>
-                <input
-                  id={fieldIds.phone}
-                  name="phone"
-                  type="tel"
-                  value={editingUser.phone || ''}
-                  onChange={handlePhoneChange}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.phone ? 'border-red-500' : 'border-slate-700'
-                  }`}
-                  placeholder="+7 (999) 123-45-67"
-                />
-              </div>
-              <div>
-                <label htmlFor={fieldIds.tgId} className="block text-slate-300 text-sm font-medium mb-2">
-                  Telegram ID
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id={fieldIds.tgId}
-                    name="tgId"
-                    type="text"
-                    inputMode="numeric"
-                    value={editingUser.tgId || ''}
-                    onChange={handleTgIdChange}
-                    className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Напр. 123456789"
-                  />
-                  {editingUser.tgId && (
-                    <button
-                      onClick={() => onCopy?.(String(editingUser.tgId))}
-                      className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
-                      title="Копировать Telegram ID"
-                      type="button"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-                <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
-                  <Send className="w-3.5 h-3.5" />
-                  ID из Telegram (поле <span className="font-mono">user.id</span>). Используется для входа через Mini App и уведомлений.
-                </p>
-              </div>
-              <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">
-                  Сессия Telegram Mini App
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {(user?.telegramSessionToken || editingUser?.telegramSessionToken) ? (
-                    <>
-                      <span className="font-mono text-slate-400 text-xs">
-                        ••••••••{(user?.telegramSessionToken || editingUser?.telegramSessionToken).slice(-8)}
-                      </span>
-                      {(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt) && (
-                        <span className="text-slate-500 text-xs">
-                          до {formatDate ? formatDate(new Date(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt).getTime(), 'short') : new Date(user?.telegramSessionTokenExpiresAt || editingUser?.telegramSessionTokenExpiresAt).toLocaleDateString()}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setEditingUser(prev => ({ ...prev, telegramSessionToken: null, telegramSessionTokenExpiresAt: null }))
-                          const payload = { ...editingUser, telegramSessionToken: null, telegramSessionTokenExpiresAt: null }
-                          if (handleSaveUserCard) await handleSaveUserCard(normalizeUser(payload))
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-amber-900/50 hover:bg-amber-800/50 text-amber-200 text-xs transition-colors"
-                        title="Отозвать сессию — при следующем входе в Mini App потребуется снова авторизация по Telegram"
-                      >
-                        <ShieldOff className="w-3.5 h-3.5" />
-                        Отозвать
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-slate-500 text-xs">Нет активной сессии (вход по initData)</span>
-                  )}
-                </div>
-                <p className="text-slate-500 text-xs mt-1">
-                  Сохраняется при входе через Mini App; по сессии пользователь определяется без повторной проверки initData.
-                </p>
-              </div>
               <div>
                 <label htmlFor={fieldIds.uuid} className="block text-slate-300 text-sm font-medium mb-2">
                   UUID {errors.uuid && <span className="text-red-400 text-xs">({errors.uuid})</span>}
@@ -781,36 +894,103 @@ const UserCard = ({
                     }`}
                     placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   />
-                  <button
-                    onClick={handleGenerateUUID}
-                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2"
-                    title="Сгенерировать новый UUID"
-                    type="button"
-                  >
+                  <button onClick={handleGenerateUUID} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2" title="Сгенерировать UUID" type="button">
                     <RefreshCw className="w-4 h-4" />
                   </button>
                   {(editingUser.uuid || user?.uuid) && (
-                    <button
-                      onClick={() => onCopy?.(editingUser.uuid || user?.uuid || '')}
-                      className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
-                      title="Копировать UUID"
-                      type="button"
-                    >
+                    <button onClick={() => onCopy?.(editingUser.uuid || user?.uuid || '')} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2" title="Копировать UUID" type="button">
                       <Copy className="w-4 h-4" />
                     </button>
                   )}
                 </div>
-                {user?.uuid && (
-                  <p className="text-slate-500 text-xs mt-1">
-                    Актуальный UUID из базы данных: {user.uuid}
-                  </p>
-                )}
+              </div>
+              <div>
+                <label htmlFor={fieldIds.subId} className="block text-slate-300 text-sm font-medium mb-2">SubID</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id={fieldIds.subId}
+                    name="subId"
+                    type="text"
+                    value={editingUser.subId || ''}
+                    onChange={handleSubIdChange}
+                    className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="7vyrlrvx1aiwylh1"
+                  />
+                  <button onClick={handleGenerateSubId} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2" title="Сгенерировать subId" type="button">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  {editingUser.subId && (
+                    <button onClick={() => onCopy?.(editingUser.subId || '')} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2" title="Копировать subId" type="button">
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor={fieldIds.subscriptionLink} className="block text-slate-300 text-sm font-medium mb-2">Ссылка подписки (3x-ui)</label>
+                <div className="flex items-center gap-2">
+                  {subscriptionLink ? (
+                    <>
+                      <input
+                        id={fieldIds.subscriptionLink}
+                        readOnly
+                        value={subscriptionLink}
+                        className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-xs"
+                      />
+                      <button onClick={() => onCopy?.(subscriptionLink)} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2" title="Копировать" type="button">
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-slate-500 text-sm">Сгенерируйте subId для ссылки</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label htmlFor={fieldIds.tariff} className="block text-slate-300 text-sm font-medium mb-2">Тариф</label>
+                <select
+                  id={fieldIds.tariff}
+                  value={editingUser.tariffId || ''}
+                  onChange={handleTariffChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Выберите тариф</option>
+                  {tariffs.filter(t => t.active).map(tariff => (
+                    <option key={tariff.id} value={tariff.id}>{tariff.name} ({tariff.plan}) — {tariff.price} ₽</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor={fieldIds.trafficGB} className="block text-slate-300 text-sm font-medium mb-2">Лимит трафика (GB)</label>
+                <input
+                  id={fieldIds.trafficGB}
+                  type="number"
+                  min="0"
+                  value={editingUser.trafficGB || 0}
+                  onChange={handleTrafficGBChange}
+                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.trafficGB ? 'border-red-500' : 'border-slate-700'}`}
+                />
+              </div>
+              <div>
+                <label htmlFor={fieldIds.devices} className="block text-slate-300 text-sm font-medium mb-2">Лимит устройств</label>
+                <input
+                  id={fieldIds.devices}
+                  type="number"
+                  min="1"
+                  value={editingUser.devices || 1}
+                  onChange={handleDevicesChange}
+                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.devices ? 'border-red-500' : 'border-slate-700'}`}
+                />
               </div>
             </div>
           </div>
+          </>
+              )}
 
+              {activeTab === 'subscription' && (
+          <div className="space-y-5">
           {/* Подписка */}
-          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700">
             <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5" />
               Подписка
@@ -847,23 +1027,6 @@ const UserCard = ({
                 </p>
               </div>
               <div>
-                <label htmlFor={fieldIds.tariff} className="block text-slate-300 text-sm font-medium mb-2">Тариф</label>
-                <select
-                  id={fieldIds.tariff}
-                  name="tariff"
-                  value={editingUser.tariffId || ''}
-                  onChange={handleTariffChange}
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Выберите тариф</option>
-                  {tariffs.filter(t => t.active).map(tariff => (
-                    <option key={tariff.id} value={tariff.id}>
-                      {tariff.name} ({tariff.plan}) - {tariff.price} ₽
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <label htmlFor={fieldIds.expiresAt} className="block text-slate-300 text-sm font-medium mb-2">Срок окончания подписки</label>
                 <input
                   id={fieldIds.expiresAt}
@@ -879,143 +1042,6 @@ const UserCard = ({
                   </p>
                 )}
               </div>
-              <div>
-                <label htmlFor={fieldIds.subscriptionLink} className="block text-slate-300 text-sm font-medium mb-2">Ссылка подписки на 3x-ui</label>
-                <div className="flex items-center gap-2">
-                  {subscriptionLink ? (
-                    <>
-                      <input
-                        id={fieldIds.subscriptionLink}
-                        name="subscriptionLink"
-                        type="text"
-                        value={subscriptionLink}
-                        readOnly
-                        className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-xs focus:outline-none"
-                      />
-                      <button
-                        onClick={() => onCopy?.(subscriptionLink)}
-                        className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
-                        title="Копировать ссылку"
-                        type="button"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <div className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-500 text-sm">
-                      {editingUser.subId ? 'Сгенерируйте subId или укажите subscriptionLink' : 'Сгенерируйте subId для получения ссылки подписки'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Лимиты */}
-          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-              <HardDrive className="w-5 h-5" />
-              Лимиты
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor={fieldIds.trafficGB} className="block text-slate-300 text-sm font-medium mb-2 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4" />
-                  Лимит трафика (GB) {errors.trafficGB && <span className="text-red-400 text-xs">({errors.trafficGB})</span>}
-                </label>
-                <input
-                  id={fieldIds.trafficGB}
-                  name="trafficGB"
-                  type="number"
-                  min="0"
-                  value={editingUser.trafficGB || 0}
-                  onChange={handleTrafficGBChange}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.trafficGB ? 'border-red-500' : 'border-slate-700'
-                  }`}
-                  placeholder="0 = безлимит"
-                />
-                <p className="text-slate-500 text-xs mt-1">
-                  {editingUser.trafficGB === 0 ? 'Безлимит' : `${editingUser.trafficGB} GB`}
-                  {editingUser.paymentStatus === 'test_period' && (
-                    <span className="block text-yellow-400 mt-1">Тестовый период: 3 GB</span>
-                  )}
-                  {editingUser.paymentStatus === 'paid' && editingUser.tariffId && (() => {
-                    const tariff = tariffs.find(t => t.id === editingUser.tariffId)
-                    const plan = tariff?.plan?.toLowerCase() || ''
-                    const name = tariff?.name?.toLowerCase() || ''
-                    if (plan === 'super' || name === 'super') {
-                      return <span className="block text-green-400 mt-1">SUPER тариф: 300 GB</span>
-                    }
-                    if (plan === 'multi' || name === 'multi') {
-                      return <span className="block text-green-400 mt-1">MULTI тариф: безлимит</span>
-                    }
-                    return null
-                  })()}
-                </p>
-              </div>
-              <div>
-                <label htmlFor={fieldIds.devices} className="block text-slate-300 text-sm font-medium mb-2 flex items-center gap-2">
-                  <Smartphone className="w-4 h-4" />
-                  Лимит устройств {errors.devices && <span className="text-red-400 text-xs">({errors.devices})</span>}
-                </label>
-                <input
-                  id={fieldIds.devices}
-                  name="devices"
-                  type="number"
-                  min="1"
-                  value={editingUser.devices || 1}
-                  onChange={handleDevicesChange}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.devices ? 'border-red-500' : 'border-slate-700'
-                  }`}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* SubID */}
-          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-              <Link2 className="w-5 h-5" />
-              SubID
-            </h3>
-            <div>
-              <label htmlFor={fieldIds.subId} className="block text-slate-300 text-sm font-medium mb-2">
-                SubID пользователя
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id={fieldIds.subId}
-                  name="subId"
-                  type="text"
-                  value={editingUser.subId || ''}
-                  onChange={handleSubIdChange}
-                  className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Введите SubID (например: 7vyrlrvx1aiwylh1)"
-                />
-                <button
-                  onClick={handleGenerateSubId}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center gap-2"
-                  title="Сгенерировать новый subId"
-                  type="button"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
-                {editingUser.subId && (
-                  <button
-                    onClick={() => onCopy?.(editingUser.subId || '')}
-                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-2"
-                    title="Копировать subId"
-                    type="button"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-              <p className="text-slate-500 text-xs mt-2">
-                SubID используется для формирования ссылки на подписку в формате 3x-ui. При генерации новый subId будет применен и сохранен для этого пользователя.
-              </p>
             </div>
           </div>
 
@@ -1110,6 +1136,242 @@ const UserCard = ({
                   )}
                 </div>
               )}
+            </div>
+          </div>
+          </div>
+              )}
+
+              {activeTab === 'payments' && (
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <CreditCard className="w-5 h-5" />
+              История оплат
+            </h3>
+            {paymentsLoading ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Загрузка...</span>
+              </div>
+            ) : payments.length === 0 ? (
+              <p className="text-slate-500 text-sm py-4">Нет платежей</p>
+            ) : (
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-600">
+                      <th className="py-2 px-2 font-medium">Дата</th>
+                      <th className="py-2 px-2 font-medium">Сумма</th>
+                      <th className="py-2 px-2 font-medium">Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.slice(0, 20).map((p) => (
+                      <tr key={p.id} className="border-b border-slate-700/50">
+                        <td className="py-2 px-2 text-slate-300">
+                          {p.createdAt ? (formatDate ? formatDate(new Date(p.createdAt).getTime(), 'short') : new Date(p.createdAt).toLocaleString()) : '—'}
+                        </td>
+                        <td className="py-2 px-2 text-slate-300">{p.amount != null ? `${Number(p.amount)} ₽` : '—'}</td>
+                        <td className="py-2 px-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            (p.status || '').toLowerCase() === 'completed' ? 'bg-green-900/40 text-green-300' :
+                            (p.status || '').toLowerCase() === 'pending' ? 'bg-amber-900/40 text-amber-300' :
+                            'bg-slate-700 text-slate-400'
+                          }`}>
+                            {p.status || '—'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {payments.length > 20 && (
+              <p className="text-slate-500 text-xs mt-2">Показаны последние 20 из {payments.length}</p>
+            )}
+          </div>
+              )}
+
+              {activeTab === 'tickets' && (
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Обращения в тех поддержку
+            </h3>
+            {ticketsLoading ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Загрузка...</span>
+              </div>
+            ) : tickets.length === 0 ? (
+              <p className="text-slate-500 text-sm py-4">Нет обращений</p>
+            ) : (
+              <ul className="space-y-2 max-h-48 overflow-y-auto">
+                {tickets.slice(0, 15).map((t) => (
+                  <li key={t.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                    <span className="text-slate-300 text-sm truncate flex-1" title={t.subject}>{t.subject || 'Без темы'}</span>
+                    <span className="text-slate-500 text-xs shrink-0">
+                      {t.updatedAt ? (formatDate ? formatDate(new Date(t.updatedAt).getTime(), 'short') : new Date(t.updatedAt).toLocaleDateString()) : ''}
+                    </span>
+                    <span className={`shrink-0 px-2 py-0.5 rounded text-xs ${
+                      t.status === 'closed' ? 'bg-slate-700 text-slate-400' :
+                      t.status === 'answered' ? 'bg-blue-900/40 text-blue-300' : 'bg-amber-900/40 text-amber-300'
+                    }`}>
+                      {t.status === 'open' ? 'Открыт' : t.status === 'answered' ? 'Отвечен' : t.status === 'closed' ? 'Закрыт' : t.status || '—'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {tickets.length > 15 && (
+              <p className="text-slate-500 text-xs mt-2">Показаны последние 15 из {tickets.length}</p>
+            )}
+          </div>
+              )}
+
+              {activeTab === 'xui' && (
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <Activity className="w-5 h-5" />
+              Данные с 3x-ui
+            </h3>
+
+            {clientStats3x?._error && (
+              <p className="text-amber-400 text-sm mb-3">{clientStats3x._error}</p>
+            )}
+
+            {clientStats3x && !clientStats3x._error && (
+              <>
+                <div className="space-y-3 mb-4 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
+                  {clientStats3x.expiryTime != null && (
+                    <div>
+                      <span className="text-slate-500 text-sm block">Дата окончания в панели 3x-ui</span>
+                      <span className="text-slate-200 font-medium">
+                        {new Date(Number(clientStats3x.expiryTime) * 1000).toLocaleString('ru-RU', { dateStyle: 'long', timeStyle: 'short' })}
+                      </span>
+                    </div>
+                  )}
+                  {clientStats3x.total != null && (
+                    <div>
+                      <span className="text-slate-500 text-sm block">Лимит трафика</span>
+                      <span className="text-slate-200">{(Number(clientStats3x.total) / (1024 ** 3)).toFixed(2)} GB</span>
+                    </div>
+                  )}
+                  {(clientStats3x.up != null || clientStats3x.down != null) && (
+                    <div>
+                      <span className="text-slate-500 text-sm block">Использовано трафика</span>
+                      <span className="text-slate-200">
+                        {((Number(clientStats3x.up || 0) + Number(clientStats3x.down || 0)) / (1024 ** 3)).toFixed(2)} GB
+                      </span>
+                    </div>
+                  )}
+                  {clientStats3x.total != null && (clientStats3x.up != null || clientStats3x.down != null) && (
+                    <div>
+                      <span className="text-slate-500 text-sm block">Остаток трафика</span>
+                      <span className="text-slate-200">
+                        {Math.max(0, (Number(clientStats3x.total) - (Number(clientStats3x.up || 0) + Number(clientStats3x.down || 0))) / (1024 ** 3)).toFixed(2)} GB
+                      </span>
+                    </div>
+                  )}
+                  {clientStats3x.lastSeen != null && (
+                    <div>
+                      <span className="text-slate-500 text-sm block">Последняя активность в сети</span>
+                      <span className="text-slate-200">
+                        {(() => {
+                          const t = Number(clientStats3x.lastSeen)
+                          const ms = t < 1e12 ? t * 1000 : t
+                          return new Date(ms).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
+                        })()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {clientStats3x.expiryTime != null && (() => {
+                  const expiry3xMs = Number(clientStats3x.expiryTime) * 1000
+                  const cardExpiryMs = editingUser?.expiresAt ? Number(editingUser.expiresAt) : null
+                  const diff = cardExpiryMs != null ? Math.abs(expiry3xMs - cardExpiryMs) : Infinity
+                  const differs = diff > 60 * 1000
+                  return differs ? (
+                    <div className="mb-4 p-3 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                      <p className="text-amber-200 text-sm mb-2">
+                        В панели 3x-ui указана другая дата окончания, чем в карточке подписки. Обновите дату в карточке по данным панели.
+                      </p>
+                      <p className="text-slate-400 text-xs mb-2">
+                        В карточке: {cardExpiryMs ? (formatDate ? formatDate(cardExpiryMs, 'short') : new Date(cardExpiryMs).toLocaleString('ru-RU')) : 'не указано'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={apply3xUiExpiryToCard}
+                        disabled={isSaving}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Обновить дату окончания в карточке по данным 3x-ui
+                      </button>
+                    </div>
+                  ) : null
+                })()}
+              </>
+            )}
+
+            {!clientStats3x && !clientStats3xLoading && !clientStats3x?._error && (
+              <p className="text-slate-500 text-sm mb-4">Нажмите кнопку ниже, чтобы загрузить данные из панели 3x-ui.</p>
+            )}
+            {clientStats3x && !clientStats3x._error && Object.keys(clientStats3x).filter(k => !k.startsWith('_')).length === 0 && (
+              <p className="text-slate-500 text-sm mb-4">Панель вернула пустой ответ. Проверьте, что клиент есть в 3x-ui по этому UUID/email.</p>
+            )}
+
+            <button
+              type="button"
+              onClick={loadClientStats3x}
+              disabled={clientStats3xLoading || (!(editingUser?.uuid || user?.uuid) && !(editingUser?.email || user?.email))}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {clientStats3xLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {clientStats3xLoading ? 'Загрузка...' : 'Загрузить данные из 3x-ui'}
+            </button>
+          </div>
+              )}
+
+              {activeTab === 'other' && (
+          <div className="space-y-5">
+          {/* Редактирование контактов и прочее */}
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+              <User className="w-5 h-5" />
+              Редактирование профиля
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor={fieldIds.login} className="block text-slate-300 text-sm font-medium mb-2">Логин</label>
+                <input id={fieldIds.login} name="login" type="text" value={editingUser.login || ''} onChange={handleLoginChange} className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.login ? 'border-red-500' : 'border-slate-700'}`} placeholder="уникальный логин" />
+              </div>
+              <div>
+                <label htmlFor={fieldIds.name} className="block text-slate-300 text-sm font-medium mb-2">Имя</label>
+                <input id={fieldIds.name} name="name" type="text" value={editingUser.name || ''} onChange={handleNameChange} className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.name ? 'border-red-500' : 'border-slate-700'}`} placeholder="Имя" />
+              </div>
+              <div>
+                <label htmlFor={fieldIds.phone} className="block text-slate-300 text-sm font-medium mb-2">Телефон</label>
+                <input id={fieldIds.phone} name="phone" type="tel" value={editingUser.phone || ''} onChange={handlePhoneChange} className={`w-full px-4 py-2 bg-slate-900 border rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.phone ? 'border-red-500' : 'border-slate-700'}`} placeholder="+7 …" />
+              </div>
+              <div>
+                <label htmlFor={fieldIds.tgId} className="block text-slate-300 text-sm font-medium mb-2">Telegram ID</label>
+                <input id={fieldIds.tgId} name="tgId" type="text" inputMode="numeric" value={editingUser.tgId || ''} onChange={handleTgIdChange} className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="123456789" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="block text-slate-300 text-sm font-medium mb-2">Сессия Telegram Mini App</label>
+              <div className="flex flex-wrap items-center gap-2">
+                {(user?.telegramSessionToken || editingUser?.telegramSessionToken) ? (
+                  <>
+                    <span className="font-mono text-slate-400 text-xs">••••••••{(user?.telegramSessionToken || editingUser?.telegramSessionToken).slice(-8)}</span>
+                    <button type="button" onClick={async () => { setEditingUser(prev => ({ ...prev, telegramSessionToken: null, telegramSessionTokenExpiresAt: null })); if (handleSaveUserCard) await handleSaveUserCard(normalizeUser({ ...editingUser, telegramSessionToken: null, telegramSessionTokenExpiresAt: null })) }} className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-amber-900/50 hover:bg-amber-800/50 text-amber-200 text-xs"> <ShieldOff className="w-3.5 h-3.5" /> Отозвать </button>
+                  </>
+                ) : (
+                  <span className="text-slate-500 text-xs">Нет активной сессии</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1234,6 +1496,10 @@ const UserCard = ({
                     {formatDate?.(user.updatedAt) || new Date(user.updatedAt).toLocaleString()}
                   </div>
                 </div>
+              )}
+            </div>
+          </div>
+          </div>
               )}
             </div>
           </div>
