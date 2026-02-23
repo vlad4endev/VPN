@@ -33,11 +33,6 @@ import { handleWebhook } from '../controllers/telegram.controller.js'
  * @param {typeof import('crypto')} deps.crypto
  * @param {() => Promise<Object|null>} [deps.getScenario] — сценарий бота для кастомных текстов/кнопок
  * @param {(db: *, appId: string, triggerType: string, triggerValue: string) => Promise<Object|null>} [deps.findScenarioFromBotBuilder]
- * @param {(fn: () => Promise<*>) => Promise<*>} [deps.runWithWebhookConcurrency] — ограничение параллельной обработки webhook
- * @param {(update: object) => Promise<*>} [deps.enqueueWebhook] — приоритетная очередь (BullMQ); при наличии webhook сразу в очередь, ответ 200
- * @param {(key: string) => Promise<string|null>} [deps.redisGet]
- * @param {(key: string, value: string, ttlSeconds?: number) => Promise<void>} [deps.redisSet]
- * @param {(path: string, ms: number) => void} [deps.logTmaTiming] — логирование времени выполнения (LOG_TMA_TIMING)
  */
 export function createTelegramRouter(deps) {
   const router = express.Router()
@@ -59,8 +54,6 @@ export function createTelegramRouter(deps) {
     logTelegramAuth,
     verifyIdToken,
     verifyTelegramWebhookSecret,
-    enqueueWebhook,
-    runWithWebhookConcurrency,
     APP_ID,
     TELEGRAM_WEBHOOK_SECRET,
     TELEGRAM_SESSION_TTL_MS,
@@ -71,37 +64,10 @@ export function createTelegramRouter(deps) {
     callN8NWebhook,
     randomUUID,
     crypto,
-    redisGet: redisGetDeps,
-    redisSet: redisSetDeps,
-    logTmaTiming,
   } = deps
-
-  const runWebhook = runWithWebhookConcurrency || ((fn) => fn())
-  const useQueue = typeof enqueueWebhook === 'function'
-  const redisGet = typeof redisGetDeps === 'function' ? redisGetDeps : () => Promise.resolve(null)
-  const redisSet = typeof redisSetDeps === 'function' ? redisSetDeps : () => Promise.resolve()
-  const TMA_USER_CACHE_TTL_SEC = 600 // 10 минут
-
-  /** Минимальный объект user для ответа auth (дашборд без лишних полей). */
-  function buildMinimalUser(uid, data) {
-    const d = data || {}
-    return {
-      id: uid,
-      email: d.email ?? '',
-      name: d.name ?? '',
-      login: d.login ?? '',
-      role: d.role ?? 'user',
-      plan: d.plan ?? 'free',
-      expiresAt: d.expiresAt ?? null,
-      tariffId: d.tariffId ?? '',
-      tariffName: d.tariffName ?? '',
-      photoURL: d.photoURL ?? null,
-    }
-  }
 
   // ——— POST /auth (Mini App: session token или initData) ———
   router.post('/auth', express.json(), async (req, res) => {
-    const authStart = Date.now()
     const hasSessionToken = !!(req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken))
     const hasInitData = !!(req.headers['x-telegram-initdata'] || (req.body && req.body.initData))
     logTelegramAuth('request', { hasSessionToken, hasInitData })
@@ -123,19 +89,6 @@ export function createTelegramRouter(deps) {
     const sessionToken = (req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken) || '').toString().trim()
     if (sessionToken) {
       try {
-        const cacheKey = `tma:session:${sessionToken}`
-        const cached = await redisGet(cacheKey)
-        if (cached) {
-          try {
-            const { uid, user, sessionTokenExpiresAt } = JSON.parse(cached)
-            if (uid && user) {
-              const customToken = await admin.auth().createCustomToken(uid)
-              logTelegramAuth('session_ok', { uid, fromCache: true })
-              if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-              return res.json({ success: true, customToken, sessionToken, sessionTokenExpiresAt: sessionTokenExpiresAt || null, user })
-            }
-          } catch (_) { /* invalid cache */ }
-        }
         const bySession = await usersRef.where('telegramSessionToken', '==', sessionToken).limit(1).get()
         if (!bySession.empty) {
           const doc = bySession.docs[0]
@@ -144,13 +97,9 @@ export function createTelegramRouter(deps) {
           const expiresMs = typeof expiresAt === 'string' ? new Date(expiresAt).getTime() : (typeof expiresAt === 'number' ? expiresAt : 0)
           if (expiresMs > Date.now()) {
             const uid = doc.id
-            const user = buildMinimalUser(uid, data)
             const customToken = await admin.auth().createCustomToken(uid)
-            const sessionExpiresAt = typeof expiresAt === 'string' ? expiresAt : new Date(expiresMs).toISOString()
-            await redisSet(cacheKey, JSON.stringify({ uid, user, sessionTokenExpiresAt: sessionExpiresAt }), TMA_USER_CACHE_TTL_SEC)
             logTelegramAuth('session_ok', { uid })
-            if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-            return res.json({ success: true, customToken, sessionToken, sessionTokenExpiresAt: sessionExpiresAt, user })
+            return res.json({ success: true, customToken })
           }
           logTelegramAuth('session_fail', { reason: 'expired', uid: doc.id })
         } else {
@@ -161,45 +110,21 @@ export function createTelegramRouter(deps) {
       }
     }
 
-    // initData: использовать req.telegramUser если middleware уже проверил (избегаем двойной HMAC)
-    let validated = req.telegramUser && req.telegramUser.user && req.telegramUser.user.id
-      ? req.telegramUser
-      : null
-    if (!validated) {
-      const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
-      const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
-      const result = await validateTelegramInitDataWithReasonAsync(initData)
-      if (!result.ok) {
-        logTelegramAuth('initData_fail', { reason: result.reason || 'unknown', message: result.message })
-        const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-        return res.status(400).json({ success: false, error: message, reason: result.reason || 'unknown' })
-      }
-      validated = result.data
+    const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
+    const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
+    const result = await validateTelegramInitDataWithReasonAsync(initData)
+    if (!result.ok) {
+      logTelegramAuth('initData_fail', { reason: result.reason || 'unknown', message: result.message })
+      const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
+      return res.status(400).json({ success: false, error: message, reason: result.reason || 'unknown' })
     }
+    const validated = result.data
     const tgId = String(validated.user.id)
     const nowIso = new Date().toISOString()
     const sessionTokenNew = crypto.randomBytes(32).toString('hex')
     const sessionExpiresAt = new Date(Date.now() + TELEGRAM_SESSION_TTL_MS).toISOString()
 
     try {
-      const userCacheKey = `tma:user:${tgId}`
-      const cached = await redisGet(userCacheKey)
-      if (cached) {
-        try {
-          const { uid, user } = JSON.parse(cached)
-          if (uid && user) {
-            const customToken = await admin.auth().createCustomToken(uid)
-            const refForUpdate = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
-            await refForUpdate.update({ telegramSessionToken: sessionTokenNew, telegramSessionTokenExpiresAt: sessionExpiresAt, updatedAt: nowIso }).catch(() => {})
-            const sessionCacheKey = `tma:session:${sessionTokenNew}`
-            await redisSet(sessionCacheKey, JSON.stringify({ uid, user, sessionTokenExpiresAt }), TMA_USER_CACHE_TTL_SEC)
-            logTelegramAuth('initData_ok', { uid, tgId, fromCache: true })
-            if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-            return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt, user })
-          }
-        } catch (_) { /* invalid cache */ }
-      }
-
       const byTgId = await usersRef.where('tgId', '==', tgId).limit(1).get()
       let uid
       let userRef
@@ -212,34 +137,22 @@ export function createTelegramRouter(deps) {
           telegramSessionTokenExpiresAt: sessionExpiresAt,
           updatedAt: nowIso,
         })
-        const data = doc.data()
-        const user = buildMinimalUser(uid, data)
-        await redisSet(userCacheKey, JSON.stringify({ uid, user }), TMA_USER_CACHE_TTL_SEC)
-        const sessionCacheKey = `tma:session:${sessionTokenNew}`
-        await redisSet(sessionCacheKey, JSON.stringify({ uid, user, sessionTokenExpiresAt }), TMA_USER_CACHE_TTL_SEC)
         const customToken = await admin.auth().createCustomToken(uid)
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
-        if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt, user })
+        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       uid = `tg_${tgId}`
       userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
       const existing = await userRef.get()
       if (existing.exists) {
-        const data = existing.data()
         await userRef.update({
           telegramSessionToken: sessionTokenNew,
           telegramSessionTokenExpiresAt: sessionExpiresAt,
           updatedAt: nowIso,
         })
-        const user = buildMinimalUser(uid, data)
-        await redisSet(userCacheKey, JSON.stringify({ uid, user }), TMA_USER_CACHE_TTL_SEC)
-        const sessionCacheKey = `tma:session:${sessionTokenNew}`
-        await redisSet(sessionCacheKey, JSON.stringify({ uid, user, sessionTokenExpiresAt }), TMA_USER_CACHE_TTL_SEC)
         const customToken = await admin.auth().createCustomToken(uid)
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
-        if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt, user })
+        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       const firstName = validated.user.first_name || ''
       const lastName = validated.user.last_name || ''
@@ -266,14 +179,9 @@ export function createTelegramRouter(deps) {
         createdAt: nowIso,
         updatedAt: nowIso,
       })
-      const user = buildMinimalUser(uid, { email: `tg_${tgId}@telegram.placeholder`, login: `tg_${tgId}`, name, role: 'user', plan: 'free', expiresAt: null, tariffName: '', tariffId: '', photoURL: validated.user.photo_url || null })
-      await redisSet(userCacheKey, JSON.stringify({ uid, user }), TMA_USER_CACHE_TTL_SEC)
-      const sessionCacheKey = `tma:session:${sessionTokenNew}`
-      await redisSet(sessionCacheKey, JSON.stringify({ uid, user, sessionTokenExpiresAt }), TMA_USER_CACHE_TTL_SEC)
       const customToken = await admin.auth().createCustomToken(uid)
       logTelegramAuth('initData_ok', { uid, tgId, created: true, name })
-      if (typeof logTmaTiming === 'function') logTmaTiming('/api/telegram/auth', Date.now() - authStart)
-      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt, user })
+      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
       logTelegramAuth('error', { step: 'create_or_update', message: err.message })
       return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
@@ -373,14 +281,10 @@ export function createTelegramRouter(deps) {
     }
   })
 
-  // ——— POST /webhook (Telegram Bot API updates). Ответ 200 OK сразу; обработка в очереди (BullMQ) или с ограничением параллелизма. ———
+  // ——— POST /webhook (Telegram Bot API updates). Ответ 200 OK сразу, обработка в telegram.service → userService, businessService. ———
   router.post('/webhook', verifyTelegramWebhookSecret, express.json(), (req, res) => {
     const update = req.body
     res.status(200).send()
-    if (useQueue) {
-      enqueueWebhook(update).catch((err) => console.error('❌ Telegram webhook enqueue:', err.message))
-      return
-    }
     const webhookDeps = {
       getTelegramToken,
       getDb,
@@ -397,7 +301,7 @@ export function createTelegramRouter(deps) {
       APP_ID,
       randomUUID,
     }
-    runWebhook(() => handleWebhook(update, webhookDeps)).catch((err) => console.error('❌ Telegram webhook:', err.message))
+    handleWebhook(update, webhookDeps).catch((err) => console.error('❌ Telegram webhook:', err.message))
   })
 
   // ——— GET /bind-link ———
@@ -452,12 +356,8 @@ export function createTelegramRouter(deps) {
       const oneDay = 24 * 60 * 60 * 1000
       const inSevenDays = now + 7 * oneDay
       const inOneDay = now + oneDay
-      const usersRef = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
-      const usersSnap = await usersRef
-        .where('expiresAt', '>', 0)
-        .where('expiresAt', '<=', inSevenDays)
-        .get()
-      const toSend = []
+      const usersSnap = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).get()
+      let sent = 0
       for (const doc of usersSnap.docs) {
         const u = doc.data()
         const tgId = u.tgId && String(u.tgId).trim()
@@ -470,14 +370,8 @@ export function createTelegramRouter(deps) {
         if (exp <= now) text = `⚠️ Подписка «${tariffName}» истекла. Оплатите продление в личном кабинете.`
         else if (exp <= inOneDay) text = `⏰ Подписка «${tariffName}» истекает сегодня! Оплатите продление в личном кабинете.`
         else text = `📅 Подписка «${tariffName}» истекает через ${daysLeft} дн. Оплатите продление в личном кабинете.`
-        toSend.push({ tgId, text })
-      }
-      const CONCURRENCY = 5
-      let sent = 0
-      for (let i = 0; i < toSend.length; i += CONCURRENCY) {
-        const chunk = toSend.slice(i, i + CONCURRENCY)
-        const results = await Promise.all(chunk.map(({ tgId, text }) => sendTelegramMessage(botToken, tgId, text)))
-        sent += results.filter((r) => r && r.ok).length
+        const result = await sendTelegramMessage(botToken, tgId, text)
+        if (result.ok) sent++
       }
       res.json({ success: true, sent })
     } catch (err) {
