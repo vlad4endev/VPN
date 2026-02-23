@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Send, BookOpen, FileText, FileCheck, Shield } from 'lucide-react'
 import PrivacyPolicyModal from './PrivacyPolicyModal.jsx'
 import UserAgreementModal from './UserAgreementModal.jsx'
@@ -15,6 +16,7 @@ const linkClass =
  * Стиль согласован с тёмной темой (slate-950 / slate-800).
  */
 export default function Footer() {
+  const { t } = useTranslation()
   const [showPrivacyModal, setShowPrivacyModal] = useState(false)
   const [showAgreementModal, setShowAgreementModal] = useState(false)
 
@@ -26,55 +28,55 @@ export default function Footer() {
             <p className="text-slate-500 font-bold text-[clamp(0.8rem,0.75rem+0.25vw,0.95rem)] tracking-wide">
               SKYFLOW | 2026
             </p>
-            <nav className="flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-6 gap-y-3 sm:gap-y-2" aria-label="Подвал">
+            <nav className="flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-6 gap-y-3 sm:gap-y-2" aria-label={t('footer.navLabel')}>
               <a
                 href={TELEGRAM_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={linkClass}
-                aria-label="Telegram-канал SKYFLOW — Лучший в России"
+                aria-label={t('footer.telegramAria')}
               >
                 <Send className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>SKYFLOW | Лучший в России</span>
+                <span>{t('footer.telegramChannel')}</span>
               </a>
-              <a href={KNOWLEDGE_BASE_URL} className={linkClass} aria-label="База знаний">
+              <a href={KNOWLEDGE_BASE_URL} className={linkClass} aria-label={t('footer.knowledgeBaseAria')}>
                 <BookOpen className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>База знаний</span>
+                <span>{t('footer.knowledgeBase')}</span>
               </a>
               <button
                 type="button"
                 onClick={() => setShowAgreementModal(true)}
                 className={linkClass + ' bg-transparent border-none cursor-pointer'}
-                aria-label="Пользовательское соглашение"
+                aria-label={t('footer.userAgreementAria')}
               >
                 <FileCheck className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>Пользовательское соглашение</span>
+                <span>{t('footer.userAgreement')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(true)}
                 className={linkClass + ' bg-transparent border-none cursor-pointer'}
-                aria-label="Политика конфиденциальности"
+                aria-label={t('footer.privacyPolicyAria')}
               >
                 <FileText className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>Политика конфиденциальности</span>
+                <span>{t('footer.privacyPolicy')}</span>
               </button>
-              <a href={PERSONAL_DATA_URL} className={linkClass} aria-label="Обработка персональных данных">
+              <a href={PERSONAL_DATA_URL} className={linkClass} aria-label={t('footer.personalDataAria')}>
                 <Shield className="w-4 h-4 flex-shrink-0" aria-hidden />
-                <span>Обработка персональных данных</span>
+                <span>{t('footer.personalData')}</span>
               </a>
             </nav>
             <a
               href="https://metrika.yandex.ru/stat/?id=106652816&from=informer"
               target="_blank"
               rel="nofollow noreferrer"
-              aria-label="Статистика посещаемости сайта в Яндекс.Метрике"
+              aria-label={t('footer.yandexAria')}
               className="mt-1"
             >
               <img
                 src="https://informer.yandex.ru/informer/106652816/3_0_535353FF_333333FF_1_uniques"
                 style={{ width: 88, height: 31, border: 0 }}
-                alt="Яндекс.Метрика: данные за сегодня (просмотры, визиты и уникальные посетители)"
+                alt={t('footer.yandexImgAlt')}
                 className="ym-advanced-informer"
                 data-cid="106652816"
                 data-lang="ru"

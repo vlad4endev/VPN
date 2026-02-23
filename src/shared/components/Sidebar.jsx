@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal, TrendingDown } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
+import LanguageSwitcher from './LanguageSwitcher.jsx'
 
 // Мобильная панель: основные кнопки и «Прочее» (вычисляем здесь, чтобы не зависеть от экспортов navSections)
 const ADMIN_MOBILE_PRIMARY_IDS = ['dashboard', 'users', 'reviews']
@@ -21,9 +23,9 @@ const navSubItemClass = (active) =>
   }`
 
 const DASHBOARD_NAV_ITEMS = [
-  { id: 'subscription', label: 'Подписка', icon: CreditCard },
-  { id: 'profile', label: 'Профиль', icon: User },
-  { id: 'payments', label: 'Платежи', icon: History },
+  { id: 'subscription', labelKey: 'sidebar.subscription', icon: CreditCard },
+  { id: 'profile', labelKey: 'sidebar.profile', icon: User },
+  { id: 'payments', labelKey: 'sidebar.payments', icon: History },
 ]
 
 
@@ -35,16 +37,17 @@ const DASHBOARD_NAV_ITEMS = [
 /** Возвращает ключ раздела, в котором находится таб */
 const getSectionKeyByTabId = (tabId) => {
   const section = ADMIN_NAV_SECTIONS.find((s) => s.items.some((i) => i.id === tabId))
-  return section ? section.title : null
+  return section ? section.titleKey : null
 }
 
 const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDashboardTab, adminTab, onSetAdminTab }) => {
+  const { t } = useTranslation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [showAdminMore, setShowAdminMore] = useState(false)
   const [expandedAdminSections, setExpandedAdminSections] = useState(() => {
     const openKey = getSectionKeyByTabId(adminTab)
-    return openKey ? { [openKey]: true } : { [ADMIN_NAV_SECTIONS[0]?.title]: true }
+    return openKey ? { [openKey]: true } : { [ADMIN_NAV_SECTIONS[0]?.titleKey]: true }
   })
 
   useEffect(() => {
@@ -99,14 +102,15 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <div className="flex-1 min-w-0">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.75rem)] sm:text-xl md:text-2xl font-black text-white mb-1.5 sm:mb-2">SKYFLOW</h1>
           <p className="text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm text-slate-400">
-            {view === 'admin' ? 'Админ-панель' : view === 'finances' ? 'Финансы' : view === 'analytics' ? 'Аналитика' : 'Личный кабинет'}
+            {view === 'admin' ? t('sidebar.admin') : view === 'finances' ? t('sidebar.finances') : view === 'analytics' ? t('sidebar.analytics') : t('sidebar.cabinet')}
           </p>
         </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <LanguageSwitcher variant="compact" />
         {currentUser?.id && (
-          <div className="flex-shrink-0">
-            <NotificationsCenter userId={currentUser.id} />
-          </div>
+          <NotificationsCenter userId={currentUser.id} />
         )}
+        </div>
       </div>
     </div>
   )
@@ -120,11 +124,11 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           setIsMenuOpen(false)
         }}
         className={`w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-colors touch-manipulation ${view === 'support' ? navItemClass(true) : 'text-slate-300 hover:bg-slate-800 hover:text-sky-400 active:bg-slate-700'}`}
-        aria-label="Тех. поддержка"
+        aria-label={t('sidebar.supportLink')}
         aria-selected={view === 'support'}
       >
         <MessageCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Тех. поддержка</span>
+        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.support')}</span>
       </button>
       <a
         href={SUPPORT_TELEGRAM_URL}
@@ -139,10 +143,10 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
       <button
         onClick={handleLogout}
         className="w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg text-slate-300 hover:bg-slate-800 active:bg-slate-700 transition-colors touch-manipulation"
-        aria-label="Выйти из аккаунта"
+        aria-label={t('sidebar.logout')}
       >
         <LogOut size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Выйти</span>
+        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.logout')}</span>
       </button>
     </div>
   )
@@ -154,43 +158,43 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <button
           onClick={() => handleNavClick('admin')}
           className={navItemClass(view === 'admin')}
-          aria-label="Админ-панель"
+          aria-label={t('sidebar.admin')}
           aria-selected={view === 'admin'}
         >
           <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Админ-панель</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.admin')}</span>
         </button>
       )}
       {canAccessFinances(currentUser?.role) && (
         <button
           onClick={() => handleNavClick('finances')}
           className={navItemClass(view === 'finances')}
-          aria-label="Финансы"
+          aria-label={t('sidebar.finances')}
           aria-selected={view === 'finances'}
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.finances')}</span>
         </button>
       )}
       {canAccessAdmin(currentUser?.role) && (
         <button
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}
-          aria-label="Аналитика"
+          aria-label={t('sidebar.analytics')}
           aria-selected={view === 'analytics'}
         >
           <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Аналитика</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.analytics')}</span>
         </button>
       )}
       <button
         onClick={() => handleNavClick('dashboard')}
         className={navItemClass(view === 'dashboard')}
-        aria-label="Личный кабинет"
+        aria-label={t('sidebar.cabinet')}
         aria-selected={view === 'dashboard'}
       >
         <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
+        <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.cabinet')}</span>
       </button>
     </nav>
   )
@@ -203,24 +207,24 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           <button
             onClick={() => handleNavClick('admin')}
             className={navItemClass(view === 'admin')}
-            aria-label="Админ-панель"
+            aria-label={t('sidebar.admin')}
             aria-selected={view === 'admin'}
           >
             <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-            <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Админ-панель</span>
+            <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.admin')}</span>
           </button>
           {hasAdminTabs && (
             <div className="space-y-0.5 sm:space-y-1">
               {ADMIN_NAV_SECTIONS.map((section) => {
-                const isExpanded = expandedAdminSections[section.title] === true
+                const isExpanded = expandedAdminSections[section.titleKey] === true
                 return (
-                  <div key={section.title} className="space-y-0.5 sm:space-y-0.5">
+                  <div key={section.titleKey} className="space-y-0.5 sm:space-y-0.5">
                     <button
                       type="button"
-                      onClick={() => toggleAdminSection(section.title)}
+                      onClick={() => toggleAdminSection(section.titleKey)}
                       className="w-full min-h-[36px] flex items-center gap-2 pl-6 sm:pl-7 pr-3 sm:pr-4 py-1.5 sm:py-2 rounded-lg text-left text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors touch-manipulation"
                       aria-expanded={isExpanded}
-                      aria-label={isExpanded ? `Свернуть ${section.title}` : `Развернуть ${section.title}`}
+                      aria-label={isExpanded ? `${t('common.collapse')} ${t(section.titleKey)}` : `${section.titleKey}`}
                     >
                       <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
                         {isExpanded ? (
@@ -229,20 +233,20 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
                           <ChevronRight size={14} className="text-slate-500" />
                         )}
                       </span>
-                      <span className="truncate">{section.title}</span>
+                      <span className="truncate">{t(section.titleKey)}</span>
                     </button>
                     {isExpanded && (
                       <div className="space-y-0.5 sm:space-y-0.5">
-                        {section.items.map(({ id, label, icon: Icon }) => (
+                        {section.items.map(({ id, labelKey, icon: Icon }) => (
                           <button
                             key={id}
                             onClick={() => handleAdminTab(id)}
                             className={navSubItemClass(adminTab === id)}
-                            aria-label={label}
+                            aria-label={t(labelKey)}
                             aria-selected={adminTab === id}
                           >
                             <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
-                            <span className="font-medium">{label}</span>
+                            <span className="font-medium">{t(labelKey)}</span>
                           </button>
                         ))}
                       </div>
@@ -260,11 +264,11 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <button
           onClick={() => handleNavClick('finances')}
           className={navItemClass(view === 'finances')}
-          aria-label="Финансы"
+          aria-label={t('sidebar.finances')}
           aria-selected={view === 'finances'}
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Финансы</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.finances')}</span>
         </button>
       )}
 
@@ -273,11 +277,11 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <button
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}
-          aria-label="Аналитика"
+          aria-label={t('sidebar.analytics')}
           aria-selected={view === 'analytics'}
         >
           <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Аналитика</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.analytics')}</span>
         </button>
       )}
 
@@ -286,24 +290,24 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <button
           onClick={() => handleNavClick('dashboard')}
           className={navItemClass(view === 'dashboard')}
-          aria-label="Личный кабинет"
+          aria-label={t('sidebar.cabinet')}
           aria-selected={view === 'dashboard'}
         >
           <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Личный кабинет</span>
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.cabinet')}</span>
         </button>
         {hasDashboardTabs && (
           <div className="space-y-0.5 sm:space-y-1">
-            {DASHBOARD_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            {DASHBOARD_NAV_ITEMS.map(({ id, labelKey, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => handleDashboardTab(id)}
                 className={navSubItemClass(dashboardTab === id)}
-                aria-label={label}
+                aria-label={t(labelKey)}
                 aria-selected={dashboardTab === id}
               >
                 <Icon size={16} className="sm:w-4 sm:h-4 flex-shrink-0" />
-                <span className="font-medium">{label}</span>
+                <span className="font-medium">{t(labelKey)}</span>
               </button>
             ))}
           </div>
@@ -325,7 +329,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
       <button
         onClick={() => setIsMenuOpen(!isMenuOpen)}
         className="lg:hidden fixed top-3 sm:top-4 left-3 sm:left-4 z-50 p-2 sm:p-2.5 bg-slate-900 hover:bg-slate-800 active:bg-slate-700 rounded-lg text-white border border-slate-800 transition-all duration-200 min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
-        aria-label="Меню"
+        aria-label={t('common.menu')}
         aria-expanded={isMenuOpen}
       >
         {isMenuOpen ? <X size={20} className="sm:w-6 sm:h-6" /> : <Menu size={20} className="sm:w-6 sm:h-6" />}
@@ -361,23 +365,23 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         <nav
           className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch bg-slate-900/95 border-t border-slate-800 backdrop-blur-md safe-area-pb"
           role="tablist"
-          aria-label="Разделы личного кабинета"
+          aria-label={t('sidebar.sectionsCabinetAria')}
         >
-          {DASHBOARD_NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+          {DASHBOARD_NAV_ITEMS.map(({ id, labelKey, icon: Icon }) => {
             const active = dashboardTab === id
             return (
               <button
                 key={id}
                 role="tab"
                 aria-selected={active}
-                aria-label={label}
+                aria-label={t(labelKey)}
                 onClick={() => handleDashboardTab(id)}
                 className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${active ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
               >
                 <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${active ? 'bg-blue-600/20 scale-110' : ''}`}>
                   <Icon size={22} strokeWidth={active ? 2.5 : 2} />
                 </span>
-                <span className="text-[11px] font-medium truncate max-w-full px-1">{label}</span>
+                <span className="text-[11px] font-medium truncate max-w-full px-1">{t(labelKey)}</span>
               </button>
             )
           })}
@@ -390,23 +394,23 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           <nav
             className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch bg-slate-900/95 border-t border-slate-800 backdrop-blur-md safe-area-pb"
             role="tablist"
-            aria-label="Разделы админ-панели"
+            aria-label={t('sidebar.sectionsAdminAria')}
           >
-            {ADMIN_NAV_ITEMS.filter((item) => ADMIN_MOBILE_PRIMARY_IDS.includes(item.id)).map(({ id, label, icon: Icon }) => {
+            {ADMIN_NAV_ITEMS.filter((item) => ADMIN_MOBILE_PRIMARY_IDS.includes(item.id)).map(({ id, labelKey, icon: Icon }) => {
               const active = adminTab === id
               return (
                 <button
                   key={id}
                   role="tab"
                   aria-selected={active}
-                  aria-label={label}
+                  aria-label={t(labelKey)}
                   onClick={() => handleAdminTab(id)}
                   className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${active ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
                 >
                   <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${active ? 'bg-blue-600/20 scale-110' : ''}`}>
                     <Icon size={22} strokeWidth={active ? 2.5 : 2} />
                   </span>
-                  <span className="text-[11px] font-medium truncate max-w-full px-0.5">{label}</span>
+                  <span className="text-[11px] font-medium truncate max-w-full px-0.5">{t(labelKey)}</span>
                 </button>
               )
             })}
@@ -415,14 +419,14 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
               role="tab"
               aria-selected={showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab)}
               aria-expanded={showAdminMore}
-              aria-label="Прочее"
+              aria-label={t('sidebar.more')}
               onClick={() => setShowAdminMore((v) => !v)}
               className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
             >
               <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'bg-blue-600/20 scale-110' : ''}`}>
                 <MoreHorizontal size={22} strokeWidth={2} />
               </span>
-              <span className="text-[11px] font-medium">Прочее</span>
+              <span className="text-[11px] font-medium">{t('sidebar.more')}</span>
             </button>
           </nav>
 
@@ -437,21 +441,21 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
               <div
                 className="lg:hidden fixed left-0 right-0 bottom-0 z-50 rounded-t-2xl bg-slate-900 border-t border-slate-700 shadow-2xl safe-area-pb max-h-[70vh] overflow-hidden flex flex-col"
                 role="dialog"
-                aria-label="Остальные разделы"
+                aria-label={t('sidebar.moreSectionsAria')}
               >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-                  <span className="text-sm font-semibold text-slate-300">Разделы</span>
+                  <span className="text-sm font-semibold text-slate-300">{t('sidebar.sections')}</span>
                   <button
                     type="button"
                     onClick={() => setShowAdminMore(false)}
                     className="p-2 -m-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                    aria-label="Закрыть"
+                    aria-label={t('common.close')}
                   >
                     <X size={20} />
                   </button>
                 </div>
                 <div className="overflow-y-auto p-3 pb-8 grid grid-cols-2 gap-2">
-                  {ADMIN_MOBILE_OTHER_ITEMS.map(({ id, label, icon: Icon }) => {
+                  {ADMIN_MOBILE_OTHER_ITEMS.map(({ id, labelKey, icon: Icon }) => {
                     const active = adminTab === id
                     return (
                       <button
@@ -466,7 +470,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
                         <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-700/80 flex items-center justify-center">
                           <Icon size={18} strokeWidth={2} />
                         </span>
-                        <span className="text-sm font-medium truncate">{label}</span>
+                        <span className="text-sm font-medium truncate">{t(labelKey)}</span>
                       </button>
                     )
                   })}

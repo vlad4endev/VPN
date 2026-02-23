@@ -1,5 +1,6 @@
 import { useCallback, useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
+import { useTranslation } from 'react-i18next'
 import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard, Database, RefreshCw } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
@@ -108,6 +109,7 @@ const AdminPanel = ({
   }
   
   const adminContext = useAdminContext()
+  const { t } = useTranslation()
   const {
     reviews = [],
     reviewsLoading = false,
@@ -194,13 +196,13 @@ const AdminPanel = ({
               <div className="flex-1 min-w-0">
                 <h1 className="text-lg sm:text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-slate-200 flex items-center gap-2">
                   <Settings className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span className="truncate">Админ-панель</span>
+                  <span className="truncate">{t('sidebar.admin')}</span>
                 </h1>
                 <p className="text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 mt-0.5">
                   {sectionInfo ? (
-                    <span><span className="text-slate-500">{sectionInfo.sectionTitle}</span><span className="text-slate-500 mx-1">→</span><span>{sectionInfo.itemLabel}</span></span>
+                    <span><span className="text-slate-500">{t(sectionInfo.sectionTitleKey)}</span><span className="text-slate-500 mx-1">→</span><span>{t(sectionInfo.itemLabelKey)}</span></span>
                   ) : (
-                    'Управление системой'
+                    t('admin.manageSystem')
                   )}
                 </p>
               </div>
@@ -209,11 +211,11 @@ const AdminPanel = ({
                   <button
                     onClick={() => onSetAdminTab('dashboard')}
                     className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
-                    title="На главную дашборда"
-                    aria-label="Дашборд"
+                    title={t('admin.toDashboard')}
+                    aria-label={t('admin.dashboard')}
                   >
                     <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
-                    <span className="btn-text whitespace-nowrap">Дашборд</span>
+                    <span className="btn-text whitespace-nowrap">{t('admin.dashboard')}</span>
                   </button>
                 )}
                 <button

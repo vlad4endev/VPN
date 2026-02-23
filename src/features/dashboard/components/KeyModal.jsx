@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Globe, X, CheckCircle2, XCircle, AlertCircle, Copy, Download, Smartphone, Monitor, Laptop, Apple, ExternalLink, Clock } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { getFirestore, doc, getDoc } from 'firebase/firestore'
@@ -7,6 +8,7 @@ import logger from '../../../shared/utils/logger.js'
 import { detectPlatform, getPlatformInfo } from '../../../shared/utils/detectPlatform.js'
 
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
+  const { t } = useTranslation()
   const [subscriptionLink, setSubscriptionLink] = useState(null)
   const [loadingLink, setLoadingLink] = useState(true)
 
@@ -158,7 +160,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
         <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6">
-          <p className="text-slate-400">Загрузка ссылки на подписку...</p>
+          <p className="text-slate-400">{t('keyModal.loadingLink')}</p>
         </div>
       </div>
     )
@@ -168,7 +170,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
         <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6">
-          <p className="text-red-400">Ссылка на подписку недоступна. Обратитесь к администратору.</p>
+          <p className="text-red-400">{t('keyModal.linkUnavailable')}</p>
         </div>
       </div>
     )
@@ -185,19 +187,19 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         <div className="p-4 sm:p-6 md:p-8 border-b border-slate-800 flex justify-between items-center gap-3">
           <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.25rem)] sm:text-xl font-bold text-white flex items-center gap-2 sm:gap-3">
             <Globe size={18} className="sm:w-5 sm:h-5 sm:w-[22px] sm:h-[22px] text-blue-500 flex-shrink-0" /> 
-            <span>Нидерланды</span>
+            <span>{t('app.netherlands')}</span>
           </h3>
           <button 
             onClick={onClose} 
             className="p-2 hover:bg-slate-800 rounded-full transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
-            aria-label="Закрыть"
+            aria-label={t('common.close')}
           >
             <X size={20} className="sm:w-6 sm:h-6 text-slate-400" />
           </button>
         </div>
         <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-5 md:space-y-6 overflow-y-auto">
           <div className="space-y-2">
-            <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">Статус:</p>
+            <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">{t('app.status')}</p>
             <div className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] ${
               userStatus.status === 'active' ? 'bg-green-900/30 text-green-400' :
               userStatus.status === 'expiring_soon' ? 'bg-yellow-900/30 text-yellow-400' :
@@ -213,7 +215,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             </div>
           </div>
           <div className="space-y-2">
-            <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">Ваша ссылка на подписку:</p>
+            <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">{t('app.subscriptionLinkLabel')}</p>
             <div className="bg-black/40 border border-slate-800 p-3 sm:p-4 md:p-5 rounded-2xl sm:rounded-3xl break-all font-mono text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs text-blue-400 leading-relaxed ring-1 ring-blue-500/10 word-break break-words whitespace-pre-wrap">
               {subscriptionLink}
             </div>
@@ -221,10 +223,10 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           <button
             onClick={() => onCopy(subscriptionLink)}
             className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 sm:py-4 md:py-5 rounded-2xl sm:rounded-3xl font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] flex items-center justify-center gap-2 sm:gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-95 touch-manipulation"
-            aria-label="Копировать ссылку на подписку"
+            aria-label={t('dashboard.copyLinkAria')}
           >
             <Copy size={18} className="sm:w-5 sm:h-5 flex-shrink-0" /> 
-            <span>Копировать ссылку</span>
+            <span>{t('app.copyLink')}</span>
           </button>
           
           {/* Кнопка скачивания приложения для текущей ОС */}
@@ -232,17 +234,17 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             <div className="space-y-2 sm:space-y-3 pt-2 border-t border-slate-800">
               <h4 className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base flex items-center gap-2">
                 <Download size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                <span>Скачайте приложение на свое устройство</span>
+                <span>{t('keyModal.downloadApp')}</span>
               </h4>
               <a
                 href={currentPlatformLink}
                 className="w-full flex items-center justify-center gap-2 sm:gap-3 p-4 sm:p-5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                aria-label={`Добавить подписку в приложение для ${platformInfo.label}`}
-                title={`Добавить подписку в приложение для ${platformInfo.label}`}
+                aria-label={t('keyModal.downloadFor', { platform: platformInfo.label })}
+                title={t('keyModal.downloadFor', { platform: platformInfo.label })}
               >
                 <PlatformIcon className={`w-6 h-6 sm:w-8 sm:h-8 ${getIconColorClass()} group-hover:scale-110 transition-transform flex-shrink-0`} />
                 <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
-                  Скачать для {platformInfo.label}
+                  {t('keyModal.downloadFor', { platform: platformInfo.label })}
                 </span>
                 <ExternalLink size={18} className="sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
               </a>
@@ -252,12 +254,12 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 <a
                   href={`happ://add/${subscriptionLink}`}
                   className="w-full flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg sm:rounded-xl transition-all min-h-[44px] touch-manipulation"
-                  aria-label="Добавить подписку в установленное приложение HAPP Proxy"
-                  title="Добавить подписку в установленное приложение HAPP Proxy"
+                  aria-label={t('keyModal.addSubscription')}
+                  title={t('keyModal.addSubscription')}
                 >
                   <Globe size={18} className="sm:w-5 sm:h-5 text-white flex-shrink-0" />
                   <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
-                    Добавить подписку в приложение
+                    {t('keyModal.addSubscription')}
                   </span>
                 </a>
               )}
@@ -269,15 +271,15 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             <div className="space-y-2 sm:space-y-3 pt-2 border-t border-slate-800">
               <h4 className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base flex items-center gap-2">
                 <Download size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                <span>Скачайте приложение на свое устройство</span>
+                <span>{t('keyModal.downloadApp')}</span>
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 {/* Windows */}
                 <a
                   href={getAppLink('windows')}
                   className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                  aria-label="Добавить подписку в приложение для Windows"
-                  title="Добавить подписку в приложение для Windows"
+                  aria-label={t('keyModal.downloadFor', { platform: 'Windows' })}
+                  title={t('keyModal.downloadFor', { platform: 'Windows' })}
                 >
                   <Monitor className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400 group-hover:scale-110 transition-transform flex-shrink-0" />
                   <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Windows</span>
@@ -288,8 +290,8 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 <a
                   href={getAppLink('android')}
                   className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                  aria-label="Добавить подписку в приложение для Android"
-                  title="Добавить подписку в приложение для Android"
+                  aria-label={t('keyModal.downloadFor', { platform: 'Android' })}
+                  title={t('keyModal.downloadFor', { platform: 'Android' })}
                 >
                   <Smartphone className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 group-hover:scale-110 transition-transform flex-shrink-0" />
                   <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Android</span>
@@ -300,8 +302,8 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 <a
                   href={getAppLink('ios')}
                   className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                  aria-label="Добавить подписку в приложение для iOS"
-                  title="Добавить подписку в приложение для iOS"
+                  aria-label={t('keyModal.downloadFor', { platform: 'iOS' })}
+                  title={t('keyModal.downloadFor', { platform: 'iOS' })}
                 >
                   <Apple className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                   <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">iOS</span>
@@ -312,8 +314,8 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 <a
                   href={getAppLink('macos')}
                   className="btn-icon-only-mobile flex flex-col items-center justify-center gap-1 sm:gap-2 p-3 sm:p-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-lg sm:rounded-xl transition-all group min-h-[44px] touch-manipulation"
-                  aria-label="Добавить подписку в приложение для macOS"
-                  title="Добавить подписку в приложение для macOS"
+                  aria-label={t('keyModal.downloadFor', { platform: 'macOS' })}
+                  title={t('keyModal.downloadFor', { platform: 'macOS' })}
                 >
                   <Laptop className="w-6 h-6 sm:w-8 sm:h-8 text-gray-300 group-hover:scale-110 transition-transform flex-shrink-0" />
                   <span className="btn-text text-white font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">macOS</span>
@@ -326,12 +328,12 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 <a
                   href={`happ://add/${subscriptionLink}`}
                   className="w-full flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg sm:rounded-xl transition-all min-h-[44px] touch-manipulation mt-3"
-                  aria-label="Добавить подписку в установленное приложение HAPP Proxy"
-                  title="Добавить подписку в установленное приложение HAPP Proxy"
+                  aria-label={t('keyModal.addSubscription')}
+                  title={t('keyModal.addSubscription')}
                 >
                   <Globe size={18} className="sm:w-5 sm:h-5 text-white flex-shrink-0" />
                   <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">
-                    Добавить подписку в приложение
+                    {t('keyModal.addSubscription')}
                   </span>
                 </a>
               )}
@@ -339,18 +341,18 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           )}
           <div className="pt-3 sm:pt-4 border-t border-slate-800 space-y-2">
             <p className="text-slate-400 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
-              <strong className="text-slate-300">План:</strong> {user.plan === 'premium' ? 'Премиум' : 'Бесплатный'}
+              <strong className="text-slate-300">{t('app.plan')}</strong> {user.plan === 'premium' ? t('app.premium') : t('app.free')}
             </p>
             {(clientStats?.expiryTime || user.expiresAt) && (
               <p className="text-slate-400 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
-                <strong className="text-slate-300">Истекает:</strong>{' '}
+                <strong className="text-slate-300">{t('app.expires')}</strong>{' '}
                 {clientStats?.expiryTime && clientStats.expiryTime > 0
                   ? formatDate(clientStats.expiryTime)
                   : user.expiresAt
                   ? formatDate(user.expiresAt)
-                  : 'Не ограничен'}
+                  : t('app.unlimited')}
                 {clientStats?.expiryTime && (
-                  <span className="text-slate-500 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs ml-1">(из 3x-ui)</span>
+                  <span className="text-slate-500 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs ml-1">{t('app.from3xui')}</span>
                 )}
               </p>
             )}

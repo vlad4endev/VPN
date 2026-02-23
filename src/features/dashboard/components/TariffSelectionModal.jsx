@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { X, Check, Loader2, AlertCircle, Clock, Tag } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import logger from '../../../shared/utils/logger.js'
+import i18n from '../../../i18n'
 
 const TariffSelectionModal = ({ 
   tariff, 
@@ -22,6 +24,7 @@ const TariffSelectionModal = ({
   const [promoLoading, setPromoLoading] = useState(false)
   const [promoError, setPromoError] = useState(null)
 
+  const { t } = useTranslation()
   const isSuper = tariff?.name?.toLowerCase() === 'super' || tariff?.plan?.toLowerCase() === 'super'
   const isMulti = tariff?.name?.toLowerCase() === 'multi' || tariff?.plan?.toLowerCase() === 'multi'
 
@@ -60,7 +63,7 @@ const TariffSelectionModal = ({
   const handleApplyPromo = async () => {
     const code = promoCode.trim().toUpperCase()
     if (!code) {
-      setPromoError('Введите промокод')
+      setPromoError(t('tariff.promoPlaceholder'))
       setPromoData(null)
       return
     }
@@ -80,11 +83,11 @@ const TariffSelectionModal = ({
         setPromoError(null)
       } else {
         setPromoData(null)
-        setPromoError(data.message || 'Промокод не найден')
+        setPromoError(data.message || t('tariff.promoNotFound'))
       }
     } catch (err) {
       setPromoData(null)
-      setPromoError('Ошибка проверки промокода')
+      setPromoError(t('tariff.promoError'))
     } finally {
       setPromoLoading(false)
     }
@@ -144,7 +147,7 @@ const TariffSelectionModal = ({
 
     if (!onConfirm || typeof onConfirm !== 'function') {
       logger.error('TariffSelectionModal', 'onConfirm не является функцией', { type: typeof onConfirm })
-      alert('Ошибка: обработчик подтверждения не настроен')
+      alert(i18n.t('tariff.handlerError'))
       return
     }
 
@@ -152,7 +155,7 @@ const TariffSelectionModal = ({
       onConfirm(subscriptionData)
     } catch (error) {
       logger.error('TariffSelectionModal', 'Ошибка при вызове onConfirm', null, error)
-      alert('Ошибка при обработке выбора: ' + error.message)
+      alert(i18n.t('tariff.processError') + ' ' + error.message)
     }
   }
 
@@ -188,13 +191,13 @@ const TariffSelectionModal = ({
     // Вызываем обработчик напрямую
     if (!onConfirm) {
       logger.error('TariffSelectionModal', 'onConfirm не передан в handlePayLater')
-      alert('Ошибка: обработчик подтверждения не настроен. Обратитесь к администратору.')
+      alert(i18n.t('tariff.handlerError') + ' ' + i18n.t('tariff.contactAdmin'))
       return
     }
     
     if (typeof onConfirm !== 'function') {
       logger.error('TariffSelectionModal', 'onConfirm не является функцией в handlePayLater', { type: typeof onConfirm })
-      alert('Ошибка: обработчик подтверждения имеет неправильный тип. Обратитесь к администратору.')
+      alert(i18n.t('tariff.handlerError') + ' ' + i18n.t('tariff.contactAdmin'))
       return
     }
     
@@ -212,14 +215,14 @@ const TariffSelectionModal = ({
           })
           .catch((error) => {
             logger.error('TariffSelectionModal', 'Ошибка в Promise onConfirm (pay_later)', null, error)
-            alert('Ошибка при обработке: ' + (error.message || 'Неизвестная ошибка'))
+            alert(i18n.t('tariff.processError') + ' ' + (error.message || i18n.t('tariff.unknownError')))
           })
       } else {
         logger.debug('TariffSelectionModal', 'onConfirm вызван (не Promise, pay_later)')
       }
     } catch (error) {
       logger.error('TariffSelectionModal', 'Синхронная ошибка при вызове onConfirm (pay_later)', null, error)
-      alert('Ошибка при обработке выбора: ' + (error.message || 'Неизвестная ошибка'))
+      alert(i18n.t('tariff.processError') + ' ' + (error.message || i18n.t('tariff.unknownError')))
     }
   }
 
@@ -256,13 +259,13 @@ const TariffSelectionModal = ({
     // Вызываем обработчик напрямую
     if (!onConfirm) {
       logger.error('TariffSelectionModal', 'onConfirm не передан в handlePayNow')
-      alert('Ошибка: обработчик подтверждения не настроен. Обратитесь к администратору.')
+      alert(i18n.t('tariff.handlerError') + ' ' + i18n.t('tariff.contactAdmin'))
       return
     }
     
     if (typeof onConfirm !== 'function') {
       logger.error('TariffSelectionModal', 'onConfirm не является функцией в handlePayNow', { type: typeof onConfirm })
-      alert('Ошибка: обработчик подтверждения имеет неправильный тип. Обратитесь к администратору.')
+      alert(i18n.t('tariff.handlerError') + ' ' + i18n.t('tariff.contactAdmin'))
       return
     }
     
@@ -280,14 +283,14 @@ const TariffSelectionModal = ({
           })
           .catch((error) => {
             logger.error('TariffSelectionModal', 'Ошибка в Promise onConfirm (pay_now)', null, error)
-            alert('Ошибка при обработке: ' + (error.message || 'Неизвестная ошибка'))
+            alert(i18n.t('tariff.processError') + ' ' + (error.message || i18n.t('tariff.unknownError')))
           })
       } else {
         logger.debug('TariffSelectionModal', 'onConfirm вызван (не Promise, pay_now)')
       }
     } catch (error) {
       logger.error('TariffSelectionModal', 'Синхронная ошибка при вызове onConfirm (pay_now)', null, error)
-      alert('Ошибка при обработке выбора: ' + (error.message || 'Неизвестная ошибка'))
+      alert(i18n.t('tariff.processError') + ' ' + (error.message || i18n.t('tariff.unknownError')))
     }
   }
 
@@ -304,13 +307,13 @@ const TariffSelectionModal = ({
       >
         <div className="p-3 sm:p-4 md:p-6 border-b border-slate-800 flex justify-between items-center gap-3">
           <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.25rem)] sm:text-xl font-bold text-white flex-1 min-w-0">
-            Выбор тарифа {tariff?.name}
+            {t('tariff.selectTariffTitle', { name: tariff?.name })}
           </h3>
           <button 
             onClick={handleCancel}
             disabled={isLoading}
             className="p-2 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
-            aria-label="Закрыть"
+            aria-label={t('common.close')}
           >
             <X size={20} className="sm:w-6 sm:h-6 text-slate-400" />
           </button>
@@ -322,7 +325,7 @@ const TariffSelectionModal = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
-                  Количество устройств
+                  {t('tariff.devicesCount')}
                 </label>
                 <div className="grid grid-cols-5 gap-2">
                   {[1, 2, 3, 4, 5].map((num) => (
@@ -351,14 +354,14 @@ const TariffSelectionModal = ({
 
               <div>
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
-                  Период оплаты
+                  {t('tariff.period')}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
-                    { months: 1, label: '1 месяц' },
-                    { months: 3, label: '3 месяца' },
-                    { months: 6, label: '6 месяцев' },
-                    { months: 12, label: 'Год', badge: '−10%' },
+                    { months: 1, label: t('tariff.month1') },
+                    { months: 3, label: t('tariff.months3') },
+                    { months: 6, label: t('tariff.months6') },
+                    { months: 12, label: t('tariff.year'), badge: t('tariff.discount10') },
                   ].map((option) => (
                     <button
                       key={option.months}
@@ -390,13 +393,13 @@ const TariffSelectionModal = ({
 
               {/* Промокод */}
               <div>
-                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">Промокод</label>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">{t('tariff.promocode')}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={promoCode}
                     onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(null) }}
-                    placeholder="Введите код"
+                    placeholder={t('tariff.promoPlaceholder')}
                     disabled={isLoading || confirmed}
                     className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   />
@@ -407,10 +410,10 @@ const TariffSelectionModal = ({
                     className="min-h-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg font-medium text-slate-200 flex items-center gap-2"
                   >
                     {promoLoading ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
-                    <span>Применить</span>
+                    <span>{t('tariff.apply')}</span>
                   </button>
                   {promoData?.valid && (
-                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label="Убрать промокод">
+                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label={t('tariff.removePromo')}>
                       <X size={18} />
                     </button>
                   )}
@@ -425,41 +428,36 @@ const TariffSelectionModal = ({
 
               <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Цена за устройство (мес.):</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.pricePerDevice')}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{devicePrice} ₽</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Количество устройств:</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.devicesCountLabel')}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{selectedDevices}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Период:</span>
-                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
-                    {selectedPeriod === 1 ? '1 месяц' :
-                     selectedPeriod === 3 ? '3 месяца' :
-                     selectedPeriod === 6 ? '6 месяцев' :
-                     'Год'}
-                  </span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.periodLabel')}</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}</span>
                 </div>
                 <div className="flex justify-between items-center flex-wrap gap-1">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">Стоимость ({selectedPeriod} {selectedPeriod === 1 ? 'месяц' : selectedPeriod < 5 ? 'месяца' : 'месяцев'}):</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">{t('tariff.costWithPeriod', { count: selectedPeriod, monthWord: selectedPeriod === 1 ? t('tariff.month_one') : selectedPeriod < 5 ? t('tariff.month_few') : t('tariff.month_many') })}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{totalMonthlyPrice.toFixed(2)} ₽</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between items-center text-green-400">
-                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
+                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.discountPercent', { percent: Math.round(discount * 100) })}</span>
                     <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{effectiveDiscountAmount.toFixed(2)} ₽</span>
                   </div>
                 )}
                 <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
-                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Итого:</span>
+                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">{t('tariff.total')}</span>
                   <span className="text-blue-400 font-bold text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] sm:text-2xl">{totalPrice.toFixed(2)} ₽</span>
                 </div>
               </div>
 
               {!confirmed && (
                 <p className="text-slate-400 text-sm text-center">
-                  Нажмите "Подтвердить" для продолжения
+                  {t('tariff.confirmHint')}
                 </p>
               )}
             </div>
@@ -470,14 +468,14 @@ const TariffSelectionModal = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
-                  Период оплаты
+                  {t('tariff.period')}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
-                    { months: 1, label: '1 месяц' },
-                    { months: 3, label: '3 месяца' },
-                    { months: 6, label: '6 месяцев' },
-                    { months: 12, label: 'Год', badge: '−10%' },
+                    { months: 1, label: t('tariff.month1') },
+                    { months: 3, label: t('tariff.months3') },
+                    { months: 6, label: t('tariff.months6') },
+                    { months: 12, label: t('tariff.year'), badge: t('tariff.discount10') },
                   ].map((option) => (
                     <button
                       key={option.months}
@@ -509,13 +507,13 @@ const TariffSelectionModal = ({
 
               {/* Промокод для MULTI */}
               <div>
-                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">Промокод</label>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">{t('tariff.promocode')}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={promoCode}
                     onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(null) }}
-                    placeholder="Введите код"
+                    placeholder={t('tariff.promoPlaceholder')}
                     disabled={isLoading || confirmed}
                     className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   />
@@ -526,10 +524,10 @@ const TariffSelectionModal = ({
                     className="min-h-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg font-medium text-slate-200 flex items-center gap-2"
                   >
                     {promoLoading ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
-                    <span>Применить</span>
+                    <span>{t('tariff.apply')}</span>
                   </button>
                   {promoData?.valid && (
-                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label="Убрать промокод">
+                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label={t('tariff.removePromo')}>
                       <X size={18} />
                     </button>
                   )}
@@ -540,34 +538,29 @@ const TariffSelectionModal = ({
 
               <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Тариф:</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.tariffLabel')}</span>
                   <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{tariff?.name}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Цена за месяц:</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.pricePerMonth')}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiBasePrice} ₽</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Период:</span>
-                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">
-                    {selectedPeriod === 1 ? '1 месяц' :
-                     selectedPeriod === 3 ? '3 месяца' :
-                     selectedPeriod === 6 ? '6 месяцев' :
-                     'Год'}
-                  </span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.periodLabel')}</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}</span>
                 </div>
                 <div className="flex justify-between items-center flex-wrap gap-1">
-                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">Стоимость ({selectedPeriod} {selectedPeriod === 1 ? 'месяц' : selectedPeriod < 5 ? 'месяца' : 'месяцев'}):</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">{t('tariff.costWithPeriod', { count: selectedPeriod, monthWord: selectedPeriod === 1 ? t('tariff.month_one') : selectedPeriod < 5 ? t('tariff.month_few') : t('tariff.month_many') })}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiTotalMonthlyPrice.toFixed(2)} ₽</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between items-center text-green-400">
-                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Скидка ({Math.round(discount * 100)}%):</span>
+                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.discountPercent', { percent: Math.round(discount * 100) })}</span>
                     <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{effectiveDiscountAmount.toFixed(2)} ₽</span>
                   </div>
                 )}
                 <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
-                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">Итого:</span>
+                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">{t('tariff.total')}</span>
                   <span className="text-blue-400 font-bold text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] sm:text-2xl">{totalPrice.toFixed(2)} ₽</span>
                 </div>
               </div>
@@ -576,17 +569,17 @@ const TariffSelectionModal = ({
                 <div className="bg-blue-900/20 border border-blue-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
                   <div className="flex items-center gap-2 text-blue-400 mb-2">
                     <AlertCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Доступные серверы</span>
+                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('tariff.availableServers')}</span>
                   </div>
                   <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">
-                    Найдено {multiServers.length} {multiServers.length === 1 ? 'сервер' : multiServers.length < 5 ? 'сервера' : 'серверов'} с отметкой MULTI
+                    {t('tariff.serversFound', { count: multiServers.length, word: multiServers.length === 1 ? t('tariff.server_one') : multiServers.length < 5 ? t('tariff.server_few') : t('tariff.server_many') })}
                   </p>
                 </div>
               )}
 
               {!confirmed && (
                 <p className="text-slate-400 text-sm text-center">
-                  Нажмите "Подтвердить" для продолжения
+                  {t('tariff.confirmHint')}
                 </p>
               )}
             </div>
@@ -597,7 +590,7 @@ const TariffSelectionModal = ({
             <div className="bg-blue-900/20 border border-blue-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
               <div className="flex items-center gap-2 text-blue-400 mb-2">
                 <Check size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Подтверждение выбора</span>
+                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('tariff.confirmChoice')}</span>
               </div>
               <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm mb-3 sm:mb-4 break-words">
                 Вы подтверждаете выбор тарифа "{tariff?.name}" 
@@ -626,27 +619,27 @@ const TariffSelectionModal = ({
               
               {/* Выбор режима оплаты */}
               <div className="space-y-2">
-                <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs font-medium mb-2">Выберите способ оплаты:</p>
+                <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs font-medium mb-2">{t('tariff.choosePaymentMethod')}</p>
                 <button
                   onClick={handlePayNow}
                   disabled={isLoading}
                   className="w-full min-h-[44px] px-4 py-3 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
-                  aria-label="Оплатить сейчас"
+                  aria-label={t('tariff.payNowAria')}
                 >
                   <Check size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span>Оплатить сейчас</span>
+                  <span>{t('tariff.payNow')}</span>
                 </button>
                 <button
                   onClick={handlePayLater}
                   disabled={isLoading}
                   className="w-full min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
-                  aria-label="Оплатить позже, тест 24 часа"
-                >
-                  <Clock size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                  <span>Оплатить позже (тест 24 часа)</span>
+aria-label={t('tariff.payLaterTestAria')}
+                  >
+                    <Clock size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <span>{t('tariff.payLaterTest')}</span>
                 </button>
                 <p className="text-slate-500 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center mt-2 break-words">
-                  При выборе "Оплатить позже" вы получите доступ на 24 часа для тестирования
+                  {t('tariff.payLaterHint')}
                 </p>
               </div>
             </div>
@@ -656,12 +649,10 @@ const TariffSelectionModal = ({
             <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
               <div className="flex items-center gap-2 text-yellow-400 mb-2">
                 <Clock size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">Тестовый период будет активирован</span>
+                <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('tariff.trialActivated')}</span>
               </div>
               <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">
-                После подтверждения вам будет предоставлен тестовый период на 24 часа. 
-                В течение этого времени VPN будет работать бесплатно. 
-                После окончания тестового периода подписка будет приостановлена до оплаты.
+                {t('tariff.trialNoteText')}
               </p>
             </div>
           )}
@@ -676,24 +667,24 @@ const TariffSelectionModal = ({
                   (isSuper && selectedDevices < 1)
                 }
                 className="min-h-[44px] flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
-                aria-label="Подтвердить"
+                aria-label={t('tariff.confirmAria')}
               >
                 {isLoading ? (
                   <>
                     <Loader2 size={18} className="w-4 h-4 sm:w-5 sm:h-5 animate-spin flex-shrink-0" />
-                    <span>Оформление...</span>
+                    <span>{t('tariff.processingBtn')}</span>
                   </>
                 ) : (
-                  <span>Подтвердить</span>
+                  <span>{t('tariff.confirmBtn')}</span>
                 )}
               </button>
               <button
                 onClick={handleCancel}
                 disabled={isLoading}
                 className="min-h-[44px] flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center touch-manipulation"
-                aria-label="Отмена"
+                aria-label={t('common.cancel')}
               >
-                <span>Отмена</span>
+                <span>{t('common.cancel')}</span>
               </button>
             </div>
           )}
@@ -708,9 +699,9 @@ const TariffSelectionModal = ({
                 }}
                 disabled={isLoading}
                 className="min-h-[44px] flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
-                aria-label="Назад"
-              >
-                Назад
+aria-label={t('common.back')}
+                >
+                  {t('common.back')}
               </button>
             </div>
           )}

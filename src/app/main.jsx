@@ -5,6 +5,7 @@ import { queryClient } from '../lib/react-query/config.js'
 import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
 import App from './App.jsx'
 import './index.css'
+import '../i18n'
 import logger from '../shared/utils/logger.js'
 import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
 

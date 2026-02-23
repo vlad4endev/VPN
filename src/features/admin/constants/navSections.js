@@ -1,60 +1,60 @@
 import { Users, MessageCircle, Megaphone, Server, DollarSign, CreditCard, Tag, Star, Link2, LayoutDashboard, Search, Send, AlertTriangle, Bot, TrendingDown } from 'lucide-react'
 
-/** Подразделы админ-панели: группа → пункты меню (единый источник правды для Sidebar и AdminPanel) */
+/** Подразделы админ-панели: группа → пункты меню (единый источник правды для Sidebar и AdminPanel). titleKey/labelKey — ключи i18n. */
 export const ADMIN_NAV_SECTIONS = [
   {
-    title: 'Главная',
+    titleKey: 'admin.sectionHome',
     items: [
-      { id: 'dashboard', label: 'Дашборд', icon: LayoutDashboard },
+      { id: 'dashboard', labelKey: 'admin.dashboard', icon: LayoutDashboard },
     ],
   },
   {
-    title: 'Пользователи и поддержка',
+    titleKey: 'admin.sectionUsersSupport',
     items: [
-      { id: 'users', label: 'Пользователи', icon: Users },
-      { id: 'tickets', label: 'Тикеты', icon: MessageCircle },
-      { id: 'notifications', label: 'Рассылка', icon: Megaphone },
+      { id: 'users', labelKey: 'admin.users', icon: Users },
+      { id: 'tickets', labelKey: 'admin.tickets', icon: MessageCircle },
+      { id: 'notifications', labelKey: 'admin.notifications', icon: Megaphone },
     ],
   },
   {
-    title: 'Настройки',
+    titleKey: 'admin.sectionSettings',
     items: [
-      { id: 'settings', label: 'Настройки', icon: Server },
-      { id: 'tariffs', label: 'Тарифы', icon: DollarSign },
+      { id: 'settings', labelKey: 'admin.settings', icon: Server },
+      { id: 'tariffs', labelKey: 'admin.tariffs', icon: DollarSign },
     ],
   },
   {
-    title: 'Финансы',
+    titleKey: 'admin.sectionFinance',
     items: [
-      { id: 'payments', label: 'Платежи', icon: CreditCard },
-      { id: 'promocodes', label: 'Промокоды', icon: Tag },
-      { id: 'reviews', label: 'Отзывы', icon: Star },
+      { id: 'payments', labelKey: 'admin.payments', icon: CreditCard },
+      { id: 'promocodes', labelKey: 'admin.promocodes', icon: Tag },
+      { id: 'reviews', labelKey: 'admin.reviews', icon: Star },
     ],
   },
   {
-    title: 'Аналитика',
+    titleKey: 'admin.sectionAnalytics',
     items: [
-      { id: 'analytics-funnel', label: 'AI-Воронка', icon: TrendingDown },
+      { id: 'analytics-funnel', labelKey: 'admin.analyticsFunnel', icon: TrendingDown },
     ],
   },
   {
-    title: 'Маркетинг и SEO',
+    titleKey: 'admin.sectionMarketing',
     items: [
-      { id: 'seo', label: 'SEO', icon: Search },
+      { id: 'seo', labelKey: 'admin.seo', icon: Search },
     ],
   },
   {
-    title: 'Интеграции',
+    titleKey: 'admin.sectionIntegrations',
     items: [
-      { id: 'n8n', label: 'n8n', icon: Link2 },
-      { id: 'telegram', label: 'Telegram', icon: Send },
-      { id: 'ai', label: 'ИИ', icon: Bot },
+      { id: 'n8n', labelKey: 'admin.n8n', icon: Link2 },
+      { id: 'telegram', labelKey: 'admin.telegram', icon: Send },
+      { id: 'ai', labelKey: 'admin.ai', icon: Bot },
     ],
   },
   {
-    title: 'Мониторинг',
+    titleKey: 'admin.sectionMonitoring',
     items: [
-      { id: 'errors', label: 'Ошибки', icon: AlertTriangle },
+      { id: 'errors', labelKey: 'admin.errors', icon: AlertTriangle },
     ],
   },
 ]
@@ -71,15 +71,14 @@ export const ADMIN_MOBILE_OTHER_ITEMS = ADMIN_NAV_ITEMS.filter(
 )
 
 /**
- * Возвращает заголовок раздела и название пункта по id таба (для шапки контента)
- * @param {string} tabId
- * @returns {{ sectionTitle: string, itemLabel: string } | null}
+ * Возвращает заголовок раздела и название пункта по id таба (для шапки контента).
+ * Возвращает ключи i18n: sectionTitleKey, itemLabelKey — вызывающая сторона должна использовать t(sectionTitleKey), t(itemLabelKey).
  */
 export function getAdminSectionByTabId(tabId) {
   if (!tabId) return null
   for (const section of ADMIN_NAV_SECTIONS) {
     const item = section.items.find((i) => i.id === tabId)
-    if (item) return { sectionTitle: section.title, itemLabel: item.label }
+    if (item) return { sectionTitleKey: section.titleKey, itemLabelKey: item.labelKey }
   }
   return null
 }

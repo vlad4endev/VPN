@@ -2,6 +2,12 @@ const MS_DAY = 24 * 60 * 60 * 1000
 const EXPIRING_SOON_DAYS = 2   // Показывать «Истекает через X дней», если осталось меньше 2 дней
 const GRACE_DAYS_AFTER_EXPIRY = 5 // «expired» и «Нет подписки» только через 5 дней после просрочки
 
+import i18n from '../../i18n'
+
+function t (key, opts = {}) {
+  return i18n.t(key, opts)
+}
+
 /**
  * Нормализует дату окончания в миллисекунды.
  * Поддерживает: number (ms или секунды), Date, ISO-строка, Firestore Timestamp.
@@ -38,19 +44,19 @@ export function getStatusFromExpiry (expiryTime, now = Date.now()) {
   if (msLeft > 0) {
     if (daysLeft < EXPIRING_SOON_DAYS) {
       const d = Math.ceil(daysLeft)
-      const dayWord = d === 1 ? 'день' : d < 5 ? 'дня' : 'дней'
-      return { status: 'expiring_soon', label: `Истекает через ${d} ${dayWord}`, color: 'text-yellow-400' }
+      const dayWord = d === 1 ? t('dashboard.day_one') : d < 5 ? t('dashboard.day_few') : t('dashboard.day_many')
+      return { status: 'expiring_soon', label: t('status.expiringInDays', { count: d, dayWord }), color: 'text-yellow-400' }
     }
-    return { status: 'active', label: 'Активен', color: 'text-green-400' }
+    return { status: 'active', label: t('status.active'), color: 'text-green-400' }
   }
 
   if (daysPast <= GRACE_DAYS_AFTER_EXPIRY) {
     const d = Math.ceil(daysPast)
-    const dayWord = d === 1 ? 'день' : d < 5 ? 'дня' : 'дней'
-    return { status: 'grace', label: `Просрочено ${d} ${dayWord}`, color: 'text-orange-400' }
+    const dayWord = d === 1 ? t('dashboard.day_one') : d < 5 ? t('dashboard.day_few') : t('dashboard.day_many')
+    return { status: 'grace', label: t('status.graceDays', { count: d, dayWord }), color: 'text-orange-400' }
   }
 
-  return { status: 'expired', label: 'Истек', color: 'text-red-400' }
+  return { status: 'expired', label: t('status.expired'), color: 'text-red-400' }
 }
 
 /**
@@ -71,7 +77,7 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
   const now = Date.now()
 
   if (!user.uuid || user.uuid.trim() === '') {
-    return { status: 'no-key', label: 'Нет ключа', color: 'text-slate-400' }
+    return { status: 'no-key', label: t('status.noKey'), color: 'text-slate-400' }
   }
 
   function getExpiryMs () {
@@ -88,7 +94,7 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
 
     switch (subStatus) {
       case 'pending_payment':
-        return { status: 'pending', label: 'Ожидает оплаты', color: 'text-yellow-400' }
+        return { status: 'pending', label: t('status.pendingPayment'), color: 'text-yellow-400' }
 
       case 'test_period': {
         const testEndDate = subscription.testPeriodEndDate || user.testPeriodEndDate
@@ -96,33 +102,33 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
         if (testEnd != null && testEnd < now) {
           const byDate = getStatusFromExpiry(testEnd, now)
           if (byDate) return byDate
-          return { status: 'grace', label: 'Просрочено', color: 'text-orange-400' }
+          return { status: 'grace', label: t('status.overdue'), color: 'text-orange-400' }
         }
         const hoursLeft = testEnd ? Math.floor((testEnd - now) / (60 * 60 * 1000)) : 0
         const minutesLeft = testEnd ? Math.floor(((testEnd - now) % (60 * 60 * 1000)) / (60 * 1000)) : 0
-        return { status: 'test_period', label: `Тест (осталось ${hoursLeft}ч ${minutesLeft}м)`, color: 'text-yellow-400' }
+        return { status: 'test_period', label: t('status.testRemaining', { hours: hoursLeft, minutes: minutesLeft }), color: 'text-yellow-400' }
       }
 
       case 'activating':
-        return { status: 'activating', label: 'Активация...', color: 'text-blue-400' }
+        return { status: 'activating', label: t('status.activating'), color: 'text-blue-400' }
 
       case 'active':
-        if (expiryMs != null) return getStatusFromExpiry(expiryMs, now) || { status: 'active', label: 'Активен', color: 'text-green-400' }
-        return { status: 'active', label: 'Активен', color: 'text-green-400' }
+        if (expiryMs != null) return getStatusFromExpiry(expiryMs, now) || { status: 'active', label: t('status.active'), color: 'text-green-400' }
+        return { status: 'active', label: t('status.active'), color: 'text-green-400' }
 
       case 'expired':
         if (expiryMs != null) return getStatusFromExpiry(expiryMs, now)
-        return { status: 'expired', label: 'Истек', color: 'text-red-400' }
+        return { status: 'expired', label: t('status.expired'), color: 'text-red-400' }
 
       case 'cancelled':
-        return { status: 'cancelled', label: 'Отменена', color: 'text-slate-400' }
+        return { status: 'cancelled', label: t('status.cancelled'), color: 'text-slate-400' }
 
       case 'failed':
-        return { status: 'failed', label: 'Ошибка активации', color: 'text-red-400' }
+        return { status: 'failed', label: t('status.activationError'), color: 'text-red-400' }
 
       default:
         if (expiryMs != null) return getStatusFromExpiry(expiryMs, now)
-        return { status: 'unknown', label: 'Неизвестный статус', color: 'text-orange-400' }
+        return { status: 'unknown', label: t('status.unknown'), color: 'text-orange-400' }
     }
   }
 
@@ -131,7 +137,7 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
   const hasPaymentStatus = user.paymentStatus && user.paymentStatus.trim() !== ''
 
   if (!hasExpiresAt && !hasTariffId && !hasPaymentStatus) {
-    return { status: 'no-subscription', label: 'Нет подписки', color: 'text-slate-400' }
+    return { status: 'no-subscription', label: t('status.noSubscription'), color: 'text-slate-400' }
   }
 
   if (user.paymentStatus === 'test_period') {
@@ -143,7 +149,7 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
     if (user.testPeriodEndDate && user.testPeriodEndDate > now) {
       const hoursLeft = Math.floor((user.testPeriodEndDate - now) / (60 * 60 * 1000))
       const minutesLeft = Math.floor(((user.testPeriodEndDate - now) % (60 * 60 * 1000)) / (60 * 1000))
-      return { status: 'test_period', label: `Тест (осталось ${hoursLeft}ч ${minutesLeft}м)`, color: 'text-yellow-400' }
+      return { status: 'test_period', label: t('status.testRemaining', { hours: hoursLeft, minutes: minutesLeft }), color: 'text-yellow-400' }
     }
   }
 
@@ -151,7 +157,7 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
     return getStatusFromExpiry(expiryMs, now)
   }
   if (user.paymentStatus === 'unpaid') {
-    return { status: 'unpaid', label: 'Не оплачено', color: 'text-red-400' }
+    return { status: 'unpaid', label: t('status.unpaid'), color: 'text-red-400' }
   }
 
   if (expiryMs != null) {
@@ -159,9 +165,9 @@ export const getUserStatus = (user, clientStats = null, subscription = null) => 
   }
 
   if (hasTariffId || hasPaymentStatus) {
-    return { status: 'inactive', label: 'Неактивна', color: 'text-orange-400' }
+    return { status: 'inactive', label: t('status.inactive'), color: 'text-orange-400' }
   }
 
-  return { status: 'no-subscription', label: 'Нет подписки', color: 'text-slate-400' }
+  return { status: 'no-subscription', label: t('status.noSubscription'), color: 'text-slate-400' }
 }
 

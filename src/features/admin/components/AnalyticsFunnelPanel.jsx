@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TrendingDown, Loader2, AlertCircle, Users, Target, Zap, UserX, Send, Sparkles, X, Copy, Percent, Gift } from 'lucide-react'
 import { getFunnel, refreshMetrics, sendChurnOffer, getAiStrategy, assignDiscount, sendUserTelegram, runAiFunnelAnalysis } from '../services/analyticsFunnelService.js'
 import { notificationsService } from '../../notifications/services/notificationsService.js'
@@ -34,15 +35,15 @@ function displayName(row, users = []) {
 }
 
 /** Текст подписки: нет / истекла N дн. назад */
-function subscriptionStatus(row) {
+function subscriptionStatus(row, t) {
   const exp = row.subscriptionExpiresAt
-  if (!exp) return { text: 'Нет подписки', type: 'none' }
+  if (!exp) return { text: t('status.noSubscription'), type: 'none' }
   const ms = new Date(exp).getTime()
   if (Number.isNaN(ms)) return { text: '—', type: 'unknown' }
   const now = Date.now()
-  if (ms >= now) return { text: 'Активна', type: 'active' }
+  if (ms >= now) return { text: t('status.active'), type: 'active' }
   const days = Math.floor((now - ms) / (24 * 60 * 60 * 1000))
-  return { text: `Истекла ${days} дн.`, type: 'expired' }
+  return { text: t('admin.expiredDaysAgo', { count: days }), type: 'expired' }
 }
 
 /** Цвет churn по значению: высокий риск / средний / низкий */
@@ -61,6 +62,7 @@ function formatLTV(value) {
 }
 
 export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatDate, onCopy }) {
+  const { t } = useTranslation()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -394,7 +396,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
               </thead>
               <tbody>
                 {tableRows.map((row, idx) => {
-                  const sub = subscriptionStatus(row)
+                  const sub = subscriptionStatus(row, t)
                   const segment = showAiColumns ? (row.aiSegment ?? row.segment) : row.segment
                   const priorityScore = showAiColumns ? (row.aiPriorityScore ?? row.priorityScore) : row.priorityScore
                   const complexityIndex = row.complexityIndex

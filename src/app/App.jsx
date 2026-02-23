@@ -43,10 +43,13 @@ import { validateEmail } from '../features/auth/utils/validateEmail.js'
 import { validatePassword } from '../features/auth/utils/validatePassword.js'
 import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/constants/admin.js'
 import { APP_ID } from '../shared/constants/app.js'
+import ConfigErrorScreen from '../shared/components/ConfigErrorScreen.jsx'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
 import { resolveReferralCode, processReferralBonus, saveReferralCodePending, getReferralCodePending, getOrCreateReferralCode } from '../features/referral/services/referralService.js'
 import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -59,7 +62,7 @@ const appId = APP_ID
 // clientStats - опциональный параметр со статистикой из 3x-ui
 const getUserStatus = (user, clientStats = null) => {
   if (!user.uuid || user.uuid.trim() === '') {
-    return { status: 'no-key', label: 'Нет ключа', color: 'text-slate-400' }
+    return { status: 'no-key', label: i18n.t('status.noKey'), color: 'text-slate-400' }
   }
   
   const now = Date.now()
@@ -67,19 +70,16 @@ const getUserStatus = (user, clientStats = null) => {
   // Приоритет: сначала проверяем expiryTime из 3x-ui, затем из Firestore
   let expiryTime = null
   if (clientStats && clientStats.expiryTime) {
-    // expiryTime из 3x-ui в миллисекундах
     expiryTime = clientStats.expiryTime
   } else if (user.expiresAt) {
-    // expiryTime из Firestore
     expiryTime = user.expiresAt
   }
   
-  // Если срок истек - принудительно ставим статус 'Истек'
   if (expiryTime && expiryTime > 0 && expiryTime < now) {
-    return { status: 'expired', label: 'Истек', color: 'text-red-400' }
+    return { status: 'expired', label: i18n.t('status.expired'), color: 'text-red-400' }
   }
   
-  return { status: 'active', label: 'Активен', color: 'text-green-400' }
+  return { status: 'active', label: i18n.t('status.active'), color: 'text-green-400' }
 }
 
 // Функции форматирования и валидации теперь импортируются из утилит
@@ -87,50 +87,23 @@ const getUserStatus = (user, clientStats = null) => {
 // Валидация имени
 const validateName = (name) => {
   if (!name || name.trim() === '') {
-    return 'Имя обязательно для заполнения'
+    return i18n.t('validation.nameRequired')
   }
   
   if (name.trim().length < 2) {
-    return 'Имя должно содержать минимум 2 символа'
+    return i18n.t('validation.nameMinLength')
   }
   
   if (name.length > 100) {
-    return 'Имя слишком длинное (максимум 100 символов)'
+    return i18n.t('validation.nameMaxLength')
   }
   
-  // Проверяем, что имя содержит только буквы, пробелы и дефисы
   if (!/^[a-zA-Zа-яА-ЯёЁ\s-]+$/.test(name.trim())) {
-    return 'Имя может содержать только буквы, пробелы и дефисы'
+    return i18n.t('validation.nameInvalidChars')
   }
   
   return null
 }
-
-// Компонент ошибки конфигурации (вынесен наружу для предотвращения пересоздания)
-const ConfigErrorScreen = ({ configError }) => (
-  <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-    <div className="max-w-2xl w-full bg-slate-900 rounded-lg shadow-xl p-8 border border-red-800">
-      <div className="flex items-center gap-3 mb-4">
-        <AlertCircle className="w-8 h-8 text-red-400" />
-        <h1 className="text-2xl font-bold text-red-400">Ошибка конфигурации</h1>
-      </div>
-      <div className="bg-slate-800 rounded p-4 mb-4">
-        <pre className="text-slate-300 text-sm whitespace-pre-wrap font-mono">
-          {configError}
-        </pre>
-      </div>
-      <div className="text-slate-400 text-sm space-y-2">
-        <p><strong className="text-slate-300">Что делать:</strong></p>
-        <ol className="list-decimal list-inside space-y-1 ml-2">
-          <li>Создайте файл <code className="bg-slate-800 px-2 py-1 rounded">.env</code> в корне проекта</li>
-          <li>Скопируйте пример из <code className="bg-slate-800 px-2 py-1 rounded">.env.example</code> (если есть)</li>
-          <li>Заполните все переменные окружения своими значениями</li>
-          <li>Перезапустите приложение</li>
-        </ol>
-      </div>
-    </div>
-  </div>
-)
 
 // Компонент LoginForm вынесен в отдельный файл src/components/LoginForm.jsx
 
@@ -139,6 +112,7 @@ const DEFAULT_TELEGRAM_BOT_USERNAME = 'skypathvpn_bot'
 
 /** Модальное окно «Открыть приложение в Telegram» — показывается при нажатии «Войти через Telegram» без initData */
 const TelegramOpenModal = ({ open, url, onClose }) => {
+  const { t } = useTranslation()
   if (!open) return null
   const hasLink = !!url
   return (
@@ -148,15 +122,15 @@ const TelegramOpenModal = ({ open, url, onClose }) => {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-start gap-3 mb-4">
-          <h3 className="text-lg font-bold text-white">Вход через Telegram</h3>
+          <h3 className="text-lg font-bold text-white">{t('app.telegramTitle')}</h3>
           <button type="button" onClick={onClose} className="p-1.5 hover:bg-slate-800 rounded-full transition-colors text-slate-400">
             <X className="w-5 h-5" />
           </button>
         </div>
         <p className="text-slate-300 text-sm mb-5">
           {hasLink
-            ? 'Чтобы войти через Telegram, нажмите кнопку ниже — откроется приложение в Telegram. После открытия вы будете авторизованы автоматически.'
-            : 'Откройте приложение в Telegram по кнопке ниже или найдите бота в Telegram и запустите приложение из меню бота.'}
+            ? t('app.telegramBodyWithLink')
+            : t('app.telegramBodyNoLink')}
         </p>
         {url && (
           <a
@@ -165,7 +139,7 @@ const TelegramOpenModal = ({ open, url, onClose }) => {
             rel="noopener noreferrer"
             className="block w-full py-3 px-4 rounded-xl bg-[#0088cc] hover:bg-[#0077b5] text-white font-medium text-center transition-colors"
           >
-            Открыть в Telegram
+            {t('app.openInTelegram')}
           </a>
         )}
         <button
@@ -173,7 +147,7 @@ const TelegramOpenModal = ({ open, url, onClose }) => {
           onClick={onClose}
           className="mt-3 w-full py-2.5 text-slate-400 hover:text-white text-sm font-medium transition-colors"
         >
-          Закрыть
+          {t('common.close')}
         </button>
       </div>
     </div>
@@ -182,6 +156,7 @@ const TelegramOpenModal = ({ open, url, onClose }) => {
 
 // Компонент модального окна с ключом (вынесен наружу для предотвращения пересоздания)
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
+  const { t } = useTranslation()
   const [subscriptionLink, setSubscriptionLink] = useState(null)
   const [loadingLink, setLoadingLink] = useState(true)
   
@@ -272,15 +247,15 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       >
         <div className="p-4 sm:p-6 lg:p-8 border-b border-slate-800 flex justify-between items-center">
           <h3 className="text-xl font-bold text-white flex items-center gap-3">
-            <Globe size={22} className="text-blue-500" /> Нидерланды
+            <Globe size={22} className="text-blue-500" /> {t('app.netherlands')}
           </h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
             <X size={24} className="text-slate-400" />
-            </button>
+          </button>
           </div>
         <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6">
           <div className="space-y-2">
-            <p className="text-sm text-slate-400 font-medium">Статус:</p>
+            <p className="text-sm text-slate-400 font-medium">{t('app.status')}</p>
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold ${
               userStatus.status === 'active' ? 'bg-green-900/30 text-green-400' :
               userStatus.status === 'expired' ? 'bg-red-900/30 text-red-400' :
@@ -293,7 +268,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             </div>
           </div>
           <div className="space-y-2">
-            <p className="text-sm text-slate-400 font-medium">Ваша ссылка на подписку:</p>
+            <p className="text-sm text-slate-400 font-medium">{t('app.subscriptionLinkLabel')}</p>
             <div className="bg-black/40 border border-slate-800 p-5 rounded-3xl break-all font-mono text-xs text-blue-400 leading-relaxed ring-1 ring-blue-500/10">
               {subscriptionLink}
             </div>
@@ -302,22 +277,22 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                 onClick={() => onCopy(subscriptionLink)}
             className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-500 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-bold flex items-center justify-center gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-[0.98] touch-manipulation"
               >
-            <Copy size={20} /> Копировать ссылку
+            <Copy size={20} /> {t('app.copyLink')}
               </button>
           <div className="pt-4 border-t border-slate-800 space-y-2">
             <p className="text-slate-400 text-sm">
-              <strong className="text-slate-300">План:</strong> {user.plan === 'premium' ? 'Премиум' : 'Бесплатный'}
+              <strong className="text-slate-300">{t('app.plan')}</strong> {user.plan === 'premium' ? t('app.premium') : t('app.free')}
             </p>
             {(clientStats?.expiryTime || user.expiresAt) && (
               <p className="text-slate-400 text-sm">
-                <strong className="text-slate-300">Истекает:</strong>{' '}
+                <strong className="text-slate-300">{t('app.expires')}</strong>{' '}
                 {clientStats?.expiryTime && clientStats.expiryTime > 0
                   ? formatDate(clientStats.expiryTime)
                   : user.expiresAt
                   ? formatDate(user.expiresAt)
-                  : 'Не ограничен'}
+                  : t('app.unlimited')}
                 {clientStats?.expiryTime && (
-                  <span className="text-slate-500 text-xs ml-1">(из 3x-ui)</span>
+                  <span className="text-slate-500 text-xs ml-1">{t('app.from3xui')}</span>
                 )}
               </p>
             )}
@@ -329,7 +304,9 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
 }
 
 // Компонент Sidebar (вынесен наружу для предотвращения пересоздания)
-const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
+const Sidebar = ({ currentUser, view, onSetView, onLogout }) => {
+  const { t } = useTranslation()
+  return (
   <aside className="w-72 bg-slate-900/40 border-r border-slate-800/60 p-8 hidden lg:flex flex-col">
     <div className="flex items-center gap-4 mb-12 px-2 cursor-pointer" onClick={() => onSetView('welcome')}>
       <div className="bg-blue-600 p-2.5 rounded-2xl">
@@ -342,17 +319,18 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout }) => (
         onClick={() => onSetView(currentUser.role === 'admin' ? 'admin' : 'dashboard')}
         className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-bold ${view === 'dashboard' || view === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800/50'}`}
       >
-        <Activity size={20} /> <span>{currentUser.role === 'admin' ? 'Управление' : 'Кабинет'}</span>
+        <Activity size={20} /> <span>{currentUser.role === 'admin' ? t('app.manage') : t('app.cabinet')}</span>
       </button>
     </nav>
     <button 
       onClick={onLogout}
       className="flex items-center gap-4 px-6 py-4 text-slate-500 hover:text-red-400 transition-colors mt-auto font-bold"
     >
-      <LogOut size={20} /> Выйти
+      <LogOut size={20} /> {t('app.logout')}
     </button>
   </aside>
-)
+  )
+}
 
 /** Вызов useAdmin в корневом бандле, чтобы избежать «Invalid hook call» из-за двух копий React в админ-чанке.
  *  adminTab/setAdminTab должны приходить из родителя, чтобы контекст и UI (AdminPanel) использовали одно и то же состояние. */
@@ -1091,13 +1069,13 @@ export default function VPNServiceApp() {
           }
           if (!data.success) {
             logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка от сервера', { error: data.error, reason: data.reason })
-            setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
+            setError(data.error || i18n.t('app.telegramSignInFailed'))
           }
         })
         .then(() => {})
         .catch((err) => {
           logger.error(TMA_LOG, 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
-          setError(err?.message || 'Ошибка входа через Telegram')
+          setError(err?.message || i18n.t('app.telegramSignInError'))
         })
     }
 
@@ -1391,7 +1369,7 @@ export default function VPNServiceApp() {
     setSuccess('')
 
     if (!auth || !db) {
-      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      setError(i18n.t('app.authUnavailable'))
       return
     }
 
@@ -1399,7 +1377,7 @@ export default function VPNServiceApp() {
     const loginOrEmail = (formData.get('email') || formData.get('loginOrEmail') || e.target.querySelector('input[name="email"]')?.value || '').trim()
     const password = formData.get('password') || e.target.querySelector('input[type="password"]')?.value || ''
     if (!loginOrEmail) {
-      setError('Введите логин или email')
+      setError(i18n.t('app.enterLoginOrEmail'))
       return
     }
     const passwordError = validatePassword(password, false)
@@ -1428,7 +1406,7 @@ export default function VPNServiceApp() {
       
       if (!userData) {
         logger.warn('Auth', 'Данные пользователя не найдены в Firestore', { uid: firebaseUser.uid })
-        setError('Данные пользователя не найдены. Обратитесь к администратору.')
+        setError(i18n.t('app.userDataNotFound'))
         await signOut(auth)
         return
       }
@@ -1458,7 +1436,7 @@ export default function VPNServiceApp() {
       
       setCurrentUser(currentUserData)
       logger.info('Auth', 'Успешный вход', { email, uid: firebaseUser.uid, role: userData.role })
-        setSuccess('Вход выполнен успешно')
+        setSuccess(i18n.t('app.loginSuccess'))
         setLoginData(prev => ({ ...prev, email: '', password: '' }))
       setView(userData.role === 'admin' ? 'admin' : 'dashboard')
       // Устанавливаем вкладку "Подписки" после входа
@@ -1497,7 +1475,7 @@ export default function VPNServiceApp() {
     setSuccess('')
 
     if (!auth || !db) {
-      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      setError(i18n.t('app.authUnavailable'))
       return
     }
 
@@ -1515,7 +1493,7 @@ export default function VPNServiceApp() {
       }
     }
     if (!login || login.length < 2) {
-      setError('Логин обязателен (минимум 2 символа)')
+      setError(i18n.t('app.loginRequired'))
       return
     }
     const nameError = validateName(name)
@@ -1536,11 +1514,11 @@ export default function VPNServiceApp() {
       if (res.ok) {
         const data = await res.json()
         if (!data.loginAvailable) {
-          setError('Этот логин уже занят')
+          setError(i18n.t('app.loginTaken'))
           return
         }
         if (!data.emailAvailable) {
-          setError('Этот email уже зарегистрирован')
+          setError(i18n.t('app.emailRegistered'))
           return
         }
       }
@@ -1624,7 +1602,7 @@ export default function VPNServiceApp() {
       
       setCurrentUser(currentUserData)
       logger.info('Auth', 'Регистрация завершена успешно', { email, uid: firebaseUser.uid })
-      setSuccess('Регистрация выполнена успешно! Теперь вы можете получить ключ в личном кабинете.')
+      setSuccess(i18n.t('app.registerSuccess'))
         setLoginData({ email: '', login: '', password: '', name: '' })
       setView('dashboard')
       // Устанавливаем вкладку "Подписки" после регистрации
@@ -1769,7 +1747,7 @@ export default function VPNServiceApp() {
   // Вход через Google (popup): auth и provider создаём из того же firebase/auth (избегаем auth/argument-error при дублировании модуля)
   const handleGoogleSignIn = useCallback(async () => {
     if (!app || !db) {
-      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      setError(i18n.t('app.authUnavailable'))
       return
     }
     if (googleSignInLoading) {
@@ -1817,7 +1795,7 @@ export default function VPNServiceApp() {
   // Вход через Google через переход на страницу Google (обход ошибки «The requested action is invalid» при popup)
   const handleGoogleSignInRedirect = useCallback(() => {
     if (!app || !db) {
-      setError('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+      setError(i18n.t('app.authUnavailable'))
       return
     }
     if (googleSignInLoading) return
@@ -1840,10 +1818,10 @@ export default function VPNServiceApp() {
         setGoogleSignInLoading(true)
         try {
           await processGoogleSignInUser(result.user)
-          setSuccess('Вход выполнен успешно')
+          setSuccess(i18n.t('app.loginSuccess'))
         } catch (err) {
           logger.error('Auth', 'Ошибка после возврата с Google (redirect)', null, err)
-          setError(err?.message || 'Ошибка входа через Google.')
+          setError(err?.message || i18n.t('app.loginError'))
         } finally {
           setGoogleSignInLoading(false)
         }
@@ -1913,7 +1891,7 @@ export default function VPNServiceApp() {
       }
     } catch (err) {
       logger.error('TelegramAuth', 'Вход по кнопке: исключение', { message: err?.message }, err)
-      setError(err?.message || 'Ошибка входа через Telegram')
+      setError(err?.message || i18n.t('app.telegramSignInError'))
     } finally {
       setTelegramSignInLoading(false)
     }
@@ -1942,11 +1920,11 @@ export default function VPNServiceApp() {
           await signInWithCustomToken(auth, data.customToken)
         } else {
           logger.warn('TelegramAuth', 'Login Widget: ошибка', { error: data.error })
-          setError(data.error || 'Не удалось войти через Telegram')
+          setError(data.error || i18n.t('app.telegramSignInFailed'))
         }
       } catch (err) {
         logger.error('TelegramAuth', 'Login Widget: исключение', { message: err?.message }, err)
-        setError(err?.message || 'Ошибка входа через Telegram')
+        setError(err?.message || i18n.t('app.telegramSignInError'))
       } finally {
         setTelegramSignInLoading(false)
       }
