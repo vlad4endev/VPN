@@ -360,7 +360,7 @@ const UserCard = ({
         setDiscountTo(new Date(ms).toISOString().slice(0, 10))
       }
     }
-  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, user?.discount, user?.discountValidFrom, user?.discountValidTo, tariffs, getTrafficLimit])
+  }, [user?.id, user?.uuid, user?.name, user?.phone, user?.expiresAt, user?.trafficGB, user?.devices, user?.tariffId, user?.plan, user?.periodMonths, user?.paymentStatus, user?.testPeriodStartDate, user?.testPeriodEndDate, user?.natrockPort, user?.syncedWithN8nAt, user?.lastSyncChanges, user?.subId, user?.subid, user?.discount, user?.discountValidFrom, user?.discountValidTo, user?.language, tariffs, getTrafficLimit])
 
   // Загружаем подписку из коллекции subscriptions (по subscriptionId или по userId) для корректного статуса
   const { subscription, isLoading: subscriptionLoading } = useSubscriptionStatus(user)
@@ -376,11 +376,26 @@ const UserCard = ({
     uuid: `user-card-uuid-${user.id}`,
     tariff: `user-card-tariff-${user.id}`,
     expiresAt: `user-card-expires-at-${user.id}`,
+    periodMonths: `user-card-period-months-${user.id}`,
     subscriptionLink: `user-card-subscription-link-${user.id}`,
     trafficGB: `user-card-traffic-gb-${user.id}`,
     devices: `user-card-devices-${user.id}`,
     subId: `user-card-subid-${user.id}`,
+    language: `user-card-language-${user.id}`,
   }
+
+  const LANGUAGE_OPTIONS = [
+    { value: '', label: '— не задан' },
+    { value: 'ru', label: 'Русский' },
+    { value: 'en', label: 'English' },
+    { value: 'zh', label: '简体中文' },
+    { value: 'hi', label: 'हिन्दी' },
+    { value: 'ar', label: 'العربية' },
+    { value: 'tg', label: 'Тоҷикӣ' },
+    { value: 'uz', label: "O'zbekcha" },
+    { value: 'kk', label: 'Қазақша' },
+    { value: 'ky', label: 'Кыргызча' },
+  ]
 
   // Обработчик изменений полей с валидацией
   const handleFieldChange = useCallback((field, value) => {
@@ -477,17 +492,22 @@ const UserCard = ({
     handleFieldChange('subId', e.target.value)
   }, [handleFieldChange])
 
+  const handleLanguageChange = useCallback((e) => {
+    const value = (e.target.value || '').trim() || null
+    handleFieldChange('language', value)
+  }, [handleFieldChange])
+
   const handlePaymentStatusChange = useCallback((e) => {
     const value = e.target.value
-    
+
     setEditingUser(prev => {
       // Определяем тариф для расчета лимита трафика
       const tariffId = prev.tariffId
       const selectedTariff = tariffId ? tariffs.find(t => t.id === tariffId) : null
-      
+
       // Вычисляем новый лимит трафика на основе статуса оплаты и тарифа
       const trafficGB = getTrafficLimit(selectedTariff, value)
-      
+
       return {
         ...prev,
         paymentStatus: value,
@@ -495,6 +515,22 @@ const UserCard = ({
       }
     })
   }, [tariffs, getTrafficLimit])
+
+  const handlePeriodMonthsChange = useCallback((e) => {
+    const raw = e.target.value
+    const value = raw === '' ? null : Math.max(1, Math.min(120, parseInt(raw, 10) || 1))
+    handleFieldChange('periodMonths', value)
+  }, [handleFieldChange])
+
+  const handleTestPeriodStartDateChange = useCallback((e) => {
+    const value = e.target.value ? new Date(e.target.value).getTime() : null
+    handleFieldChange('testPeriodStartDate', value)
+  }, [handleFieldChange])
+
+  const handleTestPeriodEndDateChange = useCallback((e) => {
+    const value = e.target.value ? new Date(e.target.value).getTime() : null
+    handleFieldChange('testPeriodEndDate', value)
+  }, [handleFieldChange])
 
   const handleRoleChange = useCallback((e) => {
     const value = e.target.value
@@ -812,6 +848,19 @@ const UserCard = ({
                   </div>
                   <Copy className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 shrink-0" />
                 </button>
+                <div className="w-full flex flex-col gap-1.5">
+                    <label htmlFor={fieldIds.language} className="text-xs text-slate-500">Язык (для ИИ и рассылок)</label>
+                    <select
+                      id={fieldIds.language}
+                      value={editingUser.language || ''}
+                      onChange={handleLanguageChange}
+                      className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      {LANGUAGE_OPTIONS.map((opt) => (
+                        <option key={opt.value || '_empty'} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 <div className="w-full flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/80 border border-slate-700">
                   <AtSign className="w-4 h-4 text-slate-500 shrink-0" />
                   <div className="min-w-0 flex-1">
@@ -1052,16 +1101,25 @@ const UserCard = ({
               Дополнительная информация о подписке
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Период оплаты - всегда показываем */}
+              {/* Период оплаты — редактируемое поле */}
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Период оплаты</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200">
-                  {editingUser.periodMonths ? (
-                    `${editingUser.periodMonths} ${editingUser.periodMonths === 1 ? 'месяц' : editingUser.periodMonths < 5 ? 'месяца' : 'месяцев'}`
-                  ) : (
-                    <span className="text-slate-500">Не указан</span>
-                  )}
-                </div>
+                <label htmlFor={fieldIds.periodMonths} className="block text-slate-300 text-sm font-medium mb-2">Период оплаты</label>
+                <input
+                  id={fieldIds.periodMonths}
+                  name="periodMonths"
+                  type="number"
+                  min={1}
+                  max={120}
+                  placeholder="Месяцев"
+                  value={editingUser.periodMonths ?? ''}
+                  onChange={handlePeriodMonthsChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {editingUser.periodMonths != null && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {editingUser.periodMonths} {editingUser.periodMonths === 1 ? 'месяц' : editingUser.periodMonths < 5 ? 'месяца' : 'месяцев'}
+                  </p>
+                )}
               </div>
               
               {/* Статус оплаты - редактируемое поле */}
@@ -1089,27 +1147,39 @@ const UserCard = ({
                 )}
               </div>
               
-              {/* Тестовый период - всегда показываем */}
+              {/* Тестовый период — редактируемые поля */}
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Начало тестового периода</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                  {editingUser.testPeriodStartDate ? (
-                    formatDate?.(editingUser.testPeriodStartDate) || new Date(editingUser.testPeriodStartDate).toLocaleString()
-                  ) : (
-                    <span className="text-slate-500">Не указано</span>
-                  )}
-                </div>
+                <label htmlFor={`user-card-test-period-start-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Начало тестового периода</label>
+                <input
+                  id={`user-card-test-period-start-${user.id}`}
+                  name="testPeriodStartDate"
+                  type="datetime-local"
+                  value={editingUser.testPeriodStartDate ? new Date(editingUser.testPeriodStartDate).toISOString().slice(0, 16) : ''}
+                  onChange={handleTestPeriodStartDateChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {editingUser.testPeriodStartDate && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {formatDate?.(editingUser.testPeriodStartDate) || new Date(editingUser.testPeriodStartDate).toLocaleString()}
+                  </p>
+                )}
               </div>
-              
+
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Окончание тестового периода</label>
-                <div className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-400 text-sm">
-                  {editingUser.testPeriodEndDate ? (
-                    formatDate?.(editingUser.testPeriodEndDate) || new Date(editingUser.testPeriodEndDate).toLocaleString()
-                  ) : (
-                    <span className="text-slate-500">Не указано</span>
-                  )}
-                </div>
+                <label htmlFor={`user-card-test-period-end-${user.id}`} className="block text-slate-300 text-sm font-medium mb-2">Окончание тестового периода</label>
+                <input
+                  id={`user-card-test-period-end-${user.id}`}
+                  name="testPeriodEndDate"
+                  type="datetime-local"
+                  value={editingUser.testPeriodEndDate ? new Date(editingUser.testPeriodEndDate).toISOString().slice(0, 16) : ''}
+                  onChange={handleTestPeriodEndDateChange}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {editingUser.testPeriodEndDate && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {formatDate?.(editingUser.testPeriodEndDate) || new Date(editingUser.testPeriodEndDate).toLocaleString()}
+                  </p>
+                )}
               </div>
               
               {/* NatRock порт (для Multi тарифа) */}

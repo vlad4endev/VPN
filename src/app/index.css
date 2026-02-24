@@ -7,12 +7,25 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Prevent font scaling in landscape on iOS */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html, body {
   margin: 0;
   padding: 0;
   overflow-x: hidden; /* Prevent horizontal scrolling */
   width: 100%;
   max-width: 100%;
+  /* Safe area insets for notch/home indicator (iOS, Android gesture nav) */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-top: env(safe-area-inset-top, 0px);
+  /* Reduce overscroll/rubber-band on iOS/Android */
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -78,6 +91,9 @@ img, video, iframe, embed, object {
   --font-size-2xl: clamp(1.5rem, 1.3rem + 1vw, 2.25rem); /* 24-36px */
   --font-size-3xl: clamp(1.875rem, 1.5rem + 1.875vw, 3rem); /* 30-48px */
   
+  /* Viewport height: 100dvh with fallback for old browsers (iOS Safari, etc.) */
+  --vh-fill: 100vh;
+  --vh-fill-dynamic: 100dvh;
   /* Adaptive Spacing */
   --spacing-xs: clamp(0.25rem, 0.2rem + 0.25vw, 0.5rem); /* 4-8px */
   --spacing-sm: clamp(0.5rem, 0.4rem + 0.5vw, 1rem); /* 8-16px */
@@ -113,10 +129,32 @@ code, pre {
     display: none;  /* Chrome, Safari and Opera */
   }
   
-  /* Touch manipulation for better mobile performance */
+  /* Touch manipulation for better mobile performance (reduces 300ms delay) */
   .touch-manipulation {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+  }
+  /* Minimum touch target (Apple HIG 44px, Material 48px) */
+  .touch-target {
+    min-height: var(--touch-target-min, 44px);
+    min-width: var(--touch-target-min, 44px);
+  }
+  .touch-target-lg {
+    min-height: var(--touch-target-comfortable, 48px);
+    min-width: var(--touch-target-comfortable, 48px);
+  }
+  /* Prevent iOS zoom on input focus when font-size < 16px */
+  @media screen and (max-width: 768px) {
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    select,
+    textarea {
+      font-size: max(16px, 1em);
+    }
   }
   
   /* Icon-only / compact buttons on mobile (<481px) */
@@ -206,9 +244,22 @@ code, pre {
   }
 }
 
-/* Нижняя панель: отступ под safe area (вырез/индикатор домой) */
+/* Safe area utilities (iOS notch, Android gesture bar, iPad, foldables) */
 .safe-area-pb {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+.safe-area-pt {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+.safe-area-insets {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+/* Main content area: extra top padding on notched devices when using fixed headers */
+.safe-area-content {
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Анимация оверлея бокового меню */

@@ -13,7 +13,12 @@
     "start:all": "node scripts/start-all.js",
     "setup:env": "node setup-env.js",
     "setup:env:fix": "node setup-env.js --fix",
-    "build:start": "npm run build && npm start"
+    "build:start": "npm run build && npm start",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:ios": "npx cap open ios",
+    "cap:android": "npx cap open android",
+    "cap:add:ios": "npx cap add ios",
+    "cap:add:android": "npx cap add android"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.16",
@@ -33,6 +38,10 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",

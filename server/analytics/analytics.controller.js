@@ -127,9 +127,10 @@ async function runAiStrategy(req, res) {
       loadGlobalContextForAi(db, appId),
     ])
     const userProfile = userSnap.exists ? userSnap.data() : null
+    const userLanguage = (userProfile?.language || 'ru').toString().trim() || 'ru'
 
     const profileText = userProfile
-      ? `Имя: ${userProfile.name ?? '-'}, Email: ${userProfile.email ?? '-'}, План: ${userProfile.plan ?? '-'}, Тариф: ${userProfile.tariffName ?? userProfile.tariffId ?? '-'}, Окончание подписки: ${userProfile.expiresAt ?? 'нет'}, Обращений в поддержку: ${analytics?.metrics?.supportTicketsCount ?? 0}, LTV: ${analytics?.lifetimeValue ?? 0}`
+      ? `Имя: ${userProfile.name ?? '-'}, Email: ${userProfile.email ?? '-'}, План: ${userProfile.plan ?? '-'}, Тариф: ${userProfile.tariffName ?? userProfile.tariffId ?? '-'}, Окончание подписки: ${userProfile.expiresAt ?? 'нет'}, Обращений в поддержку: ${analytics?.metrics?.supportTicketsCount ?? 0}, LTV: ${analytics?.lifetimeValue ?? 0}, Язык интерфейса пользователя: ${userLanguage}`
       : 'Данные пользователя не найдены.'
     const analyticsText = analytics
       ? `Сегмент: ${analytics.segment}, Churn score: ${analytics.churnScore}, Приоритет: ${analytics.priorityScore}, Рекомендация системы: ${analytics.recommendedAction}, Тип оффера: ${analytics.offerType}, Тон: ${analytics.messageTone}`
@@ -141,9 +142,11 @@ async function runAiStrategy(req, res) {
       globalBlock += `\n\nСводка метрик и логов для отчётности:\n${metricsSummary}`
     }
 
+    const langInstruction = userLanguage === 'ru' ? 'на русском' : userLanguage === 'en' ? 'in English' : `in the user's interface language (code: ${userLanguage}); if that language is not Russian or English, write the message in that language`
     const systemPrompt = `Ты — эксперт по удержанию клиентов VPN-сервиса. На основе данных о клиенте, воронки аналитики и глобального контекста (тарифы, серверы) сформулируй рекомендации для админа: что делать, чтобы вернуть клиента. Учитывай условия и цены тарифов при предложении офферов. Результат — шаги действий для админа, а не готовое сообщение клиенту.
+В данных клиента указан «Язык интерфейса пользователя» — текст suggestedOfferMessage ОБЯЗАТЕЛЬНО пиши ${langInstruction}, чтобы пользователь получил сообщение на своём языке.
 Ответь строго в формате JSON, без markdown и без лишнего текста:
-{"strategy":"краткое обоснование (1-2 предложения), почему клиент в зоне риска и общая стратегия","steps":["шаг 1 для админа","шаг 2","шаг 3"],"offerType":"тип оффера: скидка / персональное предложение / напоминание / win-back","suggestedOfferMessage":"короткий текст предложения для уведомления клиенту (до 300 символов, на русском), чтобы мотивировать вернуться — можно использовать в рассылке"}`
+{"strategy":"краткое обоснование (1-2 предложения), почему клиент в зоне риска и общая стратегия","steps":["шаг 1 для админа","шаг 2","шаг 3"],"offerType":"тип оффера: скидка / персональное предложение / напоминание / win-back","suggestedOfferMessage":"короткий текст предложения для уведомления клиенту (до 300 символов, ${langInstruction}), чтобы мотивировать вернуться — можно использовать в рассылке"}`
 
     const userMessage = `Данные клиента (userId: ${userId}):\n${profileText}\n\nАналитика воронки:\n${analyticsText}${globalBlock}\n\nПроанализируй и дай шаги действий для админа и вариант текста предложения для клиента.`
 

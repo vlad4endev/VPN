@@ -168,6 +168,7 @@ export function normalizeUser(user) {
     telegramSessionTokenExpiresAt: user.telegramSessionTokenExpiresAt != null
       ? (typeof user.telegramSessionTokenExpiresAt === 'string' ? user.telegramSessionTokenExpiresAt : new Date(user.telegramSessionTokenExpiresAt).toISOString())
       : null,
+    language: user.language && typeof user.language === 'string' ? String(user.language).trim() || null : null,
   }
 }
 

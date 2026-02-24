@@ -28,7 +28,7 @@ export function useSupport(currentUser) {
   // Подписка на Web Push для уведомлений в фоне (вкладка закрыта). Один раз при открытии поддержки.
   useEffect(() => {
     if (!currentUser?.id || isAdmin || pushSubscribedRef.current) return
-    if (typeof window === 'undefined' || Notification.permission !== 'granted') return
+    if (typeof window === 'undefined' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
     const getToken = () => (auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null))
     registerAndSubscribe(getToken).then((ok) => {
       if (ok) pushSubscribedRef.current = true

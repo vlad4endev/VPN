@@ -6,9 +6,6 @@ import { notificationsService } from '../../notifications/services/notifications
 import { NOTIFICATION_TYPES } from '../../notifications/constants.js'
 import UserCard from './UserCard.jsx'
 
-/** Порядок сегментов (один раз, без дублей при рендере) */
-const SEGMENT_ORDER = ['new', 'active', 'risk', 'churning', 'lost']
-
 const SEGMENT_LABELS = {
   new: 'Новые',
   active: 'Активные',
@@ -276,7 +273,6 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
     )
   }
 
-  const segments = data?.segments || {}
   const topByPriority = data?.topByPriority || []
   // Таблица строится только по результатам ИИ (старые данные воронки не показываем)
   const tableRowsBase = aiTableRows || []
@@ -495,24 +491,6 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
             </table>
           </div>
         )}
-      </section>
-
-      {/* Сегменты — фиксированный порядок, без дублей */}
-      <section className="rounded-xl bg-slate-900 border border-slate-800 px-4 py-3">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Сегменты воронки</p>
-        <div className="flex flex-wrap gap-2">
-          {SEGMENT_ORDER.map((key) => (
-            <span
-              key={key}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium tabular-nums ${SEGMENT_COLORS[key] || 'bg-slate-700/50 text-slate-400 border-slate-600'}`}
-            >
-              {SEGMENT_LABELS[key] || key}: {segments[key] ?? 0}
-            </span>
-          ))}
-          {totalUsers === 0 && (
-            <p className="text-slate-500 text-xs">Нет данных. Нажмите «Обновить с ИИ-анализом».</p>
-          )}
-        </div>
       </section>
 
       {/* Попап процесса ИИ-анализа воронки */}

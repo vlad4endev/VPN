@@ -167,6 +167,7 @@ export const authService = {
 
     // 5. Создаем документ в Firestore с дополнительными данными
     const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
+    const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'
     const newUserData = {
       email: email,
       name: name.trim(),
@@ -179,6 +180,7 @@ export const authService = {
       tariffName: '',
       tariffId: '',
       photoURL: firebaseUser.photoURL || null,
+      language: uiLang,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...(referredBy && referredBy.trim() ? { referredBy: referredBy.trim() } : {}),
@@ -272,6 +274,7 @@ export const authService = {
       
       const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
       const email = (firebaseUser.email || '').toLowerCase()
+      const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'
       const newUserData = {
         email,
         login: email,
@@ -285,6 +288,7 @@ export const authService = {
         tariffName: '',
         tariffId: '',
         photoURL: firebaseUser.photoURL || null,
+        language: uiLang,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }

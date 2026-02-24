@@ -67,7 +67,7 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
   ]
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30 w-full">
+    <div className="min-h-screen min-h-[100dvh] bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30 w-full">
       <main id="main" role="main" className="min-w-0 w-full max-w-full overflow-x-hidden">
         {/* Hero — экран приветствия */}
         <header className="relative pt-14 sm:pt-16 lg:pt-20 pb-12 sm:pb-14 lg:pb-16 px-4 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950 overflow-hidden" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }} role="banner" aria-label={t('welcome.mainScreen')}>

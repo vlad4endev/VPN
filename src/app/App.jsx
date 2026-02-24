@@ -50,6 +50,7 @@ import { resolveReferralCode, processReferralBonus, saveReferralCodePending, get
 import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
+import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -557,6 +558,18 @@ export default function VPNServiceApp() {
     }).catch((err) => logger.warn('App', 'Ошибка создания реферального кода', { uid: currentUser.id }, err))
   }, [db, currentUser?.id])
 
+  // Сохранение выбранного языка в карточку пользователя (для ИИ и рассылок)
+  useEffect(() => {
+    if (!db || !appId || !currentUser?.id) return
+    const handler = (lng) => {
+      saveUserLanguage(db, appId, currentUser.id, lng)
+    }
+    i18n.on('languageChanged', handler)
+    return () => {
+      i18n.off('languageChanged', handler)
+    }
+  }, [db, appId, currentUser?.id])
+
   // Загрузка пользователей из Firestore
   // ВАЖНО: для админ-панели — только админ; для раздела «Финансы» — админ и бухгалтер (чтобы подставлять имена в отчёты)
   const loadUsers = useCallback(async () => {
@@ -892,6 +905,7 @@ export default function VPNServiceApp() {
                   tariffName: '',
                   tariffId: '',
                   photoURL: firebaseUser.photoURL || null,
+                  language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
                 }
@@ -929,6 +943,7 @@ export default function VPNServiceApp() {
                   if (savedUser.id === firebaseUser.uid) {
                     logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
                     setCurrentUser(savedUser)
+                    applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
                     setTimeout(async () => {
                       try {
                         const notificationService = (await import('../shared/services/notificationService.js')).default
@@ -979,6 +994,7 @@ export default function VPNServiceApp() {
                   if (savedUser.id === firebaseUser.uid) {
                     logger.info('Firebase', 'Данные загружены из кеша (офлайн-режим)', { uid: firebaseUser.uid, email: savedUser.email })
                     setCurrentUser(savedUser)
+                    applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
                   } else {
                     setCurrentUser(null)
                   }
@@ -1435,6 +1451,7 @@ export default function VPNServiceApp() {
       }
       
       setCurrentUser(currentUserData)
+      applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
       logger.info('Auth', 'Успешный вход', { email, uid: firebaseUser.uid, role: userData.role })
         setSuccess(i18n.t('app.loginSuccess'))
         setLoginData(prev => ({ ...prev, email: '', password: '' }))
@@ -1572,6 +1589,7 @@ export default function VPNServiceApp() {
         tariffName: '',
         tariffId: '',
         photoURL: firebaseUser.photoURL || null,
+        language: i18n.language || 'ru',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         ...(inviterId ? { referredBy: inviterId } : {}),
@@ -1678,6 +1696,7 @@ export default function VPNServiceApp() {
           tariffName: '',
           tariffId: '',
           photoURL: firebaseUser.photoURL || null,
+          language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           ...(inviterId ? { referredBy: inviterId } : {}),
@@ -1734,6 +1753,7 @@ export default function VPNServiceApp() {
       await new Promise(resolve => setTimeout(resolve, 300))
       
       setCurrentUser(currentUserData)
+      applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
       setSuccess('Вход выполнен успешно')
       
       // Не устанавливаем view сразу - ждём onAuthStateChanged для перенаправления
@@ -2855,6 +2875,15 @@ export default function VPNServiceApp() {
     if (view === 'admin' && canAccessAdmin(currentUser?.role)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
+        loadUsers()
+        loadSettings()
+        loadTariffs()
+        adminPanelLoadedRef.current = true
+      }
+      financesLoadedRef.current = false
+    } else if (view === 'analytics' && canAccessAdmin(currentUser?.role)) {
+      if (!adminPanelLoadedRef.current) {
+        logger.info('Admin', 'Загрузка данных для раздела Аналитика (AI-воронка)', { adminId: currentUser.id })
         loadUsers()
         loadSettings()
         loadTariffs()

@@ -64,7 +64,7 @@ export async function registerAndSubscribe(getIdToken) {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     return false
   }
-  if (Notification.permission !== 'granted') return false
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
 
   try {
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
