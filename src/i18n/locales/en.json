@@ -453,6 +453,23 @@
     "paymentFailed": "Payment failed",
     "redirecting": "Redirecting to payment..."
   },
+  "paymentResult": {
+    "successTitle": "Payment successful",
+    "failTitle": "Payment failed",
+    "orderId": "Order number:",
+    "loading": "Loading order details...",
+    "orderIdRequired": "Order number is missing in the URL.",
+    "loadError": "Could not load order details.",
+    "tariff": "Plan",
+    "amount": "Amount",
+    "period": "Period",
+    "periodMonth": "1 month",
+    "periodMonths": "{{count}} mo.",
+    "paymentMethod": "Payment method",
+    "successNote": "Your subscription will be activated automatically. Go to your dashboard.",
+    "failNote": "Payment was not completed. You can try again from your dashboard.",
+    "goToDashboard": "Go to dashboard"
+  },
   "support": {
     "notifyReplies": "Notify about replies even when tab is closed",
     "enable": "Enable",

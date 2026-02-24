@@ -24,6 +24,7 @@ import LoggerPanel from '../shared/components/LoggerPanel.jsx'
 import LoginForm from '../features/auth/components/LoginForm.jsx'
 import SetPasswordPage from '../features/auth/components/SetPasswordPage.jsx'
 import PublicReviewPage from '../features/reviews/components/PublicReviewPage.jsx'
+import PaymentResultPage from '../features/payment/components/PaymentResultPage.jsx'
 
 // Lazy load heavy views (Dashboard — статический импорт, как AdminPanel, из-за дубликата React в lazy-чанке)
 import Dashboard from '../features/dashboard/components/Dashboard.jsx'
@@ -2595,6 +2596,20 @@ export default function VPNServiceApp() {
     return await handleCreateSubscription(tariff, devices, currentUser.natrockPort ?? null, periodMonths, false, 'pay_now', discount)
   }, [currentUser?.id, currentUser?.devices, currentUser?.periodMonths, currentUser?.natrockPort, currentUser?.discount, currentUser?.discountValidFrom, currentUser?.discountValidTo, tariffs, handleCreateSubscription])
 
+  // Добавить устройства к подписке Super (оплата за оставшийся период)
+  const handleAddDevices = useCallback(async (additionalDevices) => {
+    if (!currentUser?.tariffId || additionalDevices < 1) return null
+    const tariff = tariffs.find(t => t.id === currentUser.tariffId)
+    if (!tariff) return null
+    try {
+      return await dashboardService.addDevicesToSubscription(currentUser, tariff, additionalDevices)
+    } catch (err) {
+      logger.error('App', 'Ошибка добавления устройств', { additionalDevices }, err)
+      setError(dashboardService.getErrorMessage ? dashboardService.getErrorMessage(err) : err.message)
+      return null
+    }
+  }, [currentUser, tariffs, setError])
+
   // Обновление данных пользователя после успешной оплаты (чтобы статус подписки обновился без перезагрузки)
   const onRefreshUserAfterPayment = useCallback(async () => {
     if (!currentUser?.id) return
@@ -4142,6 +4157,19 @@ export default function VPNServiceApp() {
     return <PublicReviewPage onSetView={setView} />
   }
 
+  // Страницы результата оплаты (успех / неудача) по пути /payment/success и /payment/fail
+  const path = (typeof window !== 'undefined' && (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')) || ''
+  const goToDashboard = () => {
+    setView('dashboard')
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', '/')
+  }
+  if (path === '/payment/success') {
+    return <PaymentResultPage success onGoToDashboard={goToDashboard} />
+  }
+  if (path === '/payment/fail') {
+    return <PaymentResultPage success={false} onGoToDashboard={goToDashboard} />
+  }
+
   // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации
   // (ошибки конфигурации не критичны для показа экрана приветствия)
   if (view === 'welcome' && !currentUser) {
@@ -4532,6 +4560,7 @@ export default function VPNServiceApp() {
         creatingSubscription={creatingSubscription}
         onHandleCreateSubscription={handleCreateSubscription}
         onHandleRenewSubscription={handleRenewSubscription}
+        onHandleAddDevices={handleAddDevices}
         onHandleDeleteSubscription={handleDeleteSubscription}
         onRefreshUserAfterPayment={onRefreshUserAfterPayment}
         onHandleUpdateProfile={handleUpdateProfile}

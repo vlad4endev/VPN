@@ -81,6 +81,35 @@ export function useSubscription(currentUser, setCurrentUser, setUsers, tariffs, 
     await handleCreateSubscription(tariff)
   }, [currentUser, tariffs, handleCreateSubscription])
 
+  /**
+   * Инициация оплаты за добавление устройств к подписке Super.
+   * @param {number} additionalDevices - Количество устройств для добавления
+   * @returns {Promise<Object>} { paymentUrl, orderId, amount, requiresPayment, newDevicesCount, operationType: 'add_devices', ... }
+   */
+  const handleAddDevices = useCallback(async (additionalDevices) => {
+    if (!currentUser || !currentUser.tariffId || additionalDevices < 1) {
+      setError('Недостаточно данных или укажите количество устройств')
+      return null
+    }
+    const tariff = tariffs.find(t => t.id === currentUser.tariffId)
+    if (!tariff) {
+      setError('Тариф не найден')
+      return null
+    }
+    try {
+      setCreatingSubscription(true)
+      setError('')
+      const result = await dashboardService.addDevicesToSubscription(currentUser, tariff, additionalDevices)
+      return result
+    } catch (err) {
+      logger.error('Dashboard', 'Ошибка добавления устройств', { email: currentUser.email, additionalDevices }, err)
+      setError(dashboardService.getErrorMessage ? dashboardService.getErrorMessage(err) : err.message)
+      return null
+    } finally {
+      setCreatingSubscription(false)
+    }
+  }, [currentUser, tariffs, setError])
+
   // Получение ключа
   const handleGetKey = useCallback(async () => {
     if (!currentUser) {
@@ -119,6 +148,7 @@ export function useSubscription(currentUser, setCurrentUser, setUsers, tariffs, 
     setSelectedTariff,
     handleCreateSubscription,
     handleRenewSubscription,
+    handleAddDevices,
     handleGetKey,
   }
 }

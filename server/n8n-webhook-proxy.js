@@ -30,7 +30,7 @@ import { createAnalyticsRouter } from './analytics/analytics.routes.js'
 import * as analyticsController from './analytics/analytics.controller.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
-import { unifiedChat } from './lib/ai/index.js'
+import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { chat as deepseekChat } from './lib/deepseek.js'
 
 dotenv.config()
@@ -3311,25 +3311,49 @@ async function getTelegramScenario() {
   }
 }
 
-/** API-ключ DeepSeek: приоритет 1) DEEPSEEK_API_KEY (env), 2) настройки в Firestore (из админки). */
-async function getDeepSeekApiKey() {
-  const fromEnv = process.env.DEEPSEEK_API_KEY && String(process.env.DEEPSEEK_API_KEY).trim()
+/** API-ключ по провайдеру: env или Firestore. */
+function getApiKeyForProvider(providerId, s) {
+  const envKeys = {
+    deepseek: 'DEEPSEEK_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    openrouter: 'OPENROUTER_API_KEY',
+    gemini: 'GEMINI_API_KEY',
+    qwen: 'DASHSCOPE_API_KEY',
+  }
+  const settingKeys = {
+    deepseek: 'deepseekApiKey',
+    openai: 'openaiApiKey',
+    openrouter: 'openrouterApiKey',
+    gemini: 'geminiApiKey',
+    qwen: 'qwenApiKey',
+  }
+  const fromEnv = process.env[envKeys[providerId]] && String(process.env[envKeys[providerId]]).trim()
   if (fromEnv) return fromEnv
-  const s = await getSettingsCached()
-  const fromSettings = s.deepseekApiKey != null ? String(s.deepseekApiKey).trim() : ''
-  return fromSettings || ''
+  const key = settingKeys[providerId] && s[settingKeys[providerId]] != null ? String(s[settingKeys[providerId]]).trim() : ''
+  return key || ''
 }
 
-/** Конфиг ИИ для роутера аналитики (AI-воронка, ai-strategy, ai-funnel-analysis). */
-async function getActiveAiConfig() {
-  const apiKey = await getDeepSeekApiKey()
+/** API-ключ DeepSeek (обратная совместимость). */
+async function getDeepSeekApiKey() {
   const s = await getSettingsCached()
+  return getApiKeyForProvider('deepseek', s)
+}
+
+/** Активная конфигурация ИИ: провайдер, ключ, модель, параметры. */
+async function getActiveAiConfig() {
+  const s = await getSettingsCached()
+  const provider = (s.aiProvider && PROVIDERS[s.aiProvider]) ? s.aiProvider : 'deepseek'
+  const apiKey = getApiKeyForProvider(provider, s)
+  const def = PROVIDERS[provider]
+  const model = (s.aiModel && String(s.aiModel).trim()) || s.deepseekModel || process.env.DEEPSEEK_MODEL || def?.defaultModel || 'deepseek-chat'
   return {
-    provider: 'deepseek',
-    apiKey: apiKey || '',
-    model: (s?.deepseekModel && String(s.deepseekModel).trim()) || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-    temperature: s?.deepseekTemperature != null ? Number(s.deepseekTemperature) : 0.5,
-    timeout: s?.deepseekTimeoutSeconds != null ? Number(s.deepseekTimeoutSeconds) : 50,
+    provider,
+    apiKey,
+    model,
+    temperature: s.aiTemperature != null ? Number(s.aiTemperature) : (s.deepseekTemperature != null ? Number(s.deepseekTemperature) : 0.5),
+    max_tokens: s.aiMaxTokens != null ? Number(s.aiMaxTokens) : (s.deepseekMaxTokens != null ? Number(s.deepseekMaxTokens) : 2048),
+    timeout: s.aiTimeoutSeconds != null ? Number(s.aiTimeoutSeconds) : (s.deepseekTimeoutSeconds != null ? Number(s.deepseekTimeoutSeconds) : 50),
+    systemPromptPreset: (s.aiSystemPromptPreset != null ? String(s.aiSystemPromptPreset) : '') || (s.deepseekSystemPromptPreset != null ? String(s.deepseekSystemPromptPreset) : '') || '',
   }
 }
 
@@ -3643,51 +3667,63 @@ app.patch('/api/admin/telegram/scenario', express.json(), async (req, res) => {
   }
 })
 
-/** GET /api/admin/ai/status — статус настройки ИИ (DeepSeek). Токен не возвращаем. Только админ. */
+/** GET /api/admin/ai/status — статус настройки ИИ (провайдер, модель, параметры). Токен не возвращаем. Только админ. */
 app.get('/api/admin/ai/status', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  const settings = await getSettingsCached()
+  const config = await getActiveAiConfig()
+  const models = PROVIDER_MODELS[config.provider] || PROVIDER_MODELS.deepseek
+  const providers = Object.keys(PROVIDERS).map((id) => ({ id, name: PROVIDERS[id].name }))
   res.json({
     success: true,
-    configured: Boolean(apiKey && apiKey.length > 0),
-    model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-    temperature: settings.deepseekTemperature != null ? Number(settings.deepseekTemperature) : 0.7,
-    maxTokens: settings.deepseekMaxTokens != null ? Number(settings.deepseekMaxTokens) : 2048,
-    timeoutSeconds: settings.deepseekTimeoutSeconds != null ? Number(settings.deepseekTimeoutSeconds) : 60,
-    systemPromptPreset: settings.deepseekSystemPromptPreset != null ? String(settings.deepseekSystemPromptPreset) : '',
+    configured: Boolean(config.apiKey && config.apiKey.length > 0),
+    provider: config.provider,
+    providers,
+    model: config.model,
+    models,
+    temperature: config.temperature,
+    maxTokens: config.max_tokens,
+    timeoutSeconds: config.timeout,
+    systemPromptPreset: config.systemPromptPreset || '',
   })
 })
 
-/** PATCH /api/admin/ai/settings — сохранить настройки ИИ в Firestore (токен, модель, параметры). Только админ. */
+/** PATCH /api/admin/ai/settings — сохранить настройки ИИ в Firestore. Только админ. */
 app.patch('/api/admin/ai/settings', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
   if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   const body = req.body || {}
   const update = {}
-  if (body.apiKey !== undefined) {
-    update.deepseekApiKey = body.apiKey ? String(body.apiKey).trim() : null
-    update.deepseekApiKeyUpdatedAt = body.apiKey ? new Date().toISOString() : null
+  const currentConfig = await getActiveAiConfig()
+  if (body.provider !== undefined && PROVIDERS[body.provider]) {
+    update.aiProvider = body.provider
   }
-  if (body.model !== undefined) update.deepseekModel = body.model ? String(body.model).trim() || null : null
-  if (body.temperature !== undefined) update.deepseekTemperature = body.temperature != null ? Number(body.temperature) : null
-  if (body.maxTokens !== undefined) update.deepseekMaxTokens = body.maxTokens != null ? Number(body.maxTokens) : null
-  if (body.timeoutSeconds !== undefined) update.deepseekTimeoutSeconds = body.timeoutSeconds != null ? Number(body.timeoutSeconds) : null
-  if (body.systemPromptPreset !== undefined) update.deepseekSystemPromptPreset = body.systemPromptPreset != null ? String(body.systemPromptPreset) : null
+  if (body.apiKey !== undefined) {
+    const key = String(body.apiKey).trim()
+    const provider = (body.provider && PROVIDERS[body.provider]) ? body.provider : currentConfig.provider
+    const settingKeys = { deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey', gemini: 'geminiApiKey', qwen: 'qwenApiKey' }
+    if (settingKeys[provider]) {
+      update[settingKeys[provider]] = key || null
+      update[settingKeys[provider] + 'UpdatedAt'] = key ? new Date().toISOString() : null
+    }
+  }
+  if (body.model !== undefined) update.aiModel = body.model ? String(body.model).trim() || null : null
+  if (body.temperature !== undefined) update.aiTemperature = body.temperature != null ? Number(body.temperature) : null
+  if (body.maxTokens !== undefined) update.aiMaxTokens = body.maxTokens != null ? Number(body.maxTokens) : null
+  if (body.timeoutSeconds !== undefined) update.aiTimeoutSeconds = body.timeoutSeconds != null ? Number(body.timeoutSeconds) : null
+  if (body.systemPromptPreset !== undefined) update.aiSystemPromptPreset = body.systemPromptPreset != null ? String(body.systemPromptPreset) : null
   if (Object.keys(update).length === 0) {
-    return res.json({ success: true, configured: Boolean(await getDeepSeekApiKey()) })
+    const cfg = await getActiveAiConfig()
+    return res.json({ success: true, configured: Boolean(cfg.apiKey) })
   }
   try {
     settingsCache = { data: null, expiresAt: 0 }
     const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
     await settingsRef.set(update, { merge: true })
-    const configured = Boolean(await getDeepSeekApiKey())
-    if (update.deepseekApiKey !== undefined) {
-      console.log('✅ ИИ (DeepSeek): настройки сохранены в Firestore (artifacts/%s/public/settings).', APP_ID)
-    }
-    res.json({ success: true, configured, savedTo: 'firestore' })
+    const cfg = await getActiveAiConfig()
+    console.log('✅ ИИ: настройки сохранены (провайдер %s)', cfg.provider)
+    res.json({ success: true, configured: Boolean(cfg.apiKey), savedTo: 'firestore' })
   } catch (err) {
     console.error('❌ PATCH /api/admin/ai/settings:', err.message)
     res.status(500).json({ success: false, error: err.message })
@@ -5401,6 +5437,9 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
           userId: paymentData.userId,
           amount: paymentData.amount,
           tariffId: paymentData.tariffId,
+          tariffName: paymentData.tariffName,
+          devices: paymentData.devices,
+          periodMonths: paymentData.periodMonths,
           status: paymentData.status,
           createdAt: paymentData.createdAt,
           completedAt: paymentData.completedAt,

@@ -1,5 +1,5 @@
 /**
- * Единый модуль ИИ: выбор провайдера (DeepSeek, OpenAI, OpenRouter, Gemini) и общий интерфейс chat().
+ * Единый модуль ИИ: выбор провайдера (DeepSeek, OpenAI, OpenRouter, Gemini, Qwen) и общий интерфейс chat().
  * Используется поддержкой (support-auto-reply, support-suggest), админкой (тест, аналитика) и /api/ai/chat.
  */
 
@@ -7,6 +7,7 @@ import { chat as deepseekChat } from './providers/deepseek.js'
 import { chat as openaiChat } from './providers/openai.js'
 import { chat as openrouterChat } from './providers/openrouter.js'
 import { chat as geminiChat } from './providers/gemini.js'
+import { chat as qwenChat } from './providers/qwen.js'
 
 export const PROVIDERS = {
   deepseek: {
@@ -37,6 +38,13 @@ export const PROVIDERS = {
     defaultModel: 'gemini-1.5-flash',
     envKey: 'GEMINI_API_KEY',
   },
+  qwen: {
+    id: 'qwen',
+    name: 'Qwen (Alibaba)',
+    chat: qwenChat,
+    defaultModel: 'qwen3-max',
+    envKey: 'DASHSCOPE_API_KEY',
+  },
 }
 
 /** Список моделей по провайдеру (для админки). */
@@ -63,6 +71,15 @@ export const PROVIDER_MODELS = {
     { value: 'gemini-1.5-pro', label: 'gemini-1.5-pro' },
     { value: 'gemini-2.0-flash-exp', label: 'gemini-2.0-flash-exp' },
   ],
+  qwen: [
+    { value: 'qwen3-max', label: 'Qwen 3.5 Max (qwen3-max)' },
+    { value: 'qwen3-max-2025-09-23', label: 'Qwen 3.5 Max (snapshot)' },
+    { value: 'qwen3-max-preview', label: 'Qwen 3 Max Preview' },
+    { value: 'qwen-max-latest', label: 'qwen-max-latest' },
+    { value: 'qwen3.5-plus', label: 'Qwen 3.5 Plus' },
+    { value: 'qwen-plus', label: 'qwen-plus' },
+    { value: 'qwen-turbo', label: 'qwen-turbo' },
+  ],
 }
 
 /**
@@ -70,7 +87,7 @@ export const PROVIDER_MODELS = {
  *
  * @param {Array<{ role: 'system'|'user'|'assistant', content: string }>} messages
  * @param {{
- *   provider: 'deepseek'|'openai'|'openrouter'|'gemini',
+ *   provider: 'deepseek'|'openai'|'openrouter'|'gemini'|'qwen',
  *   apiKey: string,
  *   model?: string,
  *   temperature?: number,

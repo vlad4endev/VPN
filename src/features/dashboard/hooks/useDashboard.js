@@ -66,6 +66,7 @@ export function useDashboard({
     setSelectedTariff: subscription.setSelectedTariff,
     handleCreateSubscription: subscription.handleCreateSubscription,
     handleRenewSubscription: subscription.handleRenewSubscription,
+    handleAddDevices: subscription.handleAddDevices,
     handleGetKey: subscription.handleGetKey,
   }
 }

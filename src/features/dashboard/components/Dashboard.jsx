@@ -11,6 +11,7 @@ import PaymentProcessingModal from './PaymentProcessingModal.jsx'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import { useSubscriptionStatus } from '../../../shared/hooks/useSubscriptionStatus.js'
 import logger from '../../../shared/utils/logger.js'
+import { dashboardService } from '../services/dashboardService.js'
 import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotifications.js'
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
@@ -32,6 +33,7 @@ const Dashboard = ({
   creatingSubscription,
   onHandleCreateSubscription,
   onHandleRenewSubscription,
+  onHandleAddDevices,
   onHandleDeleteSubscription,
   onRefreshUserAfterPayment,
   onHandleUpdateProfile,
@@ -60,6 +62,8 @@ const Dashboard = ({
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deletingSubscription, setDeletingSubscription] = useState(false)
+  const [showAddDevicesModal, setShowAddDevicesModal] = useState(false)
+  const [additionalDevices, setAdditionalDevices] = useState(1)
   const [showPaymentProcessing, setShowPaymentProcessing] = useState(false)
   const [paymentProcessingMessage, setPaymentProcessingMessage] = useState('')
   const [paymentProcessingStatus, setPaymentProcessingStatus] = useState('processing') // 'processing', 'waiting', 'checking', 'error'
@@ -462,6 +466,24 @@ const Dashboard = ({
                   return
                 }
 
+                // Оплата «добавить устройства» (Super): только обновляем devices в Firestore и 3x-ui
+                const subData = subscriptionSuccessRef.current || {}
+                if (subData.operationType === 'add_devices' && subData.newDevicesCount != null && currentUserData) {
+                  try {
+                    await dashboardService.applyAddDevicesAfterPayment(currentUserData, subData.newDevicesCount)
+                    await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                    setShowSuccessModal(false)
+                    setSubscriptionSuccess(null)
+                    subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
+                    if (paymentCheckTimeoutRef.current) clearTimeout(paymentCheckTimeoutRef.current)
+                    paymentPollingIntervalRef.current = null
+                    return
+                  } catch (addDevErr) {
+                    logger.error('Dashboard', 'Ошибка применения добавления устройств', { orderId: paymentOrderId }, addDevErr)
+                    throw addDevErr
+                  }
+                }
+
                 // Создаем подписку с данными из платежа
                 logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
                   userId: currentUserData?.id,
@@ -784,6 +806,19 @@ const Dashboard = ({
                   tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
                 }
                 
+                if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
+                  try {
+                    await dashboardService.applyAddDevicesAfterPayment(currentUserData, subscriptionData.newDevicesCount)
+                    await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                    setShowSuccessModal(false)
+                    setSubscriptionSuccess(null)
+                    subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
+                    setTimeout(() => { window.location.reload() }, 1000)
+                  } catch (addDevErr) {
+                    logger.error('Dashboard', 'Ошибка применения добавления устройств (окно закрыто)', { orderId: paymentOrderId }, addDevErr)
+                  }
+                  return
+                }
                 if (tariff && onHandleCreateSubscriptionRef.current) {
                   if (subscriptionCreatedForOrderIdsRef.current.has(paymentOrderId)) {
                     logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (окно закрыто)', { orderId: paymentOrderId })
@@ -1362,6 +1397,22 @@ const Dashboard = ({
                 devices: payment.devices,
                 periodMonths: payment.periodMonths
               })
+              if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUser) {
+                if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
+                subscriptionCreatedForOrderIdsRef.current.add(orderId)
+                try {
+                  await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionData.newDevicesCount)
+                  await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
+                  await onRefreshUserAfterPayment?.().catch(() => {})
+                  setShowSuccessModal(false)
+                  setSubscriptionSuccess(null)
+                  setTimeout(() => { window.location.reload() }, 1000)
+                } catch (addDevErr) {
+                  subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+                  throw addDevErr
+                }
+                return
+              }
               if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
                 logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n массив)', { orderId })
                 return
@@ -1496,6 +1547,22 @@ const Dashboard = ({
                 devices: payment.devices,
                 periodMonths: payment.periodMonths
               })
+              if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUser) {
+                if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
+                subscriptionCreatedForOrderIdsRef.current.add(orderId)
+                try {
+                  await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionData.newDevicesCount)
+                  await dashboardService.updatePaymentStatus(n8nPayment?.orderid || orderId, 'completed').catch(() => {})
+                  await onRefreshUserAfterPayment?.().catch(() => {})
+                  setShowSuccessModal(false)
+                  setSubscriptionSuccess(null)
+                  setTimeout(() => { window.location.reload() }, 1000)
+                } catch (addDevErr) {
+                  subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+                  throw addDevErr
+                }
+                return
+              }
               if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
                 logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n объект)', { orderId })
                 return
@@ -1623,6 +1690,23 @@ const Dashboard = ({
                 availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
               })
               throw new Error('Тариф не найден')
+            }
+
+            if (subscriptionSuccess?.operationType === 'add_devices' && subscriptionSuccess?.newDevicesCount != null && currentUser) {
+              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
+              subscriptionCreatedForOrderIdsRef.current.add(orderId)
+              try {
+                await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionSuccess.newDevicesCount)
+                await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
+                await onRefreshUserAfterPayment?.().catch(() => {})
+                setShowSuccessModal(false)
+                setSubscriptionSuccess(null)
+                setTimeout(() => { window.location.reload() }, 1000)
+              } catch (addDevErr) {
+                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+                throw addDevErr
+              }
+              return
             }
 
             if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
@@ -1929,7 +2013,7 @@ const Dashboard = ({
                     {/* Компактная сетка метрик */}
                     <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
                       {/* Устройств */}
-                      <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
+                      <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center relative">
                         <div className="flex items-center justify-center gap-1.5 mb-1">
                           <Smartphone className="w-4 h-4 text-blue-400 flex-shrink-0" />
                           <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">{t('dashboard.devices')}</p>
@@ -1937,6 +2021,23 @@ const Dashboard = ({
                         <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
                           {currentUser.devices || currentTariff?.devices || 1}
                         </p>
+                        {/* Кнопка «Добавить устройства» для Super — прямо в карточке устройств */}
+                        {(() => {
+                          const isSuper = currentUser?.tariffName?.toLowerCase() === 'super' ||
+                            (currentTariff && (currentTariff.plan?.toLowerCase() === 'super' || currentTariff.name?.toLowerCase() === 'super'))
+                          const canAdd = (userStatus.status === 'active' || userStatus.status === 'expiring_soon' || userStatus.status === 'test_period') && onHandleAddDevices
+                          return isSuper && canAdd
+                        })() && (
+                          <button
+                            type="button"
+                            onClick={() => { setAdditionalDevices(1); setShowAddDevicesModal(true) }}
+                            disabled={creatingSubscription}
+                            className="mt-2 w-full min-h-[28px] px-2 py-1 bg-blue-600/90 hover:bg-blue-600 text-white text-[clamp(0.65rem,0.6rem+0.2vw,0.75rem)] font-semibold rounded-md transition-all flex items-center justify-center gap-1 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label={t('dashboard.addDevicesAria', 'Добавить устройства')}
+                          >
+                            <span className="inline-flex items-center gap-0.5">+ {t('dashboard.addDevices', 'Добавить устройства')}</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Период или Трафик */}
@@ -2744,6 +2845,111 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
             awaitingPaymentResult={awaitingPaymentResult}
             paymentPollAttempt={paymentPollAttempt}
           />
+        )}
+
+        {/* Модальное окно «Добавить устройства» (Super) */}
+        {showAddDevicesModal && currentTariff && (currentUser?.tariffName?.toLowerCase() === 'super' || currentTariff.plan?.toLowerCase() === 'super' || currentTariff.name?.toLowerCase() === 'super') && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={() => setShowAddDevicesModal(false)}>
+            <div
+              className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white">{t('dashboard.addDevices', 'Добавить устройства')}</h3>
+                <button type="button" onClick={() => setShowAddDevicesModal(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700" aria-label={t('common.close')}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 sm:p-5 space-y-4">
+                <p className="text-slate-300 text-sm">
+                  {t('dashboard.addDevicesDescription', 'Укажите, сколько устройств добавить. Оплата — за оставшийся период подписки.')}
+                </p>
+                <div>
+                  <label className="block text-slate-400 text-sm font-medium mb-2">{t('dashboard.devicesToAdd', 'Количество устройств')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={additionalDevices}
+                    onChange={(e) => setAdditionalDevices(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
+                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                {(() => {
+                  const expiresAt = currentUser?.expiresAt ? new Date(currentUser.expiresAt).getTime() : 0
+                  const now = Date.now()
+                  const remainingMs = Math.max(0, expiresAt - now)
+                  const remainingMonths = Math.max(1, Math.ceil(remainingMs / (30 * 24 * 60 * 60 * 1000)))
+                  const devicePrice = currentTariff?.price || 150
+                  const baseAmount = additionalDevices * devicePrice * remainingMonths
+                  const discountPercent = 5
+                  const amount = Math.round(baseAmount * (1 - discountPercent / 100))
+                  return (
+                    <div className="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                      <p className="text-slate-300 text-sm">
+                        {t('dashboard.addDevicesPrice', 'К оплате')}: <span className="font-semibold text-white">{amount} ₽</span>
+                        {baseAmount > amount && (
+                          <span className="text-slate-500 text-xs ml-1 line-through">{baseAmount} ₽</span>
+                        )}
+                        {discountPercent > 0 && (
+                          <span className="text-green-400 text-xs ml-1">({t('dashboard.addDevicesDiscount', 'скидка')} {discountPercent}%)</span>
+                        )}
+                      </p>
+                      <p className="text-slate-500 text-xs mt-1">
+                        {additionalDevices} × {devicePrice} ₽/мес × {remainingMonths} {remainingMonths === 1 ? t('dashboard.month') : t('dashboard.months')}
+                        {discountPercent > 0 && ` − ${discountPercent}%`}
+                      </p>
+                    </div>
+                  )
+                })()}
+              </div>
+              <div className="p-4 sm:p-5 flex gap-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddDevicesModal(false)}
+                  className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  disabled={creatingSubscription}
+                  onClick={async () => {
+                    if (!onHandleAddDevices) return
+                    const result = await onHandleAddDevices(additionalDevices)
+                    if (!result?.paymentUrl || !result?.orderId) return
+                    setShowAddDevicesModal(false)
+                    setSubscriptionSuccess({
+                      paymentUrl: result.paymentUrl,
+                      orderId: result.orderId,
+                      amount: result.amount,
+                      requiresPayment: true,
+                      message: t('dashboard.paymentWindowOpen'),
+                      tariffId: result.tariffId || currentUser?.tariffId,
+                      tariffName: result.tariffName || currentUser?.tariffName,
+                      devices: result.devices,
+                      periodMonths: result.periodMonths,
+                      discount: 0,
+                      operationType: 'add_devices',
+                      newDevicesCount: result.newDevicesCount,
+                    })
+                    setShowSuccessModal(true)
+                    const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                    const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                    if (paymentWindow) {
+                      paymentWindow.focus()
+                      setPaymentWindowRef(paymentWindow)
+                      setPaymentOrderId(result.orderId)
+                    }
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white rounded-lg font-medium flex items-center justify-center gap-2"
+                >
+                  {creatingSubscription ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  <span>{creatingSubscription ? t('dashboard.processing', 'Обработка...') : t('dashboard.payAndAdd', 'Оплатить и добавить')}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Модальное окно подтверждения удаления подписки */}

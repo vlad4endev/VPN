@@ -8,6 +8,7 @@ const API_KEY_PLACEHOLDERS = {
   openai: 'sk-… (platform.openai.com/api-keys)',
   openrouter: 'sk-or-… (openrouter.ai/keys)',
   gemini: 'Ключ из aistudio.google.com/apikey',
+  qwen: 'Ключ из dashscope.console.aliyun.com (DASHSCOPE_API_KEY)',
 }
 
 /**

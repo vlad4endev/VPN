@@ -43,7 +43,7 @@ export async function getAiStatus() {
   return {
     configured: Boolean(json.configured),
     provider: json.provider ?? 'deepseek',
-    providers: Array.isArray(json.providers) ? json.providers : [{ id: 'deepseek', name: 'DeepSeek' }],
+    providers: Array.isArray(json.providers) ? json.providers : [{ id: 'deepseek', name: 'DeepSeek' }, { id: 'qwen', name: 'Qwen (Alibaba)' }],
     model: json.model ?? 'deepseek-chat',
     models: Array.isArray(json.models) ? json.models : [{ value: 'deepseek-chat', label: 'deepseek-chat' }],
     temperature: json.temperature != null ? Number(json.temperature) : 0.7,

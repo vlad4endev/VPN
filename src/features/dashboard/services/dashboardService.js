@@ -667,7 +667,12 @@ export const dashboardService = {
    * @param {number} discount - Скидка (0-1)
    * @returns {Promise<Object>} Объект с paymentUrl и orderId
    */
-  async initiatePayment(user, tariff, amount, devices = null, periodMonths = 1, discount = 0, promocodeId = null) {
+  /**
+   * Опции для инициации платежа (добавление устройств к Super)
+   * @param {string} [options.operationType] - 'add_devices' для доплаты за устройства
+   * @param {number} [options.newDevicesCount] - итоговое количество устройств после оплаты
+   */
+  async initiatePayment(user, tariff, amount, devices = null, periodMonths = 1, discount = 0, promocodeId = null, options = null) {
     try {
       logger.info('Dashboard', 'Инициация оплаты через YooMoney', {
         userId: user?.id,
@@ -825,7 +830,7 @@ export const dashboardService = {
       // Сохраняем заказ в Firestore со статусом 'pending'
       if (paymentResult.orderId) {
         const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
-        await addDoc(paymentsCollection, {
+        const paymentDoc = {
           userId: user.id,
           email: user.email,
           orderId: paymentResult.orderId,
@@ -839,7 +844,12 @@ export const dashboardService = {
           periodMonths: periodMonths || 1,
           promocodeId: promocodeId || null,
           createdAt: new Date().toISOString(),
-        })
+        }
+        if (options && options.operationType === 'add_devices' && options.newDevicesCount != null) {
+          paymentDoc.operationType = 'add_devices'
+          paymentDoc.newDevicesCount = options.newDevicesCount
+        }
+        await addDoc(paymentsCollection, paymentDoc)
 
         logger.info('Dashboard', 'Заказ создан со статусом pending', {
           userId: user.id,
@@ -912,6 +922,161 @@ export const dashboardService = {
       logger.error('Dashboard', 'Ошибка удаления платежей со статусом pending', { userId }, err)
       throw err
     }
+  },
+
+  /**
+   * Инициация оплаты за добавление устройств к действующей подписке Super.
+   * Сумма = (доп. устройства) × (цена за устройство/мес) × (оставшиеся месяцы). Скидка 5%.
+   * @param {Object} user - Текущий пользователь
+   * @param {Object} tariff - Тариф Super
+   * @param {number} additionalDevices - Сколько устройств добавить
+   * @returns {Promise<Object>} { paymentUrl, orderId, amount, requiresPayment, tariffId, tariffName, devices, periodMonths, operationType: 'add_devices', newDevicesCount }
+   */
+  async addDevicesToSubscription(user, tariff, additionalDevices) {
+    if (!user || !tariff || !user.expiresAt || additionalDevices < 1) {
+      throw new Error('Недостаточно данных или некорректное количество устройств')
+    }
+    const isSuper = tariff.name?.toLowerCase() === 'super' || tariff.plan?.toLowerCase() === 'super'
+    if (!isSuper) {
+      throw new Error('Добавление устройств доступно только для тарифа Super')
+    }
+    const now = Date.now()
+    const expiresAt = new Date(user.expiresAt).getTime()
+    if (expiresAt <= now) {
+      throw new Error('Подписка истекла. Сначала продлите подписку.')
+    }
+    const remainingMs = expiresAt - now
+    const remainingMonths = Math.max(1, Math.ceil(remainingMs / (30 * 24 * 60 * 60 * 1000)))
+    const currentDevices = user.devices || 1
+    const newDevicesCount = currentDevices + additionalDevices
+    const devicePrice = tariff.price || 150
+    const amount = additionalDevices * devicePrice * remainingMonths
+    if (amount <= 0) {
+      throw new Error('Некорректная сумма оплаты')
+    }
+    const ADD_DEVICES_DISCOUNT = 0.05 // скидка 5% при добавлении устройств
+    const result = await this.initiatePayment(
+      user,
+      tariff,
+      amount,
+      newDevicesCount,
+      remainingMonths,
+      ADD_DEVICES_DISCOUNT,
+      null,
+      { operationType: 'add_devices', newDevicesCount }
+    )
+    return {
+      ...result,
+      operationType: 'add_devices',
+      newDevicesCount,
+      devices: newDevicesCount,
+      periodMonths: remainingMonths,
+    }
+  },
+
+  /**
+   * После успешной оплаты «добавить устройства»: обновляет devices в Firestore и limitIp в 3x-ui.
+   * @param {Object} user - Текущий пользователь (с uuid, tariffId, expiresAt, email и т.д.)
+   * @param {number} newDevicesCount - Итоговое количество устройств
+   * @returns {Promise<Object>} Обновлённые данные пользователя
+   */
+  async applyAddDevicesAfterPayment(user, newDevicesCount) {
+    if (!db || !user || !user.id || user.uuid == null || user.uuid === '') {
+      throw new Error('Недостаточно данных пользователя для применения добавления устройств')
+    }
+    const clientId = user.uuid
+    const inboundId = import.meta.env?.VITE_XUI_INBOUND_ID || '1'
+
+    const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+    await updateDoc(userDocRef, {
+      devices: newDevicesCount,
+      updatedAt: new Date().toISOString(),
+    })
+    logger.info('Dashboard', 'Обновлено количество устройств в Firestore', { userId: user.id, newDevicesCount })
+
+    let serverId = null
+    let sessionCookie = null
+    let serverIP = null
+    let serverPort = null
+    let randompath = null
+    let protocol = null
+    let serverInboundId = null
+    let tariffData = { trafficGB: 0 }
+    try {
+      const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+      const settingsSnapshot = await getDoc(settingsDoc)
+      const settingsData = settingsSnapshot.exists() ? settingsSnapshot.data() : {}
+      const serversList = settingsData.servers || []
+      let serversToCheck = serversList
+      if (user.tariffId) {
+        serversToCheck = serversList.filter(server => {
+          if (server.tariffIds && server.tariffIds.length > 0) return server.tariffIds.includes(user.tariffId)
+          return true
+        })
+      }
+      for (const server of serversToCheck) {
+        if (server.active && (server.sessionCookie || (server.xuiUsername && server.xuiPassword))) {
+          serverId = server.id
+          sessionCookie = server.sessionCookie || null
+          serverIP = server.serverIP
+          serverPort = server.serverPort
+          randompath = server.randompath
+          protocol = server.protocol || (server.serverPort === 443 || server.serverPort === 40919 ? 'https' : 'http')
+          serverInboundId = server.xuiInboundId || inboundId
+          break
+        }
+      }
+      if (user.tariffId) {
+        const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+        const tariffSnap = await getDoc(tariffDoc)
+        if (tariffSnap.exists()) tariffData = tariffSnap.data()
+      }
+      if (!serverId || !serverIP || !serverPort) {
+        logger.warn('Dashboard', 'Сервер для 3x-ui не найден, устройства обновлены только в Firestore', { userId: user.id })
+        return { ...user, devices: newDevicesCount }
+      }
+    } catch (err) {
+      logger.warn('Dashboard', 'Ошибка получения сервера для обновления 3x-ui', { userId: user.id }, err)
+      return { ...user, devices: newDevicesCount }
+    }
+
+    const finalInboundId = serverInboundId || inboundId || '1'
+    const expiryTime = user.expiresAt ? new Date(user.expiresAt).getTime() : 0
+    const totalGB = tariffData.trafficGB > 0 ? tariffData.trafficGB * 1024 * 1024 * 1024 : 0
+    const xuiService = XUIService.getInstance()
+    const webhookUrl = await loadWebhookUrl()
+    const addClientData = {
+      operation: 'add_client',
+      category: 'update_subscription',
+      timestamp: new Date().toISOString(),
+      userId: user.id,
+      userUuid: clientId,
+      userName: user.name || user.email?.split('@')[0] || 'User',
+      userEmail: user.email,
+      email: user.name || user.email,
+      inboundId: parseInt(finalInboundId),
+      totalGB,
+      expiryTime,
+      limitIp: newDevicesCount,
+      clientId,
+      subId: user.subId || '',
+      tgId: user.tgId || '',
+      serverId,
+      sessionCookie,
+      serverIP,
+      serverPort,
+      randompath,
+      protocol,
+    }
+    if (webhookUrl) addClientData.webhookUrl = webhookUrl
+    try {
+      await xuiService.addClient(addClientData)
+      logger.info('Dashboard', 'Обновлён limitIp в 3x-ui после добавления устройств', { userId: user.id, newDevicesCount })
+    } catch (err) {
+      logger.error('Dashboard', 'Ошибка обновления 3x-ui при добавлении устройств', { userId: user.id, newDevicesCount }, err)
+      throw new Error(`Устройства обновлены в личном кабинете, но не удалось обновить лимит в 3x-ui: ${err.message}`)
+    }
+    return { ...user, devices: newDevicesCount }
   },
 
   /**

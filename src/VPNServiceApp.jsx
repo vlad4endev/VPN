@@ -1857,6 +1857,7 @@ export default function VPNServiceApp() {
         creatingSubscription={dashboardHandlers.creatingSubscription}
         onHandleCreateSubscription={dashboardHandlers.handleCreateSubscription}
         onHandleRenewSubscription={dashboardHandlers.handleRenewSubscription}
+        onHandleAddDevices={dashboardHandlers.handleAddDevices}
         onHandleUpdateProfile={dashboardHandlers.handleUpdateProfile}
         onHandleDeleteAccount={dashboardHandlers.handleDeleteAccount}
         onProfileNameChange={dashboardHandlers.handleProfileNameChange}
