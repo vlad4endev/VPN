@@ -78,8 +78,55 @@ npm install
 
 ### Требования к окружению
 
-- **iOS**: macOS, Xcode 15+, CocoaPods (`sudo gem install cocoapods`), Apple Developer Account.
-- **Android**: Android Studio (Hedgehog или новее), JDK 17, SDK 24+.
+- **iOS**: только **macOS**. Нужны Xcode 15+, CocoaPods, Apple Developer Account. На Linux сборка iOS невозможна (нет Xcode и `pod`).
+- **Android**: Linux, macOS или Windows. Android Studio (Hedgehog или новее), JDK 17, SDK 24+.
+
+### Важно: сервер на Linux (без Mac)
+
+На Linux **не нужны** CocoaPods, Homebrew или `gem` — это всё только для iOS на macOS. На Linux собирайте только **Android**.
+
+Если проект собирается на **Linux** (например, CI или сервер в `/opt/my-frontend`):
+
+- **Android** — добавляйте и собирайте как обычно: `npm run build`, `npm run cap:add:android`, `npm run cap:sync`, `npm run cap:android`.
+- **iOS** — на Linux не собирается. Варианты:
+  1. **Не добавлять iOS** на этом сервере: не запускайте `cap:add:ios` на Linux.
+  2. **Если папка `ios` уже есть** (например, склонирована из репо) и при `cap:sync` видите ошибку `pod ENOENT` — это нормально: CocoaPods есть только на macOS. Либо удалите папку `ios` и не синхронизируйте iOS на Linux (`npx cap sync --no-build` без ios, или просто не запускайте `cap:sync` для iOS). Сборку iOS делайте на Mac (см. ниже).
+  3. Чтобы **пересоздать платформу iOS** (например, после удаления `ios`): на **Mac** выполните `npm run cap:add:ios`, затем ниже — установка CocoaPods и `pod install`.
+
+### Ошибка «pod ENOENT» / «pod install failed» (только на macOS)
+
+iOS-зависимости ставит CocoaPods. Если при `cap:sync` или открытии Xcode появляется ошибка про `pod`:
+
+1. Установите CocoaPods (на Mac):
+   ```bash
+   sudo gem install cocoapods
+   # или через Homebrew:
+   brew install cocoapods
+   ```
+2. Установите поды в проекте:
+   ```bash
+   cd ios/App && pod install && cd ../..
+   ```
+3. После этого снова откройте проект в Xcode: `npm run cap:ios`.
+
+### Ошибка «CAPACITOR_ANDROID_STUDIO_PATH» (Linux / Android)
+
+Если при `npm run cap:android` Capacitor пишет, что можно задать путь через `CAPACITOR_ANDROID_STUDIO_PATH`, значит Android Studio не найден в стандартных путях.
+
+1. Установите [Android Studio](https://developer.android.com/studio) (если ещё не установлен).
+2. Укажите путь к исполняемому файлу Android Studio (обычно это `studio.sh`):
+   ```bash
+   # Пример, если Android Studio в /opt/android-studio:
+   export CAPACITOR_ANDROID_STUDIO_PATH="/opt/android-studio/bin/studio.sh"
+   npm run cap:android
+   ```
+   Или в вашем каталоге установки найдите `studio.sh` или `studio` и подставьте полный путь.
+3. Чтобы переменная работала постоянно, добавьте в `~/.bashrc` или `~/.profile`:
+   ```bash
+   export CAPACITOR_ANDROID_STUDIO_PATH="/путь/к/android-studio/bin/studio.sh"
+   ```
+
+Без графического окружения (сервер без GUI) Android Studio не запустится — тогда сборку AAB/APK делают через CLI (gradle в папке `android/`), см. раздел про Google Play.
 
 ---
 

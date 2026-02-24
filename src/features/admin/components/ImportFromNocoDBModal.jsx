@@ -222,7 +222,8 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     }
     setLoading(true)
     try {
-      const data = await fetchNocoDBPreview({ baseUrl, apiToken, tableId })
+      const tableId2 = (connectForm.tableId2 || '').trim()
+      const data = await fetchNocoDBPreview({ baseUrl, apiToken, tableId, ...(tableId2 ? { tableId2 } : {}) })
       setPreviewData(data)
       if (data.columns?.length) {
         const cols = data.columns
@@ -240,7 +241,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
           expiresAtColumn: guessColumn(cols, 'expiresAt', 'ExpiresAt', 'Действует до', 'validUntil'),
           orderIdColumn: guessColumn(cols, 'order_id', 'orderId'),
           amountColumn: guessColumn(cols, 'amount', 'Amount', 'сумма'),
-          devicesColumn: guessColumn(cols, 'devices', 'Devices', 'устройства'),
+          devicesColumn: guessColumn(cols, 'devices', 'Devices', 'устройства', 'Устройства'),
         })
       } else {
         setMapping({ ...DEFAULT_MAPPING })
@@ -458,7 +459,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="mxxxxxxxx — вторая таблица с той же структурой"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">При импорте данные загрузятся из обеих таблиц (предпросмотр — только из первой).</p>
+                <p className="text-[11px] text-slate-500 mt-1">При импорте данные загрузятся из обеих таблиц. В сопоставлении колонок будут показаны колонки из обеих таблиц (например, «Устройства» из второй таблицы).</p>
               </div>
               <p className="text-[11px] text-slate-500">
                 URL, токен, ID таблиц и маппинг сохраняются в браузере и подставляются при следующем открытии.

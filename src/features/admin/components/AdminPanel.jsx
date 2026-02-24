@@ -190,8 +190,8 @@ const AdminPanel = ({
         adminTab={adminTab}
         onSetAdminTab={onSetAdminTab}
       />
-      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
-        <div className="w-full max-w-content mx-auto min-w-0">
+      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
+        <div className={`w-full max-w-content mx-auto min-w-0 ${adminTab === 'users' ? 'flex flex-col flex-1 min-h-0' : ''}`}>
           {/* Шапка - Mobile First компактная */}
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 mb-3 sm:mb-4 border border-slate-800">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
@@ -208,11 +208,11 @@ const AdminPanel = ({
                   )}
                 </p>
               </div>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto min-w-0 shrink-0">
+              <div className="flex flex-row items-center gap-1.5 sm:gap-2 w-full sm:w-auto min-w-0 shrink-0 flex-wrap sm:flex-nowrap">
                 {adminTab !== 'dashboard' && (
                   <button
                     onClick={() => onSetAdminTab('dashboard')}
-                    className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
+                    className="flex-1 sm:flex-none btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] min-w-0 px-2 sm:px-3 py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
                     title={t('admin.toDashboard')}
                     aria-label={t('admin.dashboard')}
                   >
@@ -222,7 +222,7 @@ const AdminPanel = ({
                 )}
                 <button
                   onClick={() => setShowMonitoring(true)}
-                  className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
+                  className="flex-1 sm:flex-none btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] min-w-0 px-2 sm:px-3 py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
                   title="Открыть мониторинг сервера"
                   aria-label="Открыть мониторинг"
                 >
@@ -231,7 +231,7 @@ const AdminPanel = ({
                 </button>
                 <button
                   onClick={() => onSetAdminTab('tickets')}
-                  className={`btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation ${adminTab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white'}`}
+                  className={`flex-1 sm:flex-none btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] min-w-0 px-2 sm:px-3 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation ${adminTab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white'}`}
                   title="Перейти к тикетам"
                   aria-label="Тикеты"
                 >
@@ -240,7 +240,7 @@ const AdminPanel = ({
                 </button>
                 <button
                   onClick={() => onSetShowLogger(true)}
-                  className="btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] px-3 sm:px-3 py-2 sm:py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
+                  className="flex-1 sm:flex-none btn-icon-only-mobile min-h-[44px] sm:min-h-[40px] min-w-0 px-2 sm:px-3 py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
                   title="Открыть логи"
                   aria-label="Открыть логи"
                 >
@@ -264,51 +264,57 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'users' && (
-          <>
-            <div className="mb-3 sm:mb-4 flex flex-wrap justify-end gap-2">
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex-shrink-0 mb-3 sm:mb-4 flex flex-wrap items-center justify-end gap-2 sm:gap-2.5">
               {typeof loadUsers === 'function' && (
                 <button
                   type="button"
                   onClick={() => loadUsers()}
-                  className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                  className="inline-flex items-center justify-center gap-1.5 sm:gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-xl sm:rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs sm:text-sm font-medium transition-colors touch-manipulation"
                   title="Обновить список пользователей"
+                  aria-label="Обновить список"
                 >
-                  <RefreshCw className="w-4 h-4" />
-                  Обновить
+                  <RefreshCw className="w-4 h-4 flex-shrink-0" />
+                  <span className="hidden sm:inline">Обновить</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setShowImportNocoDBModal(true)}
-                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-xl sm:rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-xs sm:text-sm font-medium transition-colors touch-manipulation"
+                aria-label="Импорт из NocoDB"
               >
-                <Database className="w-4 h-4" />
-                Импорт из NocoDB
+                <Database className="w-4 h-4 flex-shrink-0" />
+                <span className="hidden sm:inline">Импорт из NocoDB</span>
+                <span className="sm:hidden">NocoDB</span>
               </button>
               <button
                 type="button"
                 onClick={() => setShowCreateUserModal(true)}
-                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-xl sm:rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium transition-colors touch-manipulation"
+                aria-label="Добавить пользователя"
               >
-                <PlusCircle className="w-4 h-4" />
-                Добавить пользователя
+                <PlusCircle className="w-4 h-4 flex-shrink-0" />
+                <span>Добавить</span>
               </button>
             </div>
-            <VirtualizedUserTable
-              users={users}
-              editingUser={editingUser}
-              onSetEditingUser={onSetEditingUser}
-              onHandleUpdateUser={onHandleUpdateUser}
-              onHandleDeleteUser={onHandleDeleteUser}
-              onHandleCopy={onHandleCopy}
-              currentUser={currentUser}
-              formatDate={formatDate}
-              handleUserRoleChange={handleUserRoleChange}
-              handleUserPlanChange={handleUserPlanChange}
-              handleUserDevicesChange={handleUserDevicesChange}
-              handleUserExpiresAtChange={handleUserExpiresAtChange}
-              onUserRowClick={handleUserRowClick}
-            />
+            <div className="flex-1 min-h-0 flex flex-col">
+              <VirtualizedUserTable
+                users={users}
+                editingUser={editingUser}
+                onSetEditingUser={onSetEditingUser}
+                onHandleUpdateUser={onHandleUpdateUser}
+                onHandleDeleteUser={onHandleDeleteUser}
+                onHandleCopy={onHandleCopy}
+                currentUser={currentUser}
+                formatDate={formatDate}
+                handleUserRoleChange={handleUserRoleChange}
+                handleUserPlanChange={handleUserPlanChange}
+                handleUserDevicesChange={handleUserDevicesChange}
+                handleUserExpiresAtChange={handleUserExpiresAtChange}
+                onUserRowClick={handleUserRowClick}
+              />
+            </div>
             {/* Карточка пользователя */}
             {selectedUser && (
               <UserCard
@@ -325,7 +331,7 @@ const AdminPanel = ({
             {showImportNocoDBModal && (
               <ImportFromNocoDBModal onClose={() => setShowImportNocoDBModal(false)} />
             )}
-          </>
+          </div>
         )}
 
         {adminTab === 'settings' && (

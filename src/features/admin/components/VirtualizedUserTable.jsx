@@ -1,5 +1,5 @@
 import { FixedSizeList } from 'react-window'
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import React from 'react'
 import { Edit2, Trash2, Copy, CheckCircle2, XCircle, AlertCircle, Save, X, User, Mail, Calendar, Search, Filter, XCircle as ClearIcon } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
@@ -38,9 +38,9 @@ const VirtualizedUserTable = ({
   handleUserExpiresAtChange,
   onUserRowClick,
 }) => {
-  // Высота строки таблицы (в пикселях)
-  const ROW_HEIGHT = 80
-  const CARD_HEIGHT = 125 // Высота карточки на мобильных с учетом переносов текста
+  // Высота строки таблицы (в пикселях) — запас для редактирования и переносов
+  const ROW_HEIGHT = 88
+  const CARD_HEIGHT = 200 // Высота карточки на мобильных с учетом переносов текста (без наложения)
   
   // Фильтры
   const [searchText, setSearchText] = useState('')
@@ -52,8 +52,10 @@ const VirtualizedUserTable = ({
   // Определяем, мобильный ли экран
   const [isMobile, setIsMobile] = useState(false)
   const [containerHeight, setContainerHeight] = useState(600)
+  const [listAreaHeight, setListAreaHeight] = useState(400) // реальная высота области списка (подстраивается под контейнер)
+  const listAreaRef = useRef(null)
   const [tableWidth, setTableWidth] = useState(1200)
-  const [filtersExpanded, setFiltersExpanded] = useState(true)
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
 
   // Уникальные значения для селектов (тарифы из списка пользователей)
   const tariffOptions = useMemo(() => {
@@ -102,15 +104,28 @@ const VirtualizedUserTable = ({
   useEffect(() => {
     const updateDimensions = () => {
       const mobile = window.innerWidth < 768
+      const fallbackHeight = mobile ? 400 : 600
       setIsMobile(mobile)
-      setContainerHeight(mobile ? 400 : 600)
-      // Для десктопа используем минимальную ширину 900px или ширину контейнера
+      setContainerHeight(fallbackHeight)
       setTableWidth(mobile ? window.innerWidth : Math.max(900, window.innerWidth))
+      setListAreaHeight((prev) => (prev < 100 ? fallbackHeight : prev))
     }
     updateDimensions()
     window.addEventListener('resize', updateDimensions)
     return () => window.removeEventListener('resize', updateDimensions)
   }, [])
+
+  // Высота области списка подстраивается под контейнер (нет пустого места при сворачивании фильтров)
+  useEffect(() => {
+    const el = listAreaRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const { height } = entries[0]?.contentRect ?? {}
+      if (typeof height === 'number' && height > 0) setListAreaHeight(height)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [filtersExpanded])
 
   // Мемоизация данных для передачи в виртуализированный список (используем отфильтрованный список)
   const itemData = useMemo(() => ({
@@ -155,11 +170,11 @@ const VirtualizedUserTable = ({
 
     return (
       <div
-        style={style}
-        className="px-2 sm:px-3 py-1.5"
+        style={{ ...style, overflow: 'hidden', minHeight: style.height }}
+        className="px-2 sm:px-3 py-1.5 box-border"
       >
         <div 
-          className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 sm:p-3 hover:bg-slate-750 transition-colors cursor-pointer"
+          className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 sm:p-3 hover:bg-slate-750 transition-colors cursor-pointer min-h-0 overflow-hidden flex flex-col"
           onClick={() => {
             if (data.onUserRowClick && !isEditing) {
               data.onUserRowClick(user)
@@ -316,15 +331,15 @@ const VirtualizedUserTable = ({
 
     return (
       <div
-        style={style}
-        className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors cursor-pointer"
+        style={{ ...style, overflow: 'hidden', minHeight: style.height }}
+        className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors cursor-pointer box-border"
         onClick={() => {
           if (data.onUserRowClick && !isEditing) {
             data.onUserRowClick(user)
           }
         }}
       >
-        <div className="grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 items-center min-h-[80px]">
+        <div className="grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 items-center min-h-[72px] max-h-full overflow-hidden">
           {/* Имя пользователя */}
           <div className="min-w-0">
             <div className="text-slate-200 font-medium text-sm truncate" title={user.name || user.email}>
@@ -466,15 +481,15 @@ const VirtualizedUserTable = ({
   }
 
   return (
-    <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 overflow-hidden">
-      {/* Заголовок и счётчик */}
-      <div className="p-3 sm:p-4 md:p-5 border-b border-slate-800">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base sm:text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200">Управление пользователями</h2>
-            <p className="text-slate-400 text-xs sm:text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mt-0.5">
+    <div className="bg-slate-900 rounded-xl sm:rounded-xl shadow-xl border border-slate-800 overflow-hidden flex flex-col flex-1 min-h-0">
+      {/* Заголовок и счётчик — компактно на мобильных (не сжимается) */}
+      <div className="flex-shrink-0 p-3 sm:p-4 md:p-5 border-b border-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base md:text-lg font-bold text-slate-200 truncate">Управление пользователями</h2>
+            <p className="text-slate-400 text-xs sm:text-sm mt-0.5 tabular-nums">
               {hasActiveFilters ? (
-                <>Показано: <span className="text-blue-400 font-semibold">{filteredUsers.length}</span> из <span className="text-slate-300">{users.length}</span></>
+                <>Показано: <span className="text-blue-400 font-semibold">{filteredUsers.length}</span> из {users.length}</>
               ) : (
                 <>Всего: <span className="text-blue-400 font-semibold">{users.length}</span></>
               )}
@@ -483,81 +498,85 @@ const VirtualizedUserTable = ({
           <button
             type="button"
             onClick={() => setFiltersExpanded((v) => !v)}
-            className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-sm"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 sm:gap-2 min-h-[44px] px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-slate-100 text-xs sm:text-sm font-medium transition-colors touch-manipulation border border-slate-700/50"
             aria-expanded={filtersExpanded}
           >
-            <Filter className="w-4 h-4" />
-            {filtersExpanded ? 'Скрыть фильтры' : 'Показать фильтры'}
+            <Filter className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden sm:inline">{filtersExpanded ? 'Скрыть фильтры' : 'Показать фильтры'}</span>
+            <span className="sm:hidden">{filtersExpanded ? 'Скрыть' : 'Фильтры'}</span>
           </button>
         </div>
 
-        {/* Панель фильтров */}
+        {/* Панель фильтров — сетка на мобильных, ряд на десктопе */}
         {filtersExpanded && (
-          <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-3">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <div className="relative flex-1 min-w-[140px] max-w-[220px]">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+          <div className="mt-3 pt-3 border-t border-slate-700/50">
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-3 sm:gap-2">
+              <div className="relative w-full sm:flex-1 sm:min-w-[160px] sm:max-w-[220px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                 <input
                   type="text"
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="Поиск по имени, email, логину..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Поиск по имени, email..."
+                  className="w-full pl-9 pr-3 min-h-[44px] py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation"
                   aria-label="Поиск"
                 />
               </div>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[120px]"
-                aria-label="Роль"
-              >
-                <option value="">Все роли</option>
-                {USER_ROLE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <select
-                value={planFilter}
-                onChange={(e) => setPlanFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[100px]"
-                aria-label="План"
-              >
-                <option value="">Все планы</option>
-                <option value="free">free</option>
-                <option value="super">super</option>
-                <option value="multi">multi</option>
-              </select>
-              <select
-                value={tariffFilter}
-                onChange={(e) => setTariffFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[100px]"
-                aria-label="Тариф"
-              >
-                <option value="">Все тарифы</option>
-                {tariffOptions.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <select
-                value={paymentFilter}
-                onChange={(e) => setPaymentFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 min-w-[120px]"
-                aria-label="Оплата"
-              >
-                <option value="">Все</option>
-                <option value="paid">Оплачено</option>
-                <option value="test_period">Тест</option>
-                <option value="unpaid">Не оплачено</option>
-              </select>
+              <div className="grid grid-cols-2 gap-2 sm:contents">
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className="min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation sm:min-w-[120px]"
+                  aria-label="Роль"
+                >
+                  <option value="">Все роли</option>
+                  {USER_ROLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={planFilter}
+                  onChange={(e) => setPlanFilter(e.target.value)}
+                  className="min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation sm:min-w-[100px]"
+                  aria-label="План"
+                >
+                  <option value="">Все планы</option>
+                  <option value="free">free</option>
+                  <option value="super">super</option>
+                  <option value="multi">multi</option>
+                </select>
+                <select
+                  value={tariffFilter}
+                  onChange={(e) => setTariffFilter(e.target.value)}
+                  className="min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation sm:min-w-[100px]"
+                  aria-label="Тариф"
+                >
+                  <option value="">Все тарифы</option>
+                  {tariffOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <select
+                  value={paymentFilter}
+                  onChange={(e) => setPaymentFilter(e.target.value)}
+                  className="min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation sm:min-w-[100px]"
+                  aria-label="Оплата"
+                >
+                  <option value="">Оплата</option>
+                  <option value="paid">Оплачено</option>
+                  <option value="test_period">Тест</option>
+                  <option value="unpaid">Не оплачено</option>
+                </select>
+              </div>
               {hasActiveFilters && (
                 <button
                   type="button"
                   onClick={clearFilters}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 text-sm"
+                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-700/80 border border-slate-600/50 text-sm font-medium touch-manipulation sm:order-last"
                   title="Сбросить фильтры"
+                  aria-label="Сбросить фильтры"
                 >
-                  <ClearIcon className="w-4 h-4" />
+                  <ClearIcon className="w-4 h-4 flex-shrink-0" />
                   Сбросить
                 </button>
               )}
@@ -574,23 +593,23 @@ const VirtualizedUserTable = ({
           <button type="button" onClick={clearFilters} className="mt-2 text-blue-400 hover:underline text-sm">Сбросить фильтры</button>
         </div>
       ) : isMobile ? (
-        <div className="overflow-y-auto" style={{ height: containerHeight }}>
+        <div ref={listAreaRef} className="flex-1 min-h-0 overflow-hidden flex flex-col" style={{ minHeight: 200 }}>
           <FixedSizeList
-            height={containerHeight}
+            height={listAreaHeight}
             itemCount={filteredUsers.length}
             itemSize={CARD_HEIGHT}
             width="100%"
             itemData={itemData}
             overscanCount={3}
-            className="scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900"
+            className="scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900 flex-1"
           >
             {MobileCard}
           </FixedSizeList>
         </div>
       ) : (
-        <>
+        <div className="flex-1 min-h-0 flex flex-col">
           {/* Заголовок таблицы для десктопа */}
-          <div className="bg-slate-800/50 grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700">
+          <div className="flex-shrink-0 bg-slate-800/50 grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700">
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Пользователь</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Роль</div>
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Статус</div>
@@ -600,9 +619,9 @@ const VirtualizedUserTable = ({
           </div>
 
           {/* Виртуализированный список для десктопа */}
-          <div className="overflow-x-auto">
+          <div ref={listAreaRef} className="flex-1 min-h-0 overflow-x-auto" style={{ minHeight: 200 }}>
             <FixedSizeList
-              height={containerHeight}
+              height={listAreaHeight}
               itemCount={filteredUsers.length}
               itemSize={ROW_HEIGHT}
               width={tableWidth}
@@ -613,7 +632,7 @@ const VirtualizedUserTable = ({
               {DesktopRow}
             </FixedSizeList>
           </div>
-        </>
+        </div>
       )}
     </div>
   )

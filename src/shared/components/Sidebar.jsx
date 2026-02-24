@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, MoreHorizontal, TrendingDown } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, TrendingDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
 import LanguageSwitcher from './LanguageSwitcher.jsx'
 
-// Мобильная панель: основные кнопки и «Прочее» (вычисляем здесь, чтобы не зависеть от экспортов navSections)
+// Мобильная панель: основные кнопки (Дашборд, Пользователи, Отзывы) + Воронка
 const ADMIN_MOBILE_PRIMARY_IDS = ['dashboard', 'users', 'reviews']
-const ADMIN_MOBILE_OTHER_ITEMS = ADMIN_NAV_ITEMS.filter((item) => !ADMIN_MOBILE_PRIMARY_IDS.includes(item.id))
 import NotificationsCenter from '../../features/notifications/components/NotificationsCenter.jsx'
 
 const SUPPORT_TELEGRAM_URL = 'https://t.me/SkyPathsupport'
@@ -44,7 +43,6 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   const { t } = useTranslation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const [showAdminMore, setShowAdminMore] = useState(false)
   const [expandedAdminSections, setExpandedAdminSections] = useState(() => {
     const openKey = getSectionKeyByTabId(adminTab)
     return openKey ? { [openKey]: true } : { [ADMIN_NAV_SECTIONS[0]?.titleKey]: true }
@@ -390,7 +388,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
       {hasAdminTabs && (
         <>
-          {/* Компактная нижняя панель: Дашборд, Пользователи, Отзывы, Прочее */}
+          {/* Компактная нижняя панель: Дашборд, Пользователи, Отзывы, Воронка */}
           <nav
             className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch bg-slate-900/95 border-t border-slate-800 backdrop-blur-md safe-area-pb"
             role="tablist"
@@ -417,67 +415,17 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
             <button
               type="button"
               role="tab"
-              aria-selected={showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab)}
-              aria-expanded={showAdminMore}
-              aria-label={t('sidebar.more')}
-              onClick={() => setShowAdminMore((v) => !v)}
-              className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
+              aria-selected={adminTab === 'analytics-funnel'}
+              aria-label={t('admin.analyticsFunnel')}
+              onClick={() => handleAdminTab('analytics-funnel')}
+              className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 py-2 px-2 transition-all duration-250 ease-out touch-manipulation ${adminTab === 'analytics-funnel' ? 'text-blue-400' : 'text-slate-400 active:text-slate-300'}`}
             >
-              <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${showAdminMore || ADMIN_MOBILE_OTHER_ITEMS.some((i) => i.id === adminTab) ? 'bg-blue-600/20 scale-110' : ''}`}>
-                <MoreHorizontal size={22} strokeWidth={2} />
+              <span className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-250 ${adminTab === 'analytics-funnel' ? 'bg-blue-600/20 scale-110' : ''}`}>
+                <TrendingDown size={22} strokeWidth={adminTab === 'analytics-funnel' ? 2.5 : 2} />
               </span>
-              <span className="text-[11px] font-medium">{t('sidebar.more')}</span>
+              <span className="text-[11px] font-medium truncate max-w-full px-0.5">{t('admin.analyticsFunnel')}</span>
             </button>
           </nav>
-
-          {/* Панель «Прочее»: остальные разделы */}
-          {showAdminMore && (
-            <>
-              <div
-                className="lg:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-                aria-hidden="true"
-                onClick={() => setShowAdminMore(false)}
-              />
-              <div
-                className="lg:hidden fixed left-0 right-0 bottom-0 z-50 rounded-t-2xl bg-slate-900 border-t border-slate-700 shadow-2xl safe-area-pb max-h-[70vh] overflow-hidden flex flex-col"
-                role="dialog"
-                aria-label={t('sidebar.moreSectionsAria')}
-              >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-                  <span className="text-sm font-semibold text-slate-300">{t('sidebar.sections')}</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowAdminMore(false)}
-                    className="p-2 -m-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                    aria-label={t('common.close')}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                <div className="overflow-y-auto p-3 pb-8 grid grid-cols-2 gap-2">
-                  {ADMIN_MOBILE_OTHER_ITEMS.map(({ id, labelKey, icon: Icon }) => {
-                    const active = adminTab === id
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          onSetAdminTab(id)
-                          setShowAdminMore(false)
-                        }}
-                        className={`flex items-center gap-3 p-3 rounded-xl text-left transition-colors touch-manipulation ${active ? 'bg-blue-600/30 text-blue-300' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 active:bg-slate-600'}`}
-                      >
-                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-700/80 flex items-center justify-center">
-                          <Icon size={18} strokeWidth={2} />
-                        </span>
-                        <span className="text-sm font-medium truncate">{t(labelKey)}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          )}
         </>
       )}
     </>

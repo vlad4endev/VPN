@@ -3,7 +3,8 @@ import { X, Search, Filter, Download, Trash2, AlertCircle, Info, AlertTriangle, 
 import logger from '../utils/logger.js'
 
 /**
- * Панель логирования для просмотра и анализа логов приложения
+ * Панель логирования для просмотра и анализа логов приложения.
+ * Адаптирована под мобильные: компактный заголовок, сворачиваемые фильтры, удобные зоны нажатия.
  */
 export default function LoggerPanel({ onClose }) {
   const [logs, setLogs] = useState([])
@@ -12,6 +13,7 @@ export default function LoggerPanel({ onClose }) {
     category: '',
     search: '',
   })
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState(new Set())
   const [stats, setStats] = useState(null)
@@ -155,152 +157,179 @@ export default function LoggerPanel({ onClose }) {
   const categories = [...new Set(logs.map(log => log.category))].sort()
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-lg shadow-xl w-full max-w-6xl h-[90vh] flex flex-col border border-slate-800">
-        {/* Заголовок */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-200 flex items-center gap-2">
-              <Bug className="w-5 h-5" />
-              Система логирования
-            </h2>
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 safe-area-insets">
+      <div className="bg-slate-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-6xl max-h-[95dvh] sm:max-h-[90vh] h-[95dvh] sm:h-[90vh] flex flex-col border border-slate-800 border-b-0 sm:border-b">
+        {/* Заголовок — компактно на мобильных */}
+        <div className="flex-shrink-0 p-3 sm:p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <Bug className="w-5 h-5 flex-shrink-0 text-slate-400" />
+              <h2 className="text-base sm:text-xl font-bold text-slate-200 truncate">
+                Система логирования
+              </h2>
+            </div>
             {stats && (
-              <div className="flex items-center gap-4 text-sm text-slate-400">
+              <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-slate-400 flex-shrink-0 tabular-nums">
                 <span>Всего: {stats.total}</span>
                 <span className="text-red-400">Ошибок: {stats.byLevel.error}</span>
-                <span className="text-yellow-400">Предупреждений: {stats.byLevel.warn}</span>
+                <span className="text-amber-400">Пред: {stats.byLevel.warn}</span>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
               onClick={() => setAutoScroll(!autoScroll)}
-              className={`px-3 py-1 rounded text-sm transition-colors ${
+              className={`min-h-[44px] sm:min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm transition-colors touch-manipulation flex items-center justify-center ${
                 autoScroll
                   ? 'bg-blue-600 text-white'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
+              title="Автопрокрутка"
+              aria-label="Автопрокрутка"
             >
-              Автопрокрутка
+              <span className="hidden sm:inline">Автопрокрутка</span>
+              <span className="sm:hidden">Авто</span>
             </button>
             <button
               onClick={handleClear}
-              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors flex items-center gap-1"
+              className="min-h-[44px] sm:min-h-[36px] min-w-[44px] sm:min-w-0 px-2.5 sm:px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs sm:text-sm transition-colors flex items-center justify-center gap-1 touch-manipulation"
+              title="Очистить логи"
+              aria-label="Очистить"
             >
-              <Trash2 className="w-4 h-4" />
-              Очистить
+              <Trash2 className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Очистить</span>
             </button>
-            <div className="relative">
-              <button
-                onClick={() => handleExport('json')}
-                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors flex items-center gap-1"
-              >
-                <Download className="w-4 h-4" />
-                Экспорт
-              </button>
-            </div>
+            <button
+              onClick={() => handleExport('json')}
+              className="min-h-[44px] sm:min-h-[36px] min-w-[44px] sm:min-w-0 px-2.5 sm:px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs sm:text-sm transition-colors flex items-center justify-center gap-1 touch-manipulation"
+              title="Экспорт логов"
+              aria-label="Экспорт"
+            >
+              <Download className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Экспорт</span>
+            </button>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-200 transition-colors"
+              className="min-h-[44px] min-w-[44px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors touch-manipulation"
+              aria-label="Закрыть"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
           </div>
         </div>
 
-        {/* Фильтры */}
-        <div className="p-4 border-b border-slate-800 bg-slate-800/50">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Поиск по логам..."
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+        {/* Фильтры — на мобильных сворачиваемые */}
+        <div className="flex-shrink-0 border-b border-slate-800 bg-slate-800/50">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="w-full sm:hidden flex items-center justify-between gap-2 min-h-[44px] px-3 py-2.5 text-slate-300 hover:bg-slate-700/50 text-sm font-medium touch-manipulation"
+            aria-expanded={filtersOpen}
+          >
+            <span className="flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Фильтры
+            </span>
+            {filtersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          <div className={`p-3 sm:p-4 ${filtersOpen ? 'block' : 'hidden sm:block'}`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
+              <div className="relative md:col-span-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Поиск по логам..."
+                  value={filters.search}
+                  onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                  className="w-full pl-9 pr-3 min-h-[44px] py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation"
+                  aria-label="Поиск по логам"
+                />
+              </div>
+              <select
+                value={filters.level}
+                onChange={(e) => setFilters({ ...filters, level: e.target.value })}
+                className="min-h-[44px] px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation"
+                aria-label="Уровень"
+              >
+                <option value="">Все уровни</option>
+                <option value="debug">Debug</option>
+                <option value="info">Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </select>
+              <select
+                value={filters.category}
+                onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+                className="min-h-[44px] px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 touch-manipulation"
+                aria-label="Категория"
+              >
+                <option value="">Все категории</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
             </div>
-            <select
-              value={filters.level}
-              onChange={(e) => setFilters({ ...filters, level: e.target.value })}
-              className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Все уровни</option>
-              <option value="debug">Debug</option>
-              <option value="info">Info</option>
-              <option value="warn">Warn</option>
-              <option value="error">Error</option>
-            </select>
-            <select
-              value={filters.category}
-              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-              className="px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Все категории</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
           </div>
         </div>
 
         {/* Список логов */}
-        <div 
+        <div
           ref={logsContainerRef}
-          className="flex-1 overflow-y-auto p-4 space-y-2"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-2 overscroll-contain touch-manipulation"
         >
           {logs.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <Info className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Логи не найдены</p>
+            <div className="text-center py-8 sm:py-12 text-slate-400">
+              <Info className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-3 sm:mb-4 opacity-50" />
+              <p className="text-sm sm:text-base">Логи не найдены</p>
               {Object.values(filters).some(f => f) && (
-                <p className="text-sm mt-2">Попробуйте изменить фильтры</p>
+                <p className="text-xs sm:text-sm mt-2">Попробуйте изменить фильтры</p>
               )}
             </div>
           ) : (
             logs.map((log) => {
               const isExpanded = expandedLogs.has(log.id)
               const isToday = formatDate(log.timestamp) === formatDate(new Date().toISOString())
-              
+
               return (
                 <div
                   key={log.id}
-                  className={`border rounded-lg p-3 transition-all ${getLevelColor(log.level)}`}
+                  className={`border rounded-xl sm:rounded-lg p-2.5 sm:p-3 transition-all ${getLevelColor(log.level)}`}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5">
+                  <div className="flex items-start gap-2 sm:gap-3">
+                    <div className="mt-0.5 flex-shrink-0">
                       {getLevelIcon(log.level)}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-mono text-slate-400">
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                            <span className="text-[11px] sm:text-xs font-mono text-slate-400 whitespace-nowrap">
                               {isToday ? formatTime(log.timestamp) : `${formatDate(log.timestamp)} ${formatTime(log.timestamp)}`}
                             </span>
-                            <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded bg-slate-900/50">
+                            <span className="text-[11px] sm:text-xs font-semibold uppercase px-1.5 sm:px-2 py-0.5 rounded bg-slate-900/50">
                               {log.level}
                             </span>
-                            <span className="text-xs font-medium px-2 py-0.5 rounded bg-slate-900/50">
+                            <span className="text-[11px] sm:text-xs font-medium px-1.5 sm:px-2 py-0.5 rounded bg-slate-900/50 truncate max-w-[120px] sm:max-w-none">
                               {log.category}
                             </span>
                           </div>
-                          <p className="mt-1 text-sm break-words">{log.message}</p>
+                          <p className="mt-1 text-xs sm:text-sm break-words leading-snug sm:leading-normal">{log.message}</p>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
                           <button
                             onClick={() => handleCopyLog(log)}
-                            className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+                            className="min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] flex items-center justify-center hover:bg-slate-700/50 rounded-lg transition-colors touch-manipulation"
                             title="Копировать"
+                            aria-label="Копировать"
                           >
                             <Copy className="w-4 h-4" />
                           </button>
                           {(log.data || log.error || log.stack) && (
                             <button
                               onClick={() => toggleLogExpansion(log.id)}
-                              className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                              title={isExpanded ? "Свернуть" : "Развернуть"}
+                              className="min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] flex items-center justify-center hover:bg-slate-700/50 rounded-lg transition-colors touch-manipulation"
+                              title={isExpanded ? 'Свернуть' : 'Развернуть'}
+                              aria-label={isExpanded ? 'Свернуть' : 'Развернуть'}
                             >
                               {isExpanded ? (
                                 <ChevronUp className="w-4 h-4" />
@@ -311,29 +340,29 @@ export default function LoggerPanel({ onClose }) {
                           )}
                         </div>
                       </div>
-                      
+
                       {isExpanded && (
-                        <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
+                        <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-slate-700 space-y-2">
                           {log.data && (
                             <div>
-                              <p className="text-xs font-semibold mb-1 text-slate-400">Данные:</p>
-                              <pre className="text-xs bg-slate-950 p-2 rounded overflow-x-auto font-mono">
+                              <p className="text-[11px] sm:text-xs font-semibold mb-1 text-slate-400">Данные:</p>
+                              <pre className="text-[11px] sm:text-xs bg-slate-950 p-2 rounded-lg overflow-x-auto font-mono break-all whitespace-pre-wrap">
                                 {JSON.stringify(log.data, null, 2)}
                               </pre>
                             </div>
                           )}
                           {log.error && (
                             <div>
-                              <p className="text-xs font-semibold mb-1 text-slate-400">Ошибка:</p>
-                              <pre className="text-xs bg-slate-950 p-2 rounded overflow-x-auto font-mono">
+                              <p className="text-[11px] sm:text-xs font-semibold mb-1 text-slate-400">Ошибка:</p>
+                              <pre className="text-[11px] sm:text-xs bg-slate-950 p-2 rounded-lg overflow-x-auto font-mono break-all whitespace-pre-wrap">
                                 {JSON.stringify(log.error, null, 2)}
                               </pre>
                             </div>
                           )}
                           {log.stack && (
                             <div>
-                              <p className="text-xs font-semibold mb-1 text-slate-400">Stack trace:</p>
-                              <pre className="text-xs bg-slate-950 p-2 rounded overflow-x-auto font-mono text-red-300">
+                              <p className="text-[11px] sm:text-xs font-semibold mb-1 text-slate-400">Stack trace:</p>
+                              <pre className="text-[11px] sm:text-xs bg-slate-950 p-2 rounded-lg overflow-x-auto font-mono text-red-300 break-all whitespace-pre-wrap">
                                 {log.stack}
                               </pre>
                             </div>

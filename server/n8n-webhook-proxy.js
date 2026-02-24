@@ -2851,7 +2851,7 @@ app.post('/api/admin/import-from-nocodb/save-config', express.json(), async (req
   }
 })
 
-/** POST /api/admin/import-from-nocodb/preview — только загрузить записи из NocoDB (без создания пользователей). Для окна сопоставления колонок. */
+/** POST /api/admin/import-from-nocodb/preview — загрузить записи из NocoDB (и при наличии tableId2 — объединить колонки обеих таблиц для маппинга). */
 app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
@@ -2859,16 +2859,17 @@ app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
   const baseUrl = (body.baseUrl || process.env.NOCODB_BASE_URL || '').toString().trim().replace(/\/+$/, '')
   const apiToken = (body.apiToken || process.env.NOCODB_API_TOKEN || '').toString().trim()
   const tableId = (body.tableId || process.env.NOCODB_TABLE_ID || '').toString().trim()
+  const tableId2 = (body.tableId2 || '').toString().trim()
   if (!baseUrl || !apiToken) {
     return res.status(400).json({ success: false, error: 'Укажите baseUrl и apiToken' })
   }
   if (!tableId) {
     return res.status(400).json({ success: false, error: 'Укажите tableId' })
   }
-  try {
-    const listUrl = `${baseUrl}/api/v2/tables/${tableId}/records`
+  const fetchTableRows = async (tid) => {
+    const listUrl = `${baseUrl}/api/v2/tables/${tid}/records`
     const limit = 1000
-    const allRows = []
+    const rows = []
     let offset = 0
     let hasMore = true
     while (hasMore) {
@@ -2880,11 +2881,21 @@ app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
       })
       const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
       if (!Array.isArray(list) || list.length === 0) break
-      allRows.push(...list)
+      rows.push(...list)
       offset += list.length
       if (list.length < limit) hasMore = false
     }
-    const columns = allRows.length > 0 ? Object.keys(allRows[0]) : []
+    return rows
+  }
+  try {
+    const allRows = await fetchTableRows(tableId)
+    const columnsSet = new Set()
+    allRows.forEach((r) => { if (r && typeof r === 'object') Object.keys(r).forEach((k) => columnsSet.add(k)) })
+    if (tableId2) {
+      const rows2 = await fetchTableRows(tableId2)
+      rows2.forEach((r) => { if (r && typeof r === 'object') Object.keys(r).forEach((k) => columnsSet.add(k)) })
+    }
+    const columns = Array.from(columnsSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     return res.json({ success: true, list: allRows, columns })
   } catch (err) {
     const msg = err.response?.data?.message || err.response?.data?.msg || err.message
