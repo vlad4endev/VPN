@@ -195,38 +195,43 @@ app.get('/health', (req, res) => {
   })
 })
 
-// Прокси к полному бэкенду (n8n-webhook-proxy), если задан BACKEND_URL.
-// Нужно, когда на 3001 запущен proxy-server (npm start из корня), а полный API — на другом порту.
+// Прокси к полному бэкенду (n8n-webhook-proxy), если задан BACKEND_URL или по умолчанию на 3002.
+// Когда на 3001 запущен proxy-server, полный API может быть на том же порту (n8n-webhook-proxy) или на другом (BACKEND_URL).
 const BACKEND_URL = process.env.BACKEND_URL || process.env.N8N_PROXY_URL
+// По умолчанию: если proxy-server на 3001, бэкенд ожидается на 3002 (запуск: PORT=3002 node server/n8n-webhook-proxy.js)
+const backendBase = (BACKEND_URL && BACKEND_URL.replace(/\/+$/, '')) || 'http://127.0.0.1:3002'
 // пути относительно /api (в app.use('/api', ...) req.path будет /vpn/..., /payment/...)
 const BACKEND_API_PREFIXES = ['/vpn', '/payment', '/auth', '/admin', '/analytics', '/promocodes', '/ai', '/public', '/init', '/referral']
-if (BACKEND_URL) {
-  const backendBase = BACKEND_URL.replace(/\/+$/, '')
-  app.use('/api', (req, res, next) => {
-    if (!BACKEND_API_PREFIXES.some((p) => req.path.startsWith(p))) return next()
-    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
-    const targetUrl = `${backendBase}/api${req.path}${query}`
-    axios({
-      method: req.method,
-      url: targetUrl,
-      data: req.body,
-      headers: {
-        'Content-Type': req.headers['content-type'] || 'application/json',
-        'Accept': req.headers['accept'] || 'application/json',
-        ...(req.headers.authorization && { Authorization: req.headers.authorization }),
-        ...(req.headers['x-app-id'] && { 'X-App-Id': req.headers['x-app-id'] }),
-      },
-      validateStatus: () => true,
-      timeout: 60000,
-    })
-      .then((backendRes) => {
-        res.status(backendRes.status).json(backendRes.data)
-      })
-      .catch((err) => {
-        res.status(502).json({ success: false, error: err.message || 'Backend unavailable' })
-      })
+
+app.use('/api', (req, res, next) => {
+  if (!BACKEND_API_PREFIXES.some((p) => req.path.startsWith(p))) return next()
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+  const targetUrl = `${backendBase}/api${req.path}${query}`
+  axios({
+    method: req.method,
+    url: targetUrl,
+    data: req.body,
+    headers: {
+      'Content-Type': req.headers['content-type'] || 'application/json',
+      'Accept': req.headers['accept'] || 'application/json',
+      ...(req.headers.authorization && { Authorization: req.headers.authorization }),
+      ...(req.headers['x-app-id'] && { 'X-App-Id': req.headers['x-app-id'] }),
+    },
+    validateStatus: () => true,
+    timeout: 60000,
   })
+    .then((backendRes) => {
+      res.status(backendRes.status).json(backendRes.data)
+    })
+    .catch((err) => {
+      res.status(502).json({ success: false, error: err.message || 'Backend unavailable' })
+    })
+})
+if (BACKEND_URL) {
   console.log(`🔄 BACKEND_URL задан: запросы к ${BACKEND_API_PREFIXES.join(', ')} проксируются на ${backendBase}`)
+} else {
+  console.log(`🔄 API проксируется на ${backendBase} (по умолчанию). Задайте BACKEND_URL для своего бэкенда.`)
+  console.log(`💡 Чтобы работала Аналитика и др.: запустите n8n-webhook-proxy на 3002: PORT=3002 node server/n8n-webhook-proxy.js`)
 }
 
 // Прокси для всех запросов к 3x-ui

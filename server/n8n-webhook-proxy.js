@@ -26,8 +26,11 @@ import { buildMainKeyboard } from './lib/telegram.keyboard.js'
 import { createTelegramRouter } from './routes/telegram.routes.js'
 import { createBotBuilderRouter } from './bot-builder/botbuilder.routes.js'
 import { findScenario as findScenarioBotBuilder, loadScenariosIntoCache } from './bot-builder/botbuilder.service.js'
+import { createAnalyticsRouter } from './analytics/analytics.routes.js'
+import * as analyticsController from './analytics/analytics.controller.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
+import { unifiedChat } from './lib/ai/index.js'
 import { chat as deepseekChat } from './lib/deepseek.js'
 
 dotenv.config()
@@ -3306,6 +3309,19 @@ async function getDeepSeekApiKey() {
   return fromSettings || ''
 }
 
+/** Конфиг ИИ для роутера аналитики (AI-воронка, ai-strategy, ai-funnel-analysis). */
+async function getActiveAiConfig() {
+  const apiKey = await getDeepSeekApiKey()
+  const s = await getSettingsCached()
+  return {
+    provider: 'deepseek',
+    apiKey: apiKey || '',
+    model: (s?.deepseekModel && String(s.deepseekModel).trim()) || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    temperature: s?.deepseekTemperature != null ? Number(s.deepseekTemperature) : 0.5,
+    timeout: s?.deepseekTimeoutSeconds != null ? Number(s.deepseekTimeoutSeconds) : 50,
+  }
+}
+
 /**
  * Валидация initData с токеном из env или из настроек Telegram в админ-панели (Firestore).
  * @param {string} initData - строка query string из Telegram.WebApp.initData
@@ -3461,6 +3477,30 @@ app.use('/api/bot-builder', createBotBuilderRouter({
   ensureAdmin,
   getDb: () => db,
   APP_ID,
+}))
+
+// Явный маршрут GET /api/analytics/funnel (на случай если роутер не матчится первым)
+app.get('/api/analytics/funnel', async (req, res) => {
+  req.db = db
+  req.APP_ID = APP_ID
+  req.redisGet = () => Promise.resolve(null)
+  req.redisSet = () => Promise.resolve()
+  const ok = await ensureAdmin(req, res)
+  if (!ok?.ok) return
+  return analyticsController.getFunnel(req, res)
+})
+
+app.use('/api/analytics', createAnalyticsRouter({
+  ensureAdmin,
+  getDb: () => db,
+  APP_ID,
+  redisGet: () => Promise.resolve(null),
+  redisSet: () => Promise.resolve(),
+  getTelegramToken,
+  sendTelegramMessage,
+  getBaseUrlForTelegram,
+  getActiveAiConfig,
+  unifiedChat,
 }))
 
 /** GET /api/admin/telegram/status — текущие настройки (только админ). Токен не возвращаем; отдаём username бота и Chat ID админа для отображения. */

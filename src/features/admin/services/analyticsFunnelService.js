@@ -28,7 +28,13 @@ export async function getFunnel() {
   const res = await fetch(`${base}/api/analytics/funnel`, { headers })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || res.statusText)
+    if (res.status === 404) {
+      throw new Error(
+        data.error || data.msg ||
+        'Эндпоинт аналитики не найден (404). Перезапустите backend: npm start (из корня или из папки server).'
+      )
+    }
+    throw new Error(data.error || data.msg || res.statusText)
   }
   return res.json()
 }
