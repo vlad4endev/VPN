@@ -1,5 +1,5 @@
 import { FixedSizeList } from 'react-window'
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
+import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import React from 'react'
 import { Edit2, Trash2, Copy, CheckCircle2, XCircle, AlertCircle, Save, X, User, Mail, Calendar, Search, Filter, XCircle as ClearIcon } from 'lucide-react'
 import { getUserStatus } from '../../../shared/utils/userStatus.js'
@@ -52,7 +52,7 @@ const VirtualizedUserTable = ({
   // Определяем, мобильный ли экран
   const [isMobile, setIsMobile] = useState(false)
   const [containerHeight, setContainerHeight] = useState(600)
-  const [listAreaHeight, setListAreaHeight] = useState(400) // реальная высота области списка (подстраивается под контейнер)
+  const [listAreaHeight, setListAreaHeight] = useState(600) // реальная высота области списка (подстраивается под контейнер; 600 — дефолт для десктопа)
   const listAreaRef = useRef(null)
   const [tableWidth, setTableWidth] = useState(1200)
   const [filtersExpanded, setFiltersExpanded] = useState(false)
@@ -115,17 +115,23 @@ const VirtualizedUserTable = ({
     return () => window.removeEventListener('resize', updateDimensions)
   }, [])
 
-  // Высота области списка подстраивается под контейнер (нет пустого места при сворачивании фильтров)
-  useEffect(() => {
+  // Высота области списка: замер после layout и при изменении размера (десктоп — убрать пустое место под таблицей)
+  const measureListHeight = useCallback(() => {
     const el = listAreaRef.current
     if (!el) return
-    const ro = new ResizeObserver((entries) => {
-      const { height } = entries[0]?.contentRect ?? {}
-      if (typeof height === 'number' && height > 0) setListAreaHeight(height)
-    })
+    const h = el.getBoundingClientRect().height
+    if (h > 0) setListAreaHeight(h)
+  }, [])
+
+  useLayoutEffect(() => {
+    const el = listAreaRef.current
+    if (!el) return
+    measureListHeight()
+    requestAnimationFrame(measureListHeight)
+    const ro = new ResizeObserver(measureListHeight)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [filtersExpanded])
+  }, [isMobile, filtersExpanded, measureListHeight])
 
   // Мемоизация данных для передачи в виртуализированный список (используем отфильтрованный список)
   const itemData = useMemo(() => ({
