@@ -31,7 +31,6 @@ import * as analyticsController from './analytics/analytics.controller.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
-import { chat as deepseekChat } from './lib/deepseek.js'
 
 dotenv.config()
 
@@ -2026,7 +2025,7 @@ app.post('/api/promocodes/validate', async (req, res) => {
 })
 
 /**
- * DeepSeek AI: чат-запрос (только админ). Для автоматизации: ответы в поддержку, суммаризация, классификация.
+ * ИИ чат (только админ). Использует провайдер и модель из настроек (Интеграции → ИИ).
  * POST /api/ai/chat
  * Body: { messages: [{ role: "system"|"user"|"assistant", content: string }], model?, temperature?, max_tokens? }
  * Ответ: { success: true, content: string, usage? } или { success: false, error: string }
@@ -2034,9 +2033,9 @@ app.post('/api/promocodes/validate', async (req, res) => {
 app.post('/api/ai/chat', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ» или DEEPSEEK_API_KEY в .env' })
+  const config = await getActiveAiConfig()
+  if (!config?.apiKey) {
+    return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
   const body = req.body || {}
   const messages = body.messages
@@ -2047,15 +2046,15 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
     role: (m.role === 'system' || m.role === 'user' || m.role === 'assistant') ? m.role : 'user',
     content: typeof m.content === 'string' ? m.content : String(m.content || ''),
   }))
-  const settings = await getSettingsCached()
-  const opts = {
-    apiKey,
-    model: body.model || settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
-    temperature: body.temperature != null ? body.temperature : (settings.deepseekTemperature != null ? settings.deepseekTemperature : undefined),
-    max_tokens: body.max_tokens != null ? body.max_tokens : (settings.deepseekMaxTokens != null ? settings.deepseekMaxTokens : undefined),
-    timeout: body.timeout != null ? body.timeout : (settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : undefined),
+  const chatConfig = {
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: body.model != null && String(body.model).trim() ? String(body.model).trim() : config.model,
+    temperature: body.temperature != null ? body.temperature : config.temperature,
+    max_tokens: body.max_tokens != null ? body.max_tokens : config.max_tokens,
+    timeout: body.timeout != null ? body.timeout : config.timeout,
   }
-  const result = await deepseekChat(normalized, opts)
+  const result = await unifiedChat(normalized, chatConfig)
   if (result.ok) {
     return res.json({ success: true, content: result.content, usage: result.usage })
   }
@@ -2077,9 +2076,9 @@ const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдерж
 app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    return res.status(503).json({ success: false, error: 'DeepSeek не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
+  const config = await getActiveAiConfig()
+  if (!config?.apiKey) {
+    return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
   const ticketId = (req.body?.ticketId ?? '').toString().trim()
   if (!ticketId) return res.status(400).json({ success: false, error: 'Укажите ticketId' })
@@ -2126,17 +2125,18 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
     const context3xUi = await fetchOperatorContext3xUi(userId, uFor3x)
     const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
-    const settings = await getSettingsCached()
-    const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
-    const result = await deepseekChat(
+    const systemPrompt = (config.systemPromptPreset && String(config.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+    const chatConfig = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      temperature: 0.5,
+      max_tokens: 1024,
+      timeout: config.timeout != null ? config.timeout : 60,
+    }
+    const result = await unifiedChat(
       [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      {
-        apiKey,
-        model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
-        temperature: 0.5,
-        max_tokens: 1024,
-        timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
-      }
+      chatConfig
     )
 
     if (!result.ok) {
@@ -2288,10 +2288,10 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
     return res.status(503).json({ success: false, error: 'Сервис недоступен' })
   }
 
-  const apiKey = await getDeepSeekApiKey()
-  if (!apiKey) {
-    console.warn('support-auto-reply: DeepSeek API ключ не задан (DEEPSEEK_API_KEY или настройки ИИ в админке)')
-    return res.status(503).json({ success: false, replied: false, reason: 'ai_unavailable', error: 'ИИ недоступен: задайте API-ключ DeepSeek' })
+  const config = await getActiveAiConfig()
+  if (!config?.apiKey) {
+    console.warn('support-auto-reply: ИИ не настроен (API-ключ в разделе «Интеграции → ИИ»)')
+    return res.status(503).json({ success: false, replied: false, reason: 'ai_unavailable', error: 'ИИ недоступен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
 
   try {
@@ -2359,7 +2359,7 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
         await ticketRef.update({ updatedAt: typingNow })
 
         const messagesSnap = await db.collection(ticketRef.path, 'messages').orderBy('createdAt').get()
-        console.log('support-auto-reply (фон): запрос к DeepSeek', { ticketId })
+        console.log('support-auto-reply (фон): запрос к ИИ', { ticketId })
         const messagesList = messagesSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
 
         let userDataSafe = {}
@@ -2387,22 +2387,24 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
         const context3xUi = await fetchOperatorContext3xUi(userId, u)
         const userPrompt = `Тема обращения: ${(ticketData.subject || '').trim()}\n\nДанные пользователя из базы (Firestore):\n${JSON.stringify(userDataSafe, null, 2)}\n\nДанные из панели VPN (3x-ui): ${context3xUi}\n\nПереписка:\n${threadText || '(пока нет сообщений)'}`
 
-        const settings = await getSettingsCached()
-        const systemPrompt = (settings.deepseekSystemPromptPreset && String(settings.deepseekSystemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
-        console.log('🤖 Майкл: запрос к DeepSeek...', { ticketId })
-        const result = await deepseekChat(
+        const aiConfig = await getActiveAiConfig()
+        const systemPrompt = (aiConfig?.systemPromptPreset && String(aiConfig.systemPromptPreset).trim()) || SUPPORT_AI_SYSTEM_PROMPT
+        console.log('🤖 Майкл: запрос к ИИ...', { ticketId, provider: aiConfig?.provider, model: aiConfig?.model })
+        const chatConfig = {
+          provider: aiConfig.provider,
+          apiKey: aiConfig.apiKey,
+          model: aiConfig.model,
+          temperature: 0.5,
+          max_tokens: 1024,
+          timeout: aiConfig.timeout != null ? aiConfig.timeout : 60,
+        }
+        const result = await unifiedChat(
           [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          {
-            apiKey,
-            model: settings.deepseekModel || process.env.DEEPSEEK_MODEL || undefined,
-            temperature: 0.5,
-            max_tokens: 1024,
-            timeout: settings.deepseekTimeoutSeconds != null ? settings.deepseekTimeoutSeconds : 60,
-          }
+          chatConfig
         )
 
         if (!result.ok) {
-          console.error('🤖 Майкл: ошибка DeepSeek', { ticketId, code: result.code, error: result.error })
+          console.error('🤖 Майкл: ошибка ИИ', { ticketId, code: result.code, error: result.error })
           await typingRef.update({ text: 'Не удалось сформировать ответ. Специалист ответит позже.', isTyping: false })
           return
         }
