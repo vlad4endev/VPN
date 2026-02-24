@@ -4276,6 +4276,106 @@ export default function VPNServiceApp() {
     )
   }
 
+  // Раздел «Аналитика» (AI-воронка) — тот же доступ что админка, но открыт таб analytics-funnel
+  if (view === 'analytics') {
+    if (authChecking) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4" />
+            <p className="text-slate-400">Загрузка...</p>
+          </div>
+        </div>
+      )
+    }
+    if (!currentUser || !canAccessAdmin(currentUser.role)) {
+      setView('dashboard')
+      return null
+    }
+    const analyticsTab = 'analytics-funnel'
+    const setAdminTabOrSwitchView = (tab) => {
+      setAdminTab(tab)
+      if (tab !== 'analytics-funnel') setView('admin')
+    }
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+      <AdminViewWithContext
+        currentUser={currentUser}
+        users={users}
+        setUsers={setUsers}
+        setCurrentUser={setCurrentUser}
+        tariffs={tariffs}
+        setTariffs={setTariffs}
+        setError={setError}
+        setSuccess={setSuccess}
+        adminTab={analyticsTab}
+        setAdminTab={setAdminTabOrSwitchView}
+      >
+        <AdminPanel
+          currentUser={currentUser}
+          adminTab={analyticsTab}
+          onSetAdminTab={setAdminTabOrSwitchView}
+          onSetView={setView}
+          sidebarView="analytics"
+          onHandleLogout={handleLogout}
+          users={users}
+          editingUser={editingUser}
+          onSetEditingUser={setEditingUser}
+          onHandleUpdateUser={handleUpdateUser}
+          onHandleDeleteUser={handleDeleteUser}
+          onHandleCopy={handleCopy}
+          servers={servers}
+          editingServer={editingServer}
+          onSetEditingServer={setEditingServer}
+          onHandleAddServer={handleAddServer}
+          onHandleSaveServer={handleSaveServer}
+          onHandleDeleteServer={handleDeleteServer}
+          onHandleTestServerSession={handleTestServerSession}
+          testingServerId={testingServerId}
+          newServerIdRef={newServerIdRef}
+          settingsLoading={settingsLoading}
+          tariffs={tariffs}
+          editingTariff={editingTariff}
+          onSetEditingTariff={setEditingTariff}
+          onHandleSaveTariff={handleSaveTariff}
+          onHandleDeleteTariff={handleDeleteTariff}
+          onHandleSaveSettings={handleSaveSettings}
+          formatDate={formatDate}
+          showLogger={showLogger}
+          onSetShowLogger={setShowLogger}
+          success={success}
+          error={error}
+          onSetSuccess={setSuccess}
+          onSetError={setError}
+          onHandleServerNameChange={handleServerNameChange}
+          onHandleServerIPChange={handleServerIPChange}
+          onHandleServerPortChange={handleServerPortChange}
+          onHandleServerProtocolChange={handleServerProtocolChange}
+          onHandleServerRandomPathChange={handleServerRandomPathChange}
+          onHandleServerRandomPathBlur={handleServerRandomPathBlur}
+          onHandleServerUsernameChange={handleServerUsernameChange}
+          onHandleServerPasswordChange={handleServerPasswordChange}
+          onHandleServerInboundIdChange={handleServerInboundIdChange}
+          onHandleServerLocationChange={handleServerLocationChange}
+          onHandleServerActiveChange={handleServerActiveChange}
+          onHandleServerTariffChange={handleServerTariffChange}
+          onHandleTariffNameChange={handleTariffNameChange}
+          onHandleTariffPlanChange={handleTariffPlanChange}
+          onHandleTariffPriceChange={handleTariffPriceChange}
+          onHandleTariffDevicesChange={handleTariffDevicesChange}
+          onHandleTariffTrafficGBChange={handleTariffTrafficGBChange}
+          onHandleTariffDurationDaysChange={handleTariffDurationDaysChange}
+          onHandleTariffActiveChange={handleTariffActiveChange}
+          onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
+          settings={settings}
+          onHandleAppLinkChange={handleAppLinkChange}
+          onHandleSeoChange={handleSeoChange}
+        />
+      </AdminViewWithContext>
+      </Suspense>
+    )
+  }
+
   // Если пользователь в админ-панели
   // ВАЖНО: Двойная проверка доступа - защита от несанкционированного доступа
   if (view === 'admin') {

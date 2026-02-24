@@ -7,6 +7,7 @@ import { getSystemLanguage } from '../../i18n/detectSystemLanguage.js'
 const LANGS = [
   { code: 'ru', labelKey: 'lang.ru', flag: '🇷🇺' },
   { code: 'en', labelKey: 'lang.en', flag: '🇺🇸' },
+  { code: 'zh', labelKey: 'lang.zh', flag: '🇨🇳' },
   { code: 'hi', labelKey: 'lang.hi', flag: '🇮🇳' },
   { code: 'ar', labelKey: 'lang.ar', flag: '🇸🇦' },
   { code: 'tg', labelKey: 'lang.tg', flag: '🇹🇯' },

@@ -10,6 +10,7 @@ import tg from './locales/tg.json'
 import uz from './locales/uz.json'
 import kk from './locales/kk.json'
 import ky from './locales/ky.json'
+import zh from './locales/zh.json'
 
 const resources = {
   ru: { translation: ru },
@@ -20,6 +21,7 @@ const resources = {
   uz: { translation: uz },
   kk: { translation: kk },
   ky: { translation: ky },
+  zh: { translation: zh },
 }
 
 const STORAGE_KEY = 'vpn-ui-lang'
@@ -30,7 +32,7 @@ i18n
   .init({
     resources,
     fallbackLng: 'ru',
-    supportedLngs: ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky'],
+    supportedLngs: ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh'],
     interpolation: { escapeValue: false },
     detection: {
       order: ['localStorage', 'navigator'],

@@ -256,9 +256,9 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
             <h2 className="text-[clamp(1.5rem,4vw,2.25rem)] lg:text-4xl font-black text-white mb-3 sm:mb-4 leading-none italic">{t('welcome.presencePoints')}</h2>
             <p className="text-slate-400 text-base sm:text-lg max-w-2xl mx-auto mb-8 sm:mb-12 font-medium leading-relaxed px-2">{t('welcome.presenceDesc')}</p>
             <ul className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-4xl mx-auto list-none p-0 m-0">
-              {['Нидерланды', 'Россия', 'США', 'Швеция'].map((city) => (
-                <li key={city} className="flex items-center justify-center min-h-[3.5rem] sm:min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-xl sm:rounded-2xl py-3 sm:py-4 px-3 sm:px-5 font-bold text-white text-sm sm:text-base shadow-sm hover:border-blue-500/30 transition-colors">
-                  {city}
+              {['app.netherlands', 'app.russia', 'app.usa', 'app.sweden'].map((key) => (
+                <li key={key} className="flex items-center justify-center min-h-[3.5rem] sm:min-h-[4.5rem] bg-slate-900/80 border border-slate-700/60 rounded-xl sm:rounded-2xl py-3 sm:py-4 px-3 sm:px-5 font-bold text-white text-sm sm:text-base shadow-sm hover:border-blue-500/30 transition-colors">
+                  {t(key)}
                 </li>
               ))}
             </ul>

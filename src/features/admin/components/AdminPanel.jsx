@@ -87,6 +87,7 @@ const AdminPanel = ({
   onHandleSeoChange = () => {},
   onSetSuccess = () => {},
   onSetError = () => {},
+  sidebarView, // для раздела «Аналитика»: передать 'analytics', чтобы в сайдбаре подсвечивался нужный пункт
 }) => {
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
@@ -182,7 +183,7 @@ const AdminPanel = ({
     <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
       <Sidebar
         currentUser={currentUser}
-        view="admin"
+        view={sidebarView || 'admin'}
         onSetView={onSetView}
         onLogout={onHandleLogout}
         adminTab={adminTab}

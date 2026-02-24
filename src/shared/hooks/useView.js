@@ -27,7 +27,7 @@ export function useView({ currentUser, onViewChange } = {}) {
     }
     try {
       const savedView = localStorage.getItem('vpn_current_view')
-      if (savedView && ['dashboard', 'admin', 'finances', 'login', 'register'].includes(savedView)) {
+      if (savedView && ['dashboard', 'admin', 'finances', 'analytics', 'login', 'register'].includes(savedView)) {
         logger.debug('useView', 'Восстановлен view из localStorage', { view: savedView })
         return savedView
       }
@@ -80,11 +80,14 @@ export function useView({ currentUser, onViewChange } = {}) {
       correctView = 'admin'
     }
 
-    // Доступ в admin — только у роли admin; в finances — у admin и бухгалтера
+    // Доступ в admin — только у роли admin; в finances — у admin и бухгалтера; analytics — как admin
     if (view === 'admin' && !canAccessAdmin(currentUser.role)) {
       correctView = 'dashboard'
     }
     if (view === 'finances' && !canAccessFinances(currentUser.role)) {
+      correctView = 'dashboard'
+    }
+    if (view === 'analytics' && !canAccessAdmin(currentUser.role)) {
       correctView = 'dashboard'
     }
 

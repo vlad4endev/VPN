@@ -3,7 +3,7 @@
  * Используется при первой загрузке (когда пользователь ещё не выбрал язык вручную).
  */
 
-const SUPPORTED_LANGS = ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky']
+const SUPPORTED_LANGS = ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh']
 
 /** Соответствие кодов браузера/ОС нашим кодам (если отличаются) */
 const LANGUAGE_MAP = {
@@ -21,6 +21,10 @@ const LANGUAGE_MAP = {
   'uz-uz': 'uz',
   'kk-kz': 'kk',
   'ky-kg': 'ky',
+  'zh-cn': 'zh',
+  'zh-tw': 'zh',
+  'zh-hans': 'zh',
+  'zh-hant': 'zh',
 }
 
 /**

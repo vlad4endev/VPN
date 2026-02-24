@@ -22,6 +22,7 @@
     "uz": "O'zbekcha",
     "kk": "Қазақша",
     "ky": "Кыргызча",
+    "zh": "简体中文",
     "label": "भाषा",
     "system": "सिस्टम भाषा"
   },
@@ -223,6 +224,9 @@
     "cabinet": "डैशबोर्ड",
     "logout": "लॉग आउट",
     "netherlands": "नीदरलैंड",
+    "russia": "रूस",
+    "usa": "USA",
+    "sweden": "स्वीडन",
     "firebaseNotInit": "Firebase प्रारंभ नहीं। कॉन्फ़िगरेशन जांचें।",
     "dbUnavailable": "डेटाबेस अनुपलब्ध।",
     "noAccessDb": "डेटाबेस तक पहुंच नहीं।",

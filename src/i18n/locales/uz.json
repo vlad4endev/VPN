@@ -22,6 +22,7 @@
     "uz": "O'zbekcha",
     "kk": "Қазақша",
     "ky": "Кыргызча",
+    "zh": "简体中文",
     "label": "Til",
     "system": "Tizim tili"
   },
@@ -218,6 +219,9 @@
     "cabinet": "Kabinet",
     "logout": "Chiqish",
     "netherlands": "Niderlandiya",
+    "russia": "Rossiya",
+    "usa": "AQSh",
+    "sweden": "Shvetsiya",
     "firebaseNotInit": "Firebase ishga tushmagan. Sozlamalarni tekshiring.",
     "dbUnavailable": "Ma'lumotlar bazasi mavjud emas.",
     "noAccessDb": "Ma'lumotlar bazasiga kirish yo'q.",
