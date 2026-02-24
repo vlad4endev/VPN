@@ -179,8 +179,10 @@ const VirtualizedUserTable = ({
         style={{ ...style, overflow: 'hidden', minHeight: style.height }}
         className="px-2 sm:px-3 py-1.5 box-border"
       >
-        <div 
-          className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 sm:p-3 hover:bg-slate-750 transition-colors cursor-pointer min-h-0 overflow-hidden flex flex-col"
+        <div
+          role="button"
+          aria-label={`Открыть карточку ${user.name || user.email || 'пользователя'}`}
+          className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 sm:p-3 hover:bg-slate-750 active:bg-slate-700 transition-colors cursor-pointer min-h-0 overflow-hidden flex flex-col touch-manipulation select-none"
           onClick={() => {
             if (data.onUserRowClick && !isEditing) {
               data.onUserRowClick(user)
@@ -272,51 +274,55 @@ const VirtualizedUserTable = ({
             {isEditing ? (
               <>
                 <button
+                  type="button"
                   onClick={() => data.onHandleUpdateUser(user.id, data.editingUser)}
-                  className="flex-1 sm:flex-initial min-h-[28px] min-w-[28px] px-1.5 sm:px-2 py-0.5 sm:py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] font-medium"
+                  className="flex-1 sm:flex-initial min-h-[44px] min-w-[44px] px-2 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg transition-colors flex items-center justify-center gap-1.5 text-[11px] font-medium touch-manipulation"
                   title="Сохранить"
                   aria-label="Сохранить"
                 >
-                  <Save className="w-3 h-3 sm:w-3 sm:h-3 flex-shrink-0" />
+                  <Save className="w-4 h-4 flex-shrink-0" />
                   <span className="hidden sm:inline">Сохранить</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => data.onSetEditingUser(null)}
-                  className="flex-1 sm:flex-initial min-h-[28px] min-w-[28px] px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] font-medium"
+                  className="flex-1 sm:flex-initial min-h-[44px] min-w-[44px] px-2 py-1.5 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg transition-colors flex items-center justify-center gap-1.5 text-[11px] font-medium touch-manipulation"
                   title="Отмена"
                   aria-label="Отмена"
                 >
-                  <X className="w-3 h-3 sm:w-3 sm:h-3 flex-shrink-0" />
+                  <X className="w-4 h-4 flex-shrink-0" />
                   <span className="hidden sm:inline">Отмена</span>
                 </button>
               </>
             ) : (
               <>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation()
                     if (data.onUserRowClick) {
                       data.onUserRowClick(user)
                     }
                   }}
-                  className="flex-1 sm:flex-initial min-h-[28px] min-w-[28px] px-1.5 sm:px-2 py-0.5 sm:py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] font-medium"
+                  className="flex-1 sm:flex-initial min-h-[44px] min-w-[44px] px-2 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors flex items-center justify-center gap-1.5 text-[11px] font-medium touch-manipulation"
                   title="Открыть"
-                  aria-label="Открыть"
+                  aria-label="Открыть карточку"
                 >
-                  <Edit2 className="w-3 h-3 sm:w-3 sm:h-3 flex-shrink-0" />
+                  <Edit2 className="w-4 h-4 flex-shrink-0" />
                   <span className="hidden sm:inline">Открыть</span>
                 </button>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation()
                     data.onHandleDeleteUser(user.id)
                   }}
                   disabled={user.id === data.currentUser?.id}
-                  className="flex-1 sm:flex-initial min-h-[28px] min-w-[28px] px-1.5 sm:px-2 py-0.5 sm:py-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] font-medium"
+                  className="flex-1 sm:flex-initial min-h-[44px] min-w-[44px] px-2 py-1.5 bg-red-600 hover:bg-red-700 active:bg-red-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-1.5 text-[11px] font-medium touch-manipulation"
                   title="Удалить"
-                  aria-label="Удалить"
+                  aria-label="Удалить пользователя"
                 >
-                  <Trash2 className="w-3 h-3 sm:w-3 sm:h-3 flex-shrink-0" />
+                  <Trash2 className="w-4 h-4 flex-shrink-0" />
                   <span className="hidden sm:inline">Удалить</span>
                 </button>
               </>
@@ -335,15 +341,19 @@ const VirtualizedUserTable = ({
     const userStatus = getUserStatus(user)
     const isEditing = data.editingUser?.id === user.id
 
+    const openCard = () => {
+      if (data.onUserRowClick && !isEditing) {
+        data.onUserRowClick(user)
+      }
+    }
+
     return (
       <div
         style={{ ...style, overflow: 'hidden', minHeight: style.height }}
-        className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors cursor-pointer box-border"
-        onClick={() => {
-          if (data.onUserRowClick && !isEditing) {
-            data.onUserRowClick(user)
-          }
-        }}
+        className="border-b border-slate-800 hover:bg-slate-800/50 active:bg-slate-800/70 transition-colors cursor-pointer box-border select-none"
+        onClick={openCard}
+        role="button"
+        aria-label={`Открыть карточку ${user.name || user.email || 'пользователя'}`}
       >
         <div className="grid grid-cols-6 gap-4 md:gap-5 px-5 md:px-6 py-4 items-center min-h-[76px] max-h-full overflow-hidden">
           {/* Имя пользователя */}
@@ -359,7 +369,7 @@ const VirtualizedUserTable = ({
           </div>
 
           {/* Роль */}
-          <div>
+          <div onClick={(e) => e.stopPropagation()}>
             {isEditing ? (
               <select
                 value={data.editingUser.role === 'бухгалтер' ? 'accountant' : (data.editingUser.role || 'user')}
@@ -427,16 +437,20 @@ const VirtualizedUserTable = ({
             {isEditing ? (
               <>
                 <button
+                  type="button"
                   onClick={() => data.onHandleUpdateUser(user.id, data.editingUser)}
-                  className="p-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 min-w-[44px] min-h-[44px] bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg transition-colors flex items-center justify-center touch-manipulation"
                   title="Сохранить"
+                  aria-label="Сохранить изменения"
                 >
                   <Save className="w-5 h-5" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => data.onSetEditingUser(null)}
-                  className="p-2.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 min-w-[44px] min-h-[44px] bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg transition-colors flex items-center justify-center touch-manipulation"
                   title="Отмена"
+                  aria-label="Отменить редактирование"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -444,25 +458,29 @@ const VirtualizedUserTable = ({
             ) : (
               <>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation()
                     if (data.onUserRowClick) {
                       data.onUserRowClick(user)
                     }
                   }}
-                  className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 min-w-[44px] min-h-[44px] bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors flex items-center justify-center touch-manipulation"
                   title="Открыть"
+                  aria-label="Открыть карточку пользователя"
                 >
                   <Edit2 className="w-5 h-5" />
                 </button>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation()
                     data.onHandleDeleteUser(user.id)
                   }}
                   disabled={user.id === data.currentUser?.id}
-                  className="p-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 min-w-[44px] min-h-[44px] bg-red-600 hover:bg-red-700 active:bg-red-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center touch-manipulation"
                   title="Удалить"
+                  aria-label="Удалить пользователя"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
