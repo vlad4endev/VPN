@@ -156,6 +156,8 @@
     "backToHome": "Вернуться на главную"
   },
   "footer": {
+    "showFooter": "Подвал",
+    "hideFooter": "Свернуть",
     "navLabel": "Подвал",
     "telegramChannel": "SKYFLOW | Лучший в России",
     "telegramAria": "Telegram-канал SKYFLOW — Лучший в России",

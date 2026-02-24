@@ -156,6 +156,8 @@
     "backToHome": "Back to home"
   },
   "footer": {
+    "showFooter": "Footer",
+    "hideFooter": "Collapse",
     "navLabel": "Footer",
     "telegramChannel": "SKYFLOW | Best in Russia",
     "telegramAria": "SKYFLOW Telegram channel — Best in Russia",

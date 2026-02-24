@@ -1148,7 +1148,7 @@ const AdminPanel = ({
         )}
           </div>
         </div>
-        <div className="max-sm:hidden flex-shrink-0 mt-auto">
+        <div className="max-sm:hidden flex-shrink-0">
           <Footer />
         </div>
       </div>
