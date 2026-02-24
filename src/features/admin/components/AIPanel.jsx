@@ -71,10 +71,15 @@ const AIPanel = () => {
     setSuccess(null)
     setSaving(true)
     try {
-      await saveAiSettings({ provider, apiKey: apiKeyInput })
+      const keyToSave = (apiKeyInput || '').trim()
+      if (!keyToSave) {
+        setError('Введите API-ключ для сохранения. Пустое значение не сохраняется, чтобы не затирать уже сохранённый ключ.')
+        return
+      }
+      await saveAiSettings({ provider, apiKey: keyToSave })
       setApiKeyInput('')
       const name = providers.find((p) => p.id === provider)?.name || provider
-      setSuccess(`API-ключ ${name} сохранён.`)
+      setSuccess(`API-ключ ${name} сохранён. При переключении на другой провайдер ключи сохраняются отдельно.`)
       setTimeout(() => setSuccess(null), 5000)
       await loadStatus(true)
     } catch (err) {

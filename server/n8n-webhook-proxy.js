@@ -3347,7 +3347,12 @@ async function getActiveAiConfig() {
   const provider = (s.aiProvider && PROVIDERS[s.aiProvider]) ? s.aiProvider : 'deepseek'
   const apiKey = getApiKeyForProvider(provider, s)
   const def = PROVIDERS[provider]
-  const model = (s.aiModel && String(s.aiModel).trim()) || s.deepseekModel || process.env.DEEPSEEK_MODEL || def?.defaultModel || 'deepseek-chat'
+  let model = (s.aiModel && String(s.aiModel).trim()) || s.deepseekModel || process.env.DEEPSEEK_MODEL || def?.defaultModel || 'deepseek-chat'
+  // Не подставлять модель DeepSeek, если выбран другой провайдер (иначе API вернёт "model does not exist")
+  const deepseekOnlyModels = ['deepseek-chat', 'deepseek-reasoner']
+  if (provider !== 'deepseek' && deepseekOnlyModels.includes(model)) {
+    model = def?.defaultModel || 'gpt-4o-mini'
+  }
   return {
     provider,
     apiKey,
@@ -3706,8 +3711,11 @@ app.patch('/api/admin/ai/settings', express.json(), async (req, res) => {
     const provider = (body.provider && PROVIDERS[body.provider]) ? body.provider : currentConfig.provider
     const settingKeys = { deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey', gemini: 'geminiApiKey', qwen: 'qwenApiKey' }
     if (settingKeys[provider]) {
-      update[settingKeys[provider]] = key || null
-      update[settingKeys[provider] + 'UpdatedAt'] = key ? new Date().toISOString() : null
+      // Сохраняем ключ только если передан непустой — пустой не записываем, чтобы не затирать уже сохранённый ключ при смене провайдера
+      if (key) {
+        update[settingKeys[provider]] = key
+        update[settingKeys[provider] + 'UpdatedAt'] = new Date().toISOString()
+      }
     }
   }
   if (body.model !== undefined) update.aiModel = body.model ? String(body.model).trim() || null : null
