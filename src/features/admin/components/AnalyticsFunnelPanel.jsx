@@ -22,6 +22,15 @@ const SEGMENT_COLORS = {
   lost: 'bg-slate-500/20 text-slate-400 border-slate-500/40',
 }
 
+/** Человекочитаемые подписи для индекса сложности возврата (1–5) */
+const COMPLEXITY_LABELS = {
+  1: 'Очень легко',
+  2: 'Легко',
+  3: 'Средне',
+  4: 'Сложно',
+  5: 'Очень сложно',
+}
+
 function displayName(row, users = []) {
   const fromRow = (row.name && row.name.trim()) || (row.email && row.email.trim())
   if (fromRow) return fromRow
@@ -356,10 +365,10 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
       <section className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
         <div className="px-3 py-2 border-b border-slate-800 bg-slate-800/50">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-            По анализу ИИ (сложность 1–5)
+            Анализ клиентов: насколько легко вернуть
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Индекс сложности возврата и причина от ИИ. Клик по строке — карточка пользователя. Данные только после нажатия «Обновить с ИИ-анализом».
+            Для каждого клиента — оценка «насколько легко вернуть» (1–5) и короткий вывод простыми словами. Клик по строке — карточка. Данные появятся после нажатия «Обновить с ИИ-анализом».
           </p>
         </div>
         {tableRows.length === 0 ? (
@@ -379,14 +388,14 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                   <th className="text-left py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap">Сегмент</th>
                   {showAiColumns && (
                     <>
-                      <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Сложность возврата 1–5">Сложность</th>
-                      <th className="text-left py-1.5 pr-2 font-medium max-w-[180px]" title="Причина от ИИ">Причина</th>
+                      <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="1 = вернуть очень легко, 5 = очень сложно">Насколько легко вернуть</th>
+                      <th className="text-left py-1.5 pr-2 font-medium max-w-[180px]" title="Короткий вывод простыми словами">Вывод</th>
                     </>
                   )}
-                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Риск оттока 0–100">Churn</th>
-                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Приоритет для возврата">Приор.</th>
-                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Пожизненная ценность">LTV</th>
-                  <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Тикеты с жалобами">Тикеты</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Вероятность, что клиент уйдёт (0–100)">Риск ухода</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Кого вернуть в первую очередь">Приоритет</th>
+                  <th className="text-right py-1.5 pr-2 font-medium w-[1%] tabular-nums" title="Сколько клиент уже принёс (выручка)">Выручка</th>
+                  <th className="text-center py-1.5 pr-2 font-medium w-[1%] whitespace-nowrap" title="Обращения в поддержку с признаками проблемы">Тикеты</th>
                   <th className="text-right py-1.5 pr-3 font-medium w-[1%] whitespace-nowrap">Действия</th>
                 </tr>
               </thead>
@@ -432,8 +441,8 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                         <>
                           <td className="py-1 pr-2 text-center">
                             {complexityIndex != null ? (
-                              <span className={`inline-flex px-1.5 py-0.5 rounded border text-xs font-medium ${complexityClass}`} title="Сложность возврата 1–5">
-                                {complexityIndex}
+                              <span className={`inline-flex px-1.5 py-0.5 rounded border text-xs font-medium ${complexityClass}`} title={`${complexityIndex} — ${COMPLEXITY_LABELS[complexityIndex] || 'сложность'}`}>
+                                {complexityIndex} · {COMPLEXITY_LABELS[complexityIndex] || complexityIndex}
                               </span>
                             ) : (
                               <span className="text-slate-600">—</span>
@@ -521,7 +530,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
             <div className="flex items-center justify-between p-4 border-b border-slate-700">
               <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-violet-400" />
-                Анализ ИИ
+                Анализ клиента
               </h3>
               <button type="button" onClick={closeAiModal} className="p-1 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white">
                 <X className="w-5 h-5" />
@@ -529,17 +538,17 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-3">
               <p className="text-sm text-slate-500">
-                userId: <span className="font-mono text-slate-400">{aiModal.userId}</span>
+                Клиент: <span className="font-mono text-slate-400">{aiModal.userId}</span>
                 {aiModal.segment != null && (
-                  <> · Сегмент: <span className={`inline-flex px-2 py-0.5 rounded border text-xs ${SEGMENT_COLORS[aiModal.segment] || ''}`}>{SEGMENT_LABELS[aiModal.segment] || aiModal.segment}</span></>
+                  <> · Статус: <span className={`inline-flex px-2 py-0.5 rounded border text-xs ${SEGMENT_COLORS[aiModal.segment] || ''}`}>{SEGMENT_LABELS[aiModal.segment] || aiModal.segment}</span></>
                 )}
-                {aiModal.churnScore != null && <> · Churn: {aiModal.churnScore}</>}
+                {aiModal.churnScore != null && <> · Риск ухода: {aiModal.churnScore}%</>}
               </p>
               {aiError && (
                 <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-red-300 text-sm">{aiError}</div>
               )}
               {!aiResult && !aiLoading && (
-                <p className="text-slate-400 text-sm">Нажмите «Запустить анализ», чтобы ИИ проанализировал клиента и дал шаги действий для вас и вариант текста предложения.</p>
+                <p className="text-slate-400 text-sm">Нажмите «Запустить анализ» — ИИ опишет ситуацию с клиентом простыми словами и подскажет, что сделать по шагам и какой текст предложения отправить.</p>
               )}
               {aiLoading && (
                 <div className="flex items-center gap-2 text-slate-400">
@@ -551,13 +560,13 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                 <>
                   {aiResult.strategy && (
                     <div>
-                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Обоснование</p>
+                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">В чём ситуация с клиентом</p>
                       <p className="text-slate-300 text-sm whitespace-pre-wrap">{aiResult.strategy}</p>
                     </div>
                   )}
                   {Array.isArray(aiResult.steps) && aiResult.steps.length > 0 && (
                     <div>
-                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Шаги для вас</p>
+                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Что сделать по шагам</p>
                       <ol className="list-decimal list-inside space-y-1 text-slate-300 text-sm">
                         {aiResult.steps.map((step, i) => (
                           <li key={i}>{step}</li>
@@ -566,7 +575,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                     </div>
                   )}
                   {aiResult.offerType && (
-                    <p className="text-sm text-slate-400">Тип оффера: {aiResult.offerType}</p>
+                    <p className="text-sm text-slate-400">Какой тип предложения подойдёт: {aiResult.offerType}</p>
                   )}
 
                   {/* Создать скидку */}
