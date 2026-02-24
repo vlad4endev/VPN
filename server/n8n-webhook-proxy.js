@@ -3532,6 +3532,16 @@ app.get('/api/analytics/funnel', async (req, res) => {
   return analyticsController.getFunnel(req, res)
 })
 
+app.post('/api/analytics/finance-analysis', express.json(), async (req, res) => {
+  req.db = db
+  req.APP_ID = APP_ID
+  req.getActiveAiConfig = getActiveAiConfig
+  req.unifiedChat = unifiedChat
+  const ok = await ensureAdmin(req, res)
+  if (!ok?.ok) return
+  return analyticsController.financeAnalysis(req, res)
+})
+
 app.use('/api/analytics', createAnalyticsRouter({
   ensureAdmin,
   getDb: () => db,

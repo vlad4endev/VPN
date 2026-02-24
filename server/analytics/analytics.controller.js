@@ -523,3 +523,107 @@ export async function aiStrategy(req, res) {
     }
   }
 }
+
+/**
+ * POST /api/analytics/finance-analysis — ИИ анализирует доходы и расходы, даёт рекомендации и шаги для роста выручки и подписок.
+ */
+export async function financeAnalysis(req, res) {
+  const getActiveAiConfig = req.getActiveAiConfig
+  const unifiedChat = req.unifiedChat
+  if (!getActiveAiConfig || !unifiedChat) {
+    return res.status(503).json({ success: false, error: 'Сервис ИИ недоступен' })
+  }
+  try {
+    const config = await getActiveAiConfig()
+    if (!config?.apiKey) {
+      return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
+    }
+    const body = req.body || {}
+    const periodLabel = (body.periodLabel || body.period || 'период').toString().trim()
+    const totalRevenue = Number(body.totalRevenue) || 0
+    const totalExpenses = Number(body.totalExpenses) || 0
+    const subscriptionsCount = Math.max(0, parseInt(body.subscriptionsCount, 10) || 0)
+    const revenueGrowth = body.revenueGrowth != null ? Number(body.revenueGrowth) : null
+    const payersGrowth = body.payersGrowth != null ? Number(body.payersGrowth) : null
+    const balance = body.balance != null ? Number(body.balance) : totalRevenue - totalExpenses
+    const revenueByTariff = Array.isArray(body.revenueByTariff) ? body.revenueByTariff : []
+
+    const systemPrompt = `Ты — финансовый консультант для небольшого VPN-сервиса (подписки). Тебе дают сводку: доходы, расходы, количество проданных подписок за период, динамику роста.
+Твоя задача: дать понятный краткий вывод о состоянии финансов и конкретные рекомендации и шаги, чтобы поддержать проект и увеличить доход и количество подписок.
+Пиши простыми словами, без сложных терминов. Рекомендации должны быть практичными (что можно сделать в первую очередь).
+Ответь строго в формате JSON, без markdown и без текста до/после:
+{"summary":"1–3 предложения: общая картина — доходы, расходы, баланс, количество подписок; есть ли рост или проблемы","recommendations":["рекомендация 1","рекомендация 2","рекомендация 3"],"steps":["конкретный шаг 1 для увеличения дохода или подписок","шаг 2","шаг 3"]}
+Правила:
+- summary: краткий вывод для владельца/менеджера.
+- recommendations: 3–5 рекомендаций (что улучшить в целом).
+- steps: 3–5 конкретных шагов по приоритету (как увеличить выручку и число проданных подписок, как оптимизировать расходы).`
+
+    const revenueByTariffText =
+      revenueByTariff.length > 0
+        ? `\nВыручка по тарифам: ${revenueByTariff.map((t) => `${t.name || t.tariffName || 'Тариф'}: ${t.revenue ?? 0} руб., подписок: ${t.count ?? 0}`).join('; ')}`
+        : ''
+
+    const userMessage = `Данные за период «${periodLabel}»:
+- Доход (от подписок): ${totalRevenue} руб.
+- Расходы: ${totalExpenses} руб.
+- Баланс: ${balance} руб.
+- Количество проданных подписок (оплаченных): ${subscriptionsCount}
+${revenueGrowth != null ? `- Рост выручки к предыдущему периоду: ${revenueGrowth}%` : ''}
+${payersGrowth != null ? `- Рост числа платящих к предыдущему периоду: ${payersGrowth}%` : ''}
+${revenueByTariffText}
+
+Проанализируй и дай summary, recommendations и steps.`
+
+    const chatConfig = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      temperature: 0.4,
+      max_tokens: 1024,
+      timeout: config?.timeout ?? 60,
+    }
+    const result = await unifiedChat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      chatConfig
+    )
+
+    if (!result.ok) {
+      const status = result.code === 'TIMEOUT' ? 504 : 502
+      return res.status(status).json({
+        success: false,
+        error: result.error || 'Ошибка ИИ',
+        code: result.code,
+      })
+    }
+
+    const content = result?.content && typeof result.content === 'string' ? result.content : ''
+    let summary = ''
+    let recommendations = []
+    let steps = []
+    if (content) {
+      try {
+        const raw = content.replace(/```json?\s*|\s*```/g, '').trim()
+        const parsed = JSON.parse(raw)
+        summary = (parsed.summary && String(parsed.summary).trim()) || ''
+        recommendations = Array.isArray(parsed.recommendations) ? parsed.recommendations.map((s) => String(s).trim()).filter(Boolean) : []
+        steps = Array.isArray(parsed.steps) ? parsed.steps.map((s) => String(s).trim()).filter(Boolean) : []
+      } catch (parseErr) {
+        console.warn('finance-analysis: не удалось распарсить JSON', parseErr.message)
+        summary = content.slice(0, 500)
+      }
+    }
+
+    return res.json({
+      success: true,
+      summary,
+      recommendations,
+      steps,
+    })
+  } catch (err) {
+    console.error('POST /api/analytics/finance-analysis:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+}

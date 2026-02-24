@@ -46,6 +46,8 @@ npm start
 
 Сервер запустится на `http://localhost:3001`
 
+**Если в dev на 3001 запущен proxy-server**, запросы `/api/analytics/*` уходят на бэкенд по умолчанию на порт **3002**. Запустите полный API на 3002: `PORT=3002 node n8n-webhook-proxy.js`. Или используйте только n8n-webhook-proxy на 3001 (без proxy-server).
+
 ## API Endpoints
 
 Все endpoints перенаправляют запросы в n8n:
@@ -59,6 +61,7 @@ npm start
 - `POST /api/vpn/sync-user` - Синхронизация данных пользователя с n8n
 - `GET /api/system/status` - Системная информация
 - `GET /api/system/logs` - Логи (заглушка)
+- `POST /api/analytics/finance-analysis` — ИИ-анализ доходов/расходов
 
 ## Структура
 

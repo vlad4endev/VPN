@@ -203,3 +203,35 @@ export async function runAiFunnelAnalysis(opts = {}) {
   if (!isJson) throw new Error('Сервер вернул не JSON')
   return res.json()
 }
+
+/**
+ * POST /api/analytics/finance-analysis — ИИ анализирует доходы и расходы, даёт рекомендации и шаги для роста выручки и подписок.
+ */
+export async function runFinanceAnalysis(opts = {}) {
+  const base = getBaseUrl()
+  const headers = await getAuthHeaders()
+  const res = await fetch(`${base}/api/analytics/finance-analysis`.replace(/\/+/g, '/'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({
+      periodLabel: opts.periodLabel || 'период',
+      totalRevenue: Number(opts.totalRevenue) || 0,
+      totalExpenses: Number(opts.totalExpenses) || 0,
+      subscriptionsCount: Math.max(0, parseInt(opts.subscriptionsCount, 10) || 0),
+      revenueGrowth: opts.revenueGrowth != null ? Number(opts.revenueGrowth) : undefined,
+      payersGrowth: opts.payersGrowth != null ? Number(opts.payersGrowth) : undefined,
+      balance: opts.balance != null ? Number(opts.balance) : undefined,
+      revenueByTariff: Array.isArray(opts.revenueByTariff) ? opts.revenueByTariff : undefined,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        'Эндпоинт анализа финансов не найден (404). Запустите backend из папки server: npm start (n8n-webhook-proxy). Если на 3001 запущен proxy-server — запустите n8n-webhook-proxy на 3002: PORT=3002 npm start.'
+      )
+    }
+    throw new Error(data.error || res.statusText || 'Ошибка анализа финансов')
+  }
+  return data
+}

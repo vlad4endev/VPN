@@ -50,6 +50,7 @@ export function createAnalyticsRouter(deps) {
   router.post('/send-churn-offer/:id', withContext, requireAdmin, controller.sendChurnOffer)
   router.post('/ai-strategy', withContext, requireAdmin, controller.aiStrategy)
   router.post('/ai-funnel-analysis', withContext, requireAdmin, controller.aiFunnelAnalysis)
+  router.post('/finance-analysis', withContext, requireAdmin, controller.financeAnalysis)
 
   return router
 }

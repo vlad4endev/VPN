@@ -15,8 +15,10 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BookOpen,
+  Sparkles,
 } from 'lucide-react'
 import { adminService } from '../services/adminService.js'
+import { runFinanceAnalysis } from '../services/analyticsFunnelService.js'
 
 /** Роли, которые не считаем в статистике «пользователей» (только обычные клиенты) */
 const STAFF_ROLES = ['admin', 'accountant', 'бухгалтер']
@@ -68,6 +70,7 @@ function getRange(periodId) {
 const FINANCE_TABS = [
   { id: 'overview', label: 'Обзор', icon: BarChart3 },
   { id: 'accounting', label: 'Учёт', icon: BookOpen },
+  { id: 'analytics', label: 'Аналитика', icon: Sparkles },
 ]
 
 const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x != null ? String(x) : '—'), currentUser = null }) => {
@@ -85,6 +88,9 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
   const [accountingIncome, setAccountingIncome] = useState([])
   const [accountingExpenses, setAccountingExpenses] = useState([])
   const [loadingAccounting, setLoadingAccounting] = useState(false)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState(null)
+  const [analysisError, setAnalysisError] = useState(null)
 
   const loadPayments = useCallback(async () => {
     setLoading(true)
@@ -189,6 +195,8 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
         }
       }
       run()
+    } else if (financeTab === 'analytics') {
+      loadAccounting().catch(() => {})
     }
   }, [financeTab, loadAccounting])
 
@@ -248,6 +256,22 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
     return Math.round(((completedPayments.length - completedCountPrev) / completedCountPrev) * 100)
   }, [completedPayments.length, completedCountPrev])
 
+  const expensesInPeriod = useMemo(() => {
+    const { from, to } = resolvedRange
+    return accountingExpenses
+      .filter((r) => {
+        const t = toStamp(r.date || r.createdAt)
+        return t >= from && t <= to
+      })
+      .reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+  }, [accountingExpenses, resolvedRange])
+
+  const periodLabel = useMemo(() => {
+    if (useCustom && customFrom && customTo) return `${customFrom} — ${customTo}`
+    const p = PERIODS.find((x) => x.id === periodId)
+    return p ? p.label : 'период'
+  }, [useCustom, customFrom, customTo, periodId])
+
   const byTariff = useMemo(() => {
     const map = new Map()
     for (const p of completedPayments) {
@@ -263,6 +287,30 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
       name: id === '_без_тарифа' ? 'Без тарифа' : (tariffs.find((t) => t.id === id)?.name || id),
     }))
   }, [completedPayments, tariffs])
+
+  const handleRunFinanceAnalysis = useCallback(async () => {
+    setAnalysisError(null)
+    setAnalysisResult(null)
+    setAnalysisLoading(true)
+    try {
+      const balancePeriod = totalRevenue - expensesInPeriod
+      const res = await runFinanceAnalysis({
+        periodLabel,
+        totalRevenue,
+        totalExpenses: expensesInPeriod,
+        subscriptionsCount: completedPayments.length,
+        revenueGrowth,
+        payersGrowth,
+        balance: balancePeriod,
+        revenueByTariff: byTariff.map((t) => ({ name: t.name, revenue: t.amount || 0, count: t.count || 0 })),
+      })
+      if (res.success) setAnalysisResult({ summary: res.summary, recommendations: res.recommendations || [], steps: res.steps || [] })
+    } catch (err) {
+      setAnalysisError(err?.message || 'Ошибка анализа')
+    } finally {
+      setAnalysisLoading(false)
+    }
+  }, [periodLabel, totalRevenue, expensesInPeriod, completedPayments.length, revenueGrowth, payersGrowth, byTariff])
 
   /** Только обычные пользователи (без админов и бухгалтеров) для статистики */
   const regularUsers = useMemo(
@@ -408,6 +456,91 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
             formatDate={formatDate}
             expenseCategories={EXPENSE_CATEGORIES}
           />
+        )}
+
+        {financeTab === 'analytics' && (
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-violet-400" />
+              Анализ доходов и расходов
+            </h3>
+            <p className="text-slate-400 text-sm">
+              ИИ проанализирует выручку, расходы и количество подписок за выбранный период и даст рекомендации и шаги для увеличения дохода и поддержки проекта.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wider">Период</div>
+                <div className="text-slate-200 font-medium">{periodLabel}</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wider">Доход (подписки)</div>
+                <div className="text-emerald-400 font-semibold">{formatMoney(totalRevenue)}</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wider">Расходы</div>
+                <div className="text-red-400 font-semibold">{formatMoney(expensesInPeriod)}</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wider">Подписок продано</div>
+                <div className="text-slate-200 font-semibold">{completedPayments.length}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleRunFinanceAnalysis}
+                disabled={analysisLoading}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
+              >
+                {analysisLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                {analysisLoading ? 'Анализируем...' : 'Проанализировать'}
+              </button>
+              {analysisResult && (
+                <button
+                  type="button"
+                  onClick={() => { setAnalysisResult(null); setAnalysisError(null) }}
+                  className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg font-medium transition-colors"
+                >
+                  Сбросить результат
+                </button>
+              )}
+            </div>
+            {analysisError && (
+              <div className="p-4 rounded-xl bg-red-900/20 border border-red-800 text-red-300 text-sm">
+                {analysisError}
+              </div>
+            )}
+            {analysisResult && (
+              <div className="space-y-4">
+                {analysisResult.summary && (
+                  <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Вывод</p>
+                    <p className="text-slate-200 whitespace-pre-wrap">{analysisResult.summary}</p>
+                  </div>
+                )}
+                {analysisResult.recommendations?.length > 0 && (
+                  <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Рекомендации</p>
+                    <ul className="list-disc list-inside space-y-1 text-slate-300 text-sm">
+                      {analysisResult.recommendations.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {analysisResult.steps?.length > 0 && (
+                  <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Шаги для улучшения дохода и подписок</p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-300 text-sm">
+                      {analysisResult.steps.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {financeTab === 'overview' && (
