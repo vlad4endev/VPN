@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import PropTypes from 'prop-types'
 import { useTranslation } from 'react-i18next'
 import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard, Database, RefreshCw } from 'lucide-react'
@@ -316,15 +317,16 @@ const AdminPanel = ({
                 onUserRowClick={handleUserRowClick}
               />
             </div>
-            {/* Карточка пользователя */}
-            {selectedUser && (
+            {/* Карточка пользователя — через портал, чтобы не обрезалась из-за overflow на десктопе */}
+            {selectedUser && createPortal(
               <UserCard
                 user={selectedUser}
                 onClose={handleCloseUserCard}
                 onCopy={onHandleCopy}
                 tariffs={tariffs}
                 formatDate={formatDate}
-              />
+              />,
+              document.body
             )}
             {showCreateUserModal && (
               <CreateUserModal onClose={() => setShowCreateUserModal(false)} />
