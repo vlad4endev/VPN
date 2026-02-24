@@ -38,9 +38,9 @@ const VirtualizedUserTable = ({
   handleUserExpiresAtChange,
   onUserRowClick,
 }) => {
-  // Высота строки таблицы (в пикселях) — запас для редактирования и переносов
-  const ROW_HEIGHT = 88
-  const CARD_HEIGHT = 200 // Высота карточки на мобильных с учетом переносов текста (без наложения)
+  // Высота строки: на десктопе — просторная таблица, на мобильных — карточки
+  const ROW_HEIGHT_DESKTOP = 84 // высокие строки на десктопе для удобства
+  const CARD_HEIGHT = 200 // Высота карточки на мобильных
   
   // Фильтры
   const [searchText, setSearchText] = useState('')
@@ -107,7 +107,7 @@ const VirtualizedUserTable = ({
       const fallbackHeight = mobile ? 400 : 600
       setIsMobile(mobile)
       setContainerHeight(fallbackHeight)
-      setTableWidth(mobile ? window.innerWidth : Math.max(900, window.innerWidth))
+      setTableWidth(mobile ? window.innerWidth : Math.max(1100, window.innerWidth))
       setListAreaHeight((prev) => (prev < 100 ? fallbackHeight : prev))
     }
     updateDimensions()
@@ -345,14 +345,14 @@ const VirtualizedUserTable = ({
           }
         }}
       >
-        <div className="grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 items-center min-h-[72px] max-h-full overflow-hidden">
+        <div className="grid grid-cols-6 gap-4 md:gap-5 px-5 md:px-6 py-4 items-center min-h-[76px] max-h-full overflow-hidden">
           {/* Имя пользователя */}
           <div className="min-w-0">
-            <div className="text-slate-200 font-medium text-sm truncate" title={user.name || user.email}>
+            <div className="text-slate-200 font-medium text-base truncate" title={user.name || user.email}>
               {user.name || user.email || '—'}
             </div>
             {user.name && user.email && (
-              <div className="text-slate-500 text-xs truncate mt-0.5">
+              <div className="text-slate-500 text-sm truncate mt-0.5">
                 {user.email}
               </div>
             )}
@@ -364,7 +364,7 @@ const VirtualizedUserTable = ({
               <select
                 value={data.editingUser.role === 'бухгалтер' ? 'accountant' : (data.editingUser.role || 'user')}
                 onChange={data.handleUserRoleChange}
-                className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-w-[120px] px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 onClick={(e) => e.stopPropagation()}
               >
                 {USER_ROLE_OPTIONS.map(({ value, label }) => (
@@ -372,7 +372,7 @@ const VirtualizedUserTable = ({
                 ))}
               </select>
             ) : (
-              <span className={`px-2.5 py-1 rounded-lg text-xs font-medium inline-block ${getRoleBadgeClass(user.role)}`}>
+              <span className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-block ${getRoleBadgeClass(user.role)}`}>
                 {getRoleLabel(user.role)}
               </span>
             )}
@@ -380,7 +380,7 @@ const VirtualizedUserTable = ({
 
           {/* Статус */}
           <div>
-            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+            <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
               userStatus.status === 'active' ? 'bg-green-900/30 text-green-400' :
               userStatus.status === 'expired' ? 'bg-red-900/30 text-red-400' :
               userStatus.status === 'unpaid' ? 'bg-red-900/30 text-red-400' :
@@ -389,11 +389,11 @@ const VirtualizedUserTable = ({
               userStatus.status === 'no-subscription' ? 'bg-slate-700 text-slate-400' :
               'bg-slate-700 text-slate-400'
             }`}>
-              {userStatus.status === 'active' && <CheckCircle2 className="w-3.5 h-3.5" />}
-              {(userStatus.status === 'expired' || userStatus.status === 'unpaid') && <XCircle className="w-3.5 h-3.5" />}
-              {(userStatus.status === 'no-key' || userStatus.status === 'no-subscription') && <AlertCircle className="w-3.5 h-3.5" />}
-              {userStatus.status === 'test_period' && <AlertCircle className="w-3.5 h-3.5" />}
-              {userStatus.status === 'inactive' && <AlertCircle className="w-3.5 h-3.5" />}
+              {userStatus.status === 'active' && <CheckCircle2 className="w-4 h-4 flex-shrink-0" />}
+              {(userStatus.status === 'expired' || userStatus.status === 'unpaid') && <XCircle className="w-4 h-4 flex-shrink-0" />}
+              {(userStatus.status === 'no-key' || userStatus.status === 'no-subscription') && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+              {userStatus.status === 'test_period' && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+              {userStatus.status === 'inactive' && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
               <span>{userStatus.label}</span>
             </div>
           </div>
@@ -412,7 +412,7 @@ const VirtualizedUserTable = ({
                 type="datetime-local"
                 value={data.editingUser.expiresAt ? new Date(data.editingUser.expiresAt).toISOString().slice(0, 16) : ''}
                 onChange={data.handleUserExpiresAtChange}
-                className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full min-w-[160px] px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
@@ -423,22 +423,22 @@ const VirtualizedUserTable = ({
           </div>
 
           {/* Действия */}
-          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
             {isEditing ? (
               <>
                 <button
                   onClick={() => data.onHandleUpdateUser(user.id, data.editingUser)}
-                  className="p-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center justify-center"
                   title="Сохранить"
                 >
-                  <Save className="w-4 h-4" />
+                  <Save className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => data.onSetEditingUser(null)}
-                  className="p-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center"
                   title="Отмена"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </>
             ) : (
@@ -450,10 +450,10 @@ const VirtualizedUserTable = ({
                       data.onUserRowClick(user)
                     }
                   }}
-                  className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center"
                   title="Открыть"
                 >
-                  <Edit2 className="w-4 h-4" />
+                  <Edit2 className="w-5 h-5" />
                 </button>
                 <button
                   onClick={(e) => {
@@ -461,10 +461,10 @@ const VirtualizedUserTable = ({
                     data.onHandleDeleteUser(user.id)
                   }}
                   disabled={user.id === data.currentUser?.id}
-                  className="p-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center"
                   title="Удалить"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-5 h-5" />
                 </button>
               </>
             )}
@@ -614,14 +614,14 @@ const VirtualizedUserTable = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
-          {/* Заголовок таблицы для десктопа */}
-          <div className="flex-shrink-0 bg-slate-800/50 grid grid-cols-6 gap-3 sm:gap-4 px-4 sm:px-6 py-3 border-b border-slate-700">
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Пользователь</div>
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Роль</div>
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Статус</div>
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider" title="Дата начала использования сервиса">Начало</div>
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Срок действия</div>
-            <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Действия</div>
+          {/* Заголовок таблицы для десктопа — крупнее для удобства */}
+          <div className="flex-shrink-0 bg-slate-800/50 grid grid-cols-6 gap-4 md:gap-5 px-5 md:px-6 py-4 border-b border-slate-700">
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Пользователь</div>
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Роль</div>
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Статус</div>
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider" title="Дата начала использования сервиса">Начало</div>
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Срок действия</div>
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Действия</div>
           </div>
 
           {/* Виртуализированный список для десктопа */}
@@ -629,7 +629,7 @@ const VirtualizedUserTable = ({
             <FixedSizeList
               height={listAreaHeight}
               itemCount={filteredUsers.length}
-              itemSize={ROW_HEIGHT}
+              itemSize={ROW_HEIGHT_DESKTOP}
               width={tableWidth}
               itemData={itemData}
               overscanCount={5}
