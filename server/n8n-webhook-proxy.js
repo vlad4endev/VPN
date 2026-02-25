@@ -494,6 +494,7 @@ const TEST_WEBHOOK_ID = process.env.N8N_WEBHOOK_TEST_ID || '8a8b74ff-eedf-4ad2-9
 // 3. Дефолтные значения
 const getDefaultWebhooks = () => ({
   addClient: process.env.N8N_WEBHOOK_ADD_CLIENT || `${N8N_BASE_URL}/webhook/${DEFAULT_WEBHOOK_ID}`,
+  updateClient: process.env.N8N_WEBHOOK_UPDATE_CLIENT || `${N8N_BASE_URL}/webhook/${DEFAULT_WEBHOOK_ID}`,
   deleteClient: process.env.N8N_WEBHOOK_DELETE_CLIENT || `${N8N_BASE_URL}/webhook/${DEFAULT_WEBHOOK_ID}`,
   getClientStats: process.env.N8N_WEBHOOK_GET_STATS || `${N8N_BASE_URL}/webhook/${DEFAULT_WEBHOOK_ID}`,
   getInbounds: process.env.N8N_WEBHOOK_GET_INBOUNDS || `${N8N_BASE_URL}/webhook/${DEFAULT_WEBHOOK_ID}`,
@@ -1587,8 +1588,9 @@ app.post('/api/public/review', async (req, res) => {
 })
 
 /**
- * Добавление клиента в 3x-ui (только через xuiClient, n8n не используется).
+ * Добавление клиента в 3x-ui через n8n webhook.
  * POST /api/vpn/add-client
+ * Тело запроса передаётся в n8n; ответ n8n возвращается клиенту как есть.
  */
 app.post('/api/vpn/add-client', async (req, res) => {
   try {
@@ -1600,86 +1602,91 @@ app.post('/api/vpn/add-client', async (req, res) => {
       })
     }
 
-    // Данные сервера — из тарифа/сервера, к которому привязан пользователь (tariffId/serverId в body)
-    const { xui, inboundId } = await getXuiAndInboundForRequest({
-      tariffId: body.tariffId,
-      serverId: body.serverId,
-      inboundId: body.inboundId,
-    })
-    if (!xui || !xui.configured) {
+    const webhookUrl = getWebhookUrl('addClient', req)
+    if (!webhookUrl || !webhookUrl.trim()) {
       return res.status(503).json({
         success: false,
-        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
+        error: 'Webhook для addClient не настроен (N8N_WEBHOOK_ADD_CLIENT или webhookUrl в запросе)',
       })
     }
 
-    const email = (body.email || `user_${body.userId || 'local'}@local`).toString().trim()
-    const totalGB = body.totalGB != null ? Number(body.totalGB) : 0
-    const expiryTime = body.expiryTime != null ? Number(body.expiryTime) : 0
-    const limitIp = body.limitIp != null ? Number(body.limitIp) : 1
-
-    await xui.addClient(inboundId, {
-      email,
-      uuid: body.clientId,
-      totalGB,
-      expiryTime,
-      limitIp,
-      tgId: (body.tgId ?? body.telegramUserId ?? '').toString(),
-      subId: (body.subId ?? '').toString(),
-    })
-
-    const result = {
-      success: true,
-      vpnUuid: body.clientId,
-    }
-    if (req.telegramUser?.user?.id) result.telegramUserId = String(req.telegramUser.user.id)
-    res.json(result)
+    const result = await callN8NWebhook(webhookUrl, body)
+    res.json(result != null ? result : { success: true, vpnUuid: body.clientId })
   } catch (error) {
     const statusCode = error.response?.status || 500
     res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка создания клиента в 3x-ui',
+      error: error.message || 'Ошибка создания клиента через n8n',
       errorMessage: error.message,
     })
   }
 })
 
 /**
- * Удаление клиента из 3x-ui (только через xuiClient, n8n не используется).
+ * Удаление клиента из 3x-ui через n8n webhook.
  * POST /api/vpn/delete-client
+ * Тело запроса (clientId или email, serverId/inboundId и т.д.) передаётся в n8n; ответ возвращается как есть.
  */
 app.post('/api/vpn/delete-client', async (req, res) => {
   try {
     const body = req.body || {}
-    const { xui, inboundId } = await getXuiAndInboundForRequest({
-      tariffId: body.tariffId,
-      serverId: body.serverId,
-      inboundId: body.inboundId,
-    })
-    if (!xui || !xui.configured) {
-      return res.status(503).json({
-        success: false,
-        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
-      })
-    }
-
-    if (body.clientId) {
-      await xui.delClient(inboundId, body.clientId)
-    } else if (body.email) {
-      await xui.delClientByEmail(inboundId, body.email)
-    } else {
+    if (!body.clientId && !body.email) {
       return res.status(400).json({
         success: false,
         error: 'Укажите clientId или email',
       })
     }
 
-    res.json({ success: true })
+    const webhookUrl = getWebhookUrl('deleteClient', req)
+    if (!webhookUrl || !webhookUrl.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Webhook для deleteClient не настроен (N8N_WEBHOOK_DELETE_CLIENT или webhookUrl в запросе)',
+      })
+    }
+
+    const result = await callN8NWebhook(webhookUrl, { ...body, operation: 'delete_client' })
+    res.json(result != null ? result : { success: true })
   } catch (error) {
     const statusCode = error.response?.status || 500
     res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка удаления клиента из 3x-ui',
+      error: error.message || 'Ошибка удаления клиента через n8n',
+      details: error.response?.data || null,
+    })
+  }
+})
+
+/**
+ * Обновление клиента в 3x-ui через n8n webhook.
+ * POST /api/vpn/update-client
+ * Тело запроса (clientId, inboundId, totalGB, expiryTime и т.д.) передаётся в n8n; ответ возвращается как есть.
+ */
+app.post('/api/vpn/update-client', async (req, res) => {
+  try {
+    const body = req.body || {}
+    if (!body.clientId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Отсутствует обязательное поле: clientId (UUID клиента)',
+      })
+    }
+
+    const webhookUrl = getWebhookUrl('updateClient', req)
+    if (!webhookUrl || !webhookUrl.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Webhook для updateClient не настроен (N8N_WEBHOOK_UPDATE_CLIENT или webhookUrl в запросе)',
+      })
+    }
+
+    const result = await callN8NWebhook(webhookUrl, { ...body, operation: 'update_client' })
+    res.json(result != null ? result : { success: true })
+  } catch (error) {
+    const statusCode = error.response?.status || 500
+    res.status(statusCode).json({
+      success: false,
+      error: error.message || 'Ошибка обновления клиента через n8n',
       details: error.response?.data || null,
     })
   }
