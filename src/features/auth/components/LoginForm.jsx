@@ -5,6 +5,33 @@ import Footer from '../../../shared/components/Footer.jsx'
 import TelegramLoginWidget from './TelegramLoginWidget.jsx'
 import PrivacyPolicyModal from '../../../shared/components/PrivacyPolicyModal.jsx'
 
+/** Резервные подписи для экрана входа (если i18n вернёт ключ, напр. в Telegram WebView) */
+const AUTH_FALLBACKS = {
+  'auth.login': 'Вход',
+  'auth.register': 'Регистрация',
+  'auth.loginOrEmail': 'Логин или email',
+  'auth.loginOrEmailPlaceholder': 'логин или email',
+  'auth.loginLabel': 'Логин',
+  'auth.loginPlaceholder': 'уникальный логин',
+  'auth.emailOptional': 'Email (необязательно)',
+  'auth.emailPlaceholder': 'можно не указывать, вход по логину',
+  'auth.name': 'Имя',
+  'auth.namePlaceholder': 'Ваше имя',
+  'auth.password': 'Пароль',
+  'auth.submitLogin': 'Войти',
+  'auth.submitRegister': 'Зарегистрироваться',
+  'common.or': 'или',
+}
+
+/** Перевод с подстраховкой: если t() вернул ключ — подставляем русский fallback */
+function labelT (t, key) {
+  const value = t(key)
+  if (value == null || value === '' || value === key || (typeof value === 'string' && value.includes('.') && value.length < 60)) {
+    return AUTH_FALLBACKS[key] ?? value ?? key
+  }
+  return value
+}
+
 const LoginForm = ({
   authMode,
   loginData,
@@ -54,7 +81,7 @@ const LoginForm = ({
       <div className="flex-1 flex items-center justify-center p-3 sm:p-4 lg:p-6">
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 lg:p-10 shadow-2xl backdrop-blur-xl mx-auto">
       <div className="text-center mb-6 sm:mb-10">
-        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? t('auth.login') : t('auth.register')}</h2>
+        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? labelT(t, 'auth.login') : labelT(t, 'auth.register')}</h2>
         <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYFLOW System</p>
         </div>
 
@@ -89,7 +116,7 @@ const LoginForm = ({
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
-            {t('auth.register')}
+            {labelT(t, 'auth.register')}
           </button>
         </div>
 
@@ -97,7 +124,7 @@ const LoginForm = ({
         <div className="space-y-5">
           {authMode === 'login' ? (
             <div className="space-y-2">
-              <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{t('auth.loginOrEmail')}</label>
+              <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginOrEmail')}</label>
               <input
                 id="login-email"
                 type="text"
@@ -106,14 +133,14 @@ const LoginForm = ({
                 value={loginData.email}
                 onChange={onEmailChange}
                 className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                placeholder={t('auth.loginOrEmailPlaceholder')}
+                placeholder={labelT(t, 'auth.loginOrEmailPlaceholder')}
                 required
               />
             </div>
           ) : (
             <>
               <div className="space-y-2">
-                <label htmlFor="register-login" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{t('auth.loginLabel')}</label>
+                <label htmlFor="register-login" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginLabel')}</label>
                 <input
                   id="register-login"
                   type="text"
@@ -122,12 +149,12 @@ const LoginForm = ({
                   value={loginData.login || ''}
                   onChange={onLoginChange}
                   className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                  placeholder={t('auth.loginPlaceholder')}
+                  placeholder={labelT(t, 'auth.loginPlaceholder')}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="register-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{t('auth.emailOptional')}</label>
+                <label htmlFor="register-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.emailOptional')}</label>
                 <input
                   id="register-email"
                   type="email"
@@ -136,11 +163,11 @@ const LoginForm = ({
                   value={loginData.email}
                   onChange={onEmailChange}
                   className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                  placeholder={t('auth.emailPlaceholder')}
+                  placeholder={labelT(t, 'auth.emailPlaceholder')}
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{t('auth.name')}</label>
+                <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.name')}</label>
               <input
                 key="register-name-input"
                 id="register-name"
@@ -150,7 +177,7 @@ const LoginForm = ({
                 value={loginData.name || ''}
                 onChange={onNameChange}
                 className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                placeholder={t('auth.namePlaceholder')}
+                placeholder={labelT(t, 'auth.namePlaceholder')}
                 required
               />
               </div>
@@ -158,7 +185,7 @@ const LoginForm = ({
           )}
 
           <div className="space-y-2">
-            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{t('auth.password')}</label>
+            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.password')}</label>
             <input
               id={`${authMode}-password`}
               type="password"
@@ -257,7 +284,7 @@ const LoginForm = ({
             type="submit"
             className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-500 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-[0.98] touch-manipulation"
           >
-            {authMode === 'login' ? t('auth.submitLogin') : t('auth.submitRegister')}
+            {authMode === 'login' ? labelT(t, 'auth.submitLogin') : labelT(t, 'auth.submitRegister')}
           </button>
           </div>
         </form>
@@ -268,7 +295,7 @@ const LoginForm = ({
             <div className="w-full border-t border-slate-700"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-4 bg-slate-900/80 text-slate-500 font-bold uppercase text-xs tracking-widest">{t('common.or')}</span>
+            <span className="px-4 bg-slate-900/80 text-slate-500 font-bold uppercase text-xs tracking-widest">{labelT(t, 'common.or')}</span>
           </div>
         </div>
 
