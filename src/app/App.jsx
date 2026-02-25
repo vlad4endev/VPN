@@ -4296,7 +4296,7 @@ export default function VPNServiceApp() {
       return (
         <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950">
           <div className="inline-block w-10 h-10 border-2 border-blue-500/50 border-t-blue-400 rounded-full animate-spin mb-4" />
-          <p className="text-slate-300 font-medium text-center">{t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
+          <p className="text-slate-300 font-medium text-center">{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
           <p className="text-slate-500 text-sm mt-2 text-center max-w-xs">Открыто из бота — входим автоматически</p>
         </div>
       )
