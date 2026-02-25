@@ -460,8 +460,9 @@ export default function VPNServiceApp() {
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
-  /** Контекст Telegram Mini App: либо есть WebApp (открыто в боте), либо уже подставлен initData */
-  const isTelegramApp = typeof window !== 'undefined' && !!(window.Telegram?.WebApp || window.__TELEGRAM_INIT_DATA)
+  /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой) */
+  const [hasTmaInitData, setHasTmaInitData] = useState(false)
+  const isTelegramApp = hasTmaInitData
   /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
   const [tmaWaitingAuth, setTmaWaitingAuth] = useState(false)
 
@@ -1079,13 +1080,23 @@ export default function VPNServiceApp() {
     const raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
     return String(raw || '').trim()
   }, [])
+
+  // Обновляем hasTmaInitData при появлении initData (загрузка SDK с задержкой, событие telegram-initdata-ready, повторы)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (getTmaInitData()) setHasTmaInitData(true)
+    const onReady = () => { if (getTmaInitData()) setHasTmaInitData(true) }
+    window.addEventListener('telegram-initdata-ready', onReady)
+    return () => window.removeEventListener('telegram-initdata-ready', onReady)
+  }, [getTmaInitData, tmaAuthRetryTick])
+
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
     if (typeof window === 'undefined') return
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
     const hasInitData = !!getTmaInitData()
-    const inTmaContext = !!(window.Telegram?.WebApp || window.__TELEGRAM_INIT_DATA)
+    const inTmaContext = hasInitData
     if (inTmaContext && tmaAttemptStartRef.current === 0) {
       tmaAttemptStartRef.current = Date.now()
       setTmaWaitingAuth(true)

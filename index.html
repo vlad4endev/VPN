@@ -141,10 +141,13 @@
           } catch (e) {}
         }
         if (!window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
-          try {
-            var stored = sessionStorage.getItem('tg_init_data');
-            if (stored) window.__TELEGRAM_INIT_DATA = stored;
-          } catch (e) {}
+          var ref = typeof document !== 'undefined' ? (document.referrer || '') : '';
+          if (ref.indexOf('t.me') !== -1 || ref.indexOf('telegram.org') !== -1 || ref.indexOf('telegram') !== -1) {
+            try {
+              var stored = sessionStorage.getItem('tg_init_data');
+              if (stored) window.__TELEGRAM_INIT_DATA = stored;
+            } catch (e) {}
+          }
         }
         if (window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
           try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
