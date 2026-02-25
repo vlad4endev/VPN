@@ -318,6 +318,8 @@
     "confirmUnsubscribeQuestion": "Are you sure you want to cancel your subscription? This will remove your VPN configuration and revoke access to the service.",
     "tariffTableHeader": "Tariff",
     "statusTableHeader": "Status",
+    "actionsTableHeader": "Actions",
+    "recheckPaymentStatus": "Check status",
     "cancelSubscription": "Cancel subscription",
     "cancelEditAria": "Cancel editing",
     "cancelSubscription": "Cancel subscription",

@@ -409,6 +409,33 @@ class XUIService {
   }
 
   /**
+   * Трафик клиента по UUID из 3x-ui (GET /panel/api/inbounds/getClientTrafficsById/{uuid}).
+   * Вызывается при загрузке данных в карточке клиента (раздел «Данные с 3x-ui»).
+   * @param {Object} data - { uuid (обязательно), userId?, tariffId?, serverId?, inboundId? }
+   * @returns {Promise<{ success: boolean, data?: Object }>}
+   */
+  async getClientTrafficsById(data) {
+    try {
+      const payload = {
+        uuid: data.uuid || data.clientId,
+        userId: data.userId,
+        tariffId: data.tariffId,
+        serverId: data.serverId,
+        inboundId: data.inboundId,
+      }
+      if (!payload.uuid) {
+        return { success: false, error: 'uuid обязателен' }
+      }
+      const response = await this.api.post('/client-traffics-by-id', payload)
+      return response.data
+    } catch (error) {
+      const errMsg = error.response?.data?.error || error.message || 'Ошибка запроса трафика по UUID'
+      logger.error('XUIService', 'Ошибка getClientTrafficsById', { uuid: data?.uuid }, error)
+      return { success: false, error: errMsg }
+    }
+  }
+
+  /**
    * Получение списка инбаундов через Proxy
    * 
    * @returns {Promise<Array>} Массив инбаундов

@@ -33,6 +33,8 @@ import { handleWebhook } from '../controllers/telegram.controller.js'
  * @param {typeof import('crypto')} deps.crypto
  * @param {() => Promise<Object|null>} [deps.getScenario] — сценарий бота для кастомных текстов/кнопок
  * @param {(db: *, appId: string, triggerType: string, triggerValue: string) => Promise<Object|null>} [deps.findScenarioFromBotBuilder]
+ * @param {(widgetUser: object) => Promise<{ok: boolean, tgId?: string, user?: object, reason?: string, message?: string}>} [deps.validateTelegramWidgetDataOrRemote]
+ * @param {string} [deps.TELEGRAM_VERIFY_SECRET] — секрет для защиты POST /verify (сервер A с токеном бота)
  */
 export function createTelegramRouter(deps) {
   const router = express.Router()
@@ -51,11 +53,13 @@ export function createTelegramRouter(deps) {
     logTelegramUpdate,
     validateTelegramInitDataWithReasonAsync,
     validateTelegramWidgetData,
+    validateTelegramWidgetDataOrRemote,
     logTelegramAuth,
     verifyIdToken,
     verifyTelegramWebhookSecret,
     APP_ID,
     TELEGRAM_WEBHOOK_SECRET,
+    TELEGRAM_VERIFY_SECRET = '',
     TELEGRAM_SESSION_TTL_MS,
     getBaseUrlForTelegram,
     sendMainMenu,
@@ -65,6 +69,32 @@ export function createTelegramRouter(deps) {
     randomUUID,
     crypto,
   } = deps
+
+  // ——— POST /verify (для удалённой проверки: B запрашивает у A) ———
+  router.post('/verify', express.json(), async (req, res) => {
+    const secret = (req.headers['x-telegram-verify-secret'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '')).trim()
+    if (!TELEGRAM_VERIFY_SECRET || secret !== TELEGRAM_VERIFY_SECRET) {
+      return res.status(401).json({ ok: false, reason: 'unauthorized', message: 'Invalid or missing verify secret' })
+    }
+    const { type, initData, widgetUser } = req.body || {}
+    if (type === 'initData') {
+      const result = await validateTelegramInitDataWithReasonAsync(initData)
+      if (!result.ok) {
+        return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+      }
+      const tgId = result.data?.user?.id
+      return res.json({ ok: true, tgId, user: result.data?.user })
+    }
+    if (type === 'widget') {
+      const token = await getTelegramToken()
+      const result = await validateTelegramWidgetData(widgetUser, token)
+      if (!result.ok) {
+        return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+      }
+      return res.json({ ok: true, tgId: result.tgId, user: result.user })
+    }
+    return res.status(400).json({ ok: false, reason: 'invalid_type', message: 'Body must have type "initData" or "widget" and corresponding data' })
+  })
 
   // ——— POST /auth (Mini App: session token или initData) ———
   router.post('/auth', express.json(), async (req, res) => {
@@ -203,8 +233,9 @@ export function createTelegramRouter(deps) {
         return res.status(503).json({ success: false, error: 'Сервис недоступен' })
       }
     }
-    const token = await getTelegramToken()
-    const result = await validateTelegramWidgetData(widgetUser, token)
+    const result = validateTelegramWidgetDataOrRemote
+      ? await validateTelegramWidgetDataOrRemote(widgetUser)
+      : await validateTelegramWidgetData(widgetUser, await getTelegramToken())
     if (!result.ok) {
       logTelegramAuth('initData_fail', { reason: result.reason, source: 'widget' })
       return res.status(400).json({ success: false, error: result.message, reason: result.reason })

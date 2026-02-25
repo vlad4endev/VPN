@@ -31,8 +31,15 @@ import * as analyticsController from './analytics/analytics.controller.js'
 import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
+import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 
 dotenv.config()
+
+/** Для операций с 3x-ui используем только xuiClient (n8n для 3x-ui не используется). */
+function getXuiForVpn() {
+  const xui = getXuiClient()
+  return xui.configured ? xui : null
+}
 
 // Webhook-пути для исключения из latency per route (учёт только в metricsWebhook)
 function isWebhookPath(path) {
@@ -1580,218 +1587,245 @@ app.post('/api/public/review', async (req, res) => {
 })
 
 /**
- * Добавление клиента
+ * Добавление клиента в 3x-ui (только через xuiClient, n8n не используется).
  * POST /api/vpn/add-client
  */
 app.post('/api/vpn/add-client', async (req, res) => {
   try {
-    console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/vpn/add-client', {
-      hasBody: !!req.body,
-      bodyKeys: req.body ? Object.keys(req.body) : [],
-      operation: req.body?.operation,
-      category: req.body?.category,
-      userId: req.body?.userId,
-      email: req.body?.email,
-      clientId: req.body?.clientId,
-      inboundId: req.body?.inboundId
-    })
-    
-    if (!req.body || !req.body.clientId) {
-      console.error('❌ n8n-webhook-proxy: Отсутствует clientId в запросе')
+    const body = req.body || {}
+    if (!body.clientId) {
       return res.status(400).json({
         success: false,
         error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
       })
     }
 
-    // Telegram Mini App: подставляем telegram user id для сохранения в 3x-ui (не меняем текущую логику)
-    const addClientPayload = { ...req.body }
-    if (req.telegramUser && req.telegramUser.user && req.telegramUser.user.id) {
-      addClientPayload.telegramUserId = String(req.telegramUser.user.id)
-    }
-    
-    // Получаем webhook URL (приоритет: из запроса > из env > дефолтный)
-    const webhookUrl = getWebhookUrl('addClient', req)
-    console.log('📤 n8n-webhook-proxy: Отправка запроса в n8n webhook:', webhookUrl)
-    const result = await callN8NWebhook(webhookUrl, addClientPayload)
-    
-    console.log('✅ n8n-webhook-proxy: Получен ответ от n8n:', {
-      hasResult: !!result,
-      success: result?.success,
-      hasVpnUuid: !!result?.vpnUuid,
-      resultKeys: result ? Object.keys(result) : []
+    // Данные сервера — из тарифа/сервера, к которому привязан пользователь (tariffId/serverId в body)
+    const { xui, inboundId } = await getXuiAndInboundForRequest({
+      tariffId: body.tariffId,
+      serverId: body.serverId,
+      inboundId: body.inboundId,
     })
-    
+    if (!xui || !xui.configured) {
+      return res.status(503).json({
+        success: false,
+        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
+      })
+    }
+
+    const email = (body.email || `user_${body.userId || 'local'}@local`).toString().trim()
+    const totalGB = body.totalGB != null ? Number(body.totalGB) : 0
+    const expiryTime = body.expiryTime != null ? Number(body.expiryTime) : 0
+    const limitIp = body.limitIp != null ? Number(body.limitIp) : 1
+
+    await xui.addClient(inboundId, {
+      email,
+      uuid: body.clientId,
+      totalGB,
+      expiryTime,
+      limitIp,
+      tgId: (body.tgId ?? body.telegramUserId ?? '').toString(),
+      subId: (body.subId ?? '').toString(),
+    })
+
+    const result = {
+      success: true,
+      vpnUuid: body.clientId,
+    }
+    if (req.telegramUser?.user?.id) result.telegramUserId = String(req.telegramUser.user.id)
     res.json(result)
   } catch (error) {
-    // Детальное логирование ошибки
-    const errorStatus = error.status || error.response?.status || 500
-    const errorData = error.errorData || error.response?.data
-    const hasErrorData = errorData && (typeof errorData === 'object' ? Object.keys(errorData).length > 0 : typeof errorData === 'string' && errorData.trim().length > 0)
-    
-    console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса add-client:', {
-      message: error.message,
-      status: errorStatus,
-      statusText: error.response?.statusText,
-      hasErrorData: hasErrorData,
-      errorDataType: typeof errorData,
-      errorDataPreview: errorData ? (typeof errorData === 'string' ? errorData.substring(0, 200) : JSON.stringify(errorData).substring(0, 200)) : 'empty',
-      webhookUrl: error.webhookUrl || getWebhookUrl('addClient', req),
-      stack: error.stack?.substring(0, 500)
-    })
-    
-    // Определяем правильный HTTP статус код
-    let statusCode = 500
-    if (errorStatus) {
-      statusCode = errorStatus
-    } else if (error.message?.includes('not registered') || error.message?.includes('not found')) {
-      statusCode = 404
-    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-      statusCode = 503
-    }
-    
-    // Формируем детальное сообщение об ошибке
-    let errorMessage = error.message || 'Ошибка создания клиента через n8n'
-    let errorDetails = null
-    
-    // Если есть структурированные данные об ошибке, передаем их
-    if (errorData) {
-      if (typeof errorData === 'object') {
-        errorDetails = errorData
-        // Если есть errorMessage в данных, используем его
-        if (errorData.errorMessage) {
-          errorMessage = errorData.errorMessage
-        } else if (errorData.error) {
-          errorMessage = errorData.error
-        } else if (errorData.message) {
-          errorMessage = errorData.message
-        }
-      } else if (typeof errorData === 'string' && errorData.trim()) {
-        errorDetails = { rawResponse: errorData.substring(0, 1000) }
-        // Если ответ - строка, но не пустая, добавляем её к сообщению
-        if (errorData.length < 200) {
-          errorMessage = `${errorMessage}\n\nОтвет n8n: ${errorData}`
-        }
-      }
-    }
-    
-    // Если ответ пустой, добавляем специальную подсказку
-    if (!hasErrorData && errorStatus === 500) {
-      errorMessage = `${errorMessage}\n\n` +
-        `⚠️ Получен пустой ответ от n8n. Это может означать:\n` +
-        `1. Workflow не активирован в n8n\n` +
-        `2. Ошибка выполнения workflow (проверьте логи n8n)\n` +
-        `3. Узел "Respond to Webhook" не настроен правильно\n` +
-        `4. Webhook URL: ${error.webhookUrl || getWebhookUrl('addClient', req)}`
-    }
-    
+    const statusCode = error.response?.status || 500
     res.status(statusCode).json({
       success: false,
-      error: errorMessage,
-      errorMessage: errorMessage, // Дублируем для совместимости с фронтендом
-      errorDetails: errorDetails,
-      status: errorStatus,
-      webhookUrl: error.webhookUrl || getWebhookUrl('addClient', req),
-      hint: error.message?.includes('not registered') || error.message?.includes('not found')
-        ? 'Проверьте, что workflow активен в n8n и webhook настроен правильно.'
-        : error.message?.includes('Unused Respond to Webhook')
-        ? 'См. файл N8N_WORKFLOW_SETUP.md для инструкций по исправлению.'
-        : null
+      error: error.message || 'Ошибка создания клиента в 3x-ui',
+      errorMessage: error.message,
     })
   }
 })
 
 /**
- * Удаление клиента
+ * Удаление клиента из 3x-ui (только через xuiClient, n8n не используется).
  * POST /api/vpn/delete-client
  */
 app.post('/api/vpn/delete-client', async (req, res) => {
   try {
-    console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/vpn/delete-client', {
-      hasBody: !!req.body,
-      bodyKeys: req.body ? Object.keys(req.body) : [],
-      operation: req.body?.operation,
-      category: req.body?.category,
-      userId: req.body?.userId,
-      email: req.body?.email,
-      clientId: req.body?.clientId,
-      inboundId: req.body?.inboundId,
-      serverId: req.body?.serverId,
-      serverIP: req.body?.serverIP,
-      serverPort: req.body?.serverPort,
-      randompath: req.body?.randompath,
-      protocol: req.body?.protocol
+    const body = req.body || {}
+    const { xui, inboundId } = await getXuiAndInboundForRequest({
+      tariffId: body.tariffId,
+      serverId: body.serverId,
+      inboundId: body.inboundId,
     })
-    
-    if (!req.body || !req.body.clientId) {
-      console.error('❌ n8n-webhook-proxy: Отсутствует clientId в запросе')
-      return res.status(400).json({
+    if (!xui || !xui.configured) {
+      return res.status(503).json({
         success: false,
-        error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
+        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
       })
     }
 
-    const deleteClientPayload = { ...req.body }
-    if (req.telegramUser && req.telegramUser.user && req.telegramUser.user.id) {
-      deleteClientPayload.telegramUserId = String(req.telegramUser.user.id)
+    if (body.clientId) {
+      await xui.delClient(inboundId, body.clientId)
+    } else if (body.email) {
+      await xui.delClientByEmail(inboundId, body.email)
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Укажите clientId или email',
+      })
     }
-    
-    // Получаем webhook URL (приоритет: из запроса > из env > дефолтный)
-    const webhookUrl = getWebhookUrl('deleteClient', req)
-    console.log('📤 n8n-webhook-proxy: Отправка запроса в n8n webhook:', webhookUrl)
-    const result = await callN8NWebhook(webhookUrl, deleteClientPayload)
-    
-    console.log('✅ n8n-webhook-proxy: Получен ответ от n8n:', {
-      hasResult: !!result,
-      success: result?.success,
-      resultKeys: result ? Object.keys(result) : []
-    })
-    
-    res.json(result)
+
+    res.json({ success: true })
   } catch (error) {
-    console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса delete-client:', {
-      message: error.message,
-      stack: error.stack,
-      response: error.response?.data,
-      status: error.response?.status
-    })
-    
-    // Определяем правильный HTTP статус код
-    let statusCode = 500
-    if (error.response?.status) {
-      statusCode = error.response.status
-    } else if (error.message.includes('not registered') || error.message.includes('not found')) {
-      statusCode = 404
-    }
-    
+    const statusCode = error.response?.status || 500
     res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка удаления клиента через n8n',
+      error: error.message || 'Ошибка удаления клиента из 3x-ui',
       details: error.response?.data || null,
-      hint: error.message?.includes('Unused Respond to Webhook')
-        ? 'Проверьте настройку workflow в n8n: должен быть правильно настроен узел "Respond to Webhook" в цепочке выполнения. URL: ' + N8N_WEBHOOKS.deleteClient
-        : error.message?.includes('not registered')
-        ? 'Проверьте, что workflow активен в n8n и webhook настроен правильно. URL: ' + N8N_WEBHOOKS.deleteClient
-        : null
     })
   }
 })
 
 /**
- * Получение статистики клиента
+ * Получение статистики клиента из 3x-ui (xuiClient).
  * POST /api/vpn/client-stats
  */
 app.post('/api/vpn/client-stats', async (req, res) => {
   try {
-    const webhookUrl = getWebhookUrl('getClientStats', req)
-    const result = await callN8NWebhook(webhookUrl, req.body)
-    res.json(result)
+    const body = req.body || {}
+    let tariffId = body.tariffId
+    let serverId = body.serverId
+    if (!tariffId && !serverId && body.userId && db) {
+      const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${body.userId}`).get()
+      if (userSnap.exists) {
+        const userData = userSnap.data()
+        if (userData?.tariffId) tariffId = userData.tariffId
+      }
+    }
+    const { xui } = await getXuiAndInboundForRequest({
+      tariffId,
+      serverId,
+      inboundId: body.inboundId,
+    })
+    if (!xui || !xui.configured) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера' })
+    }
+    const { uuid, clientId, email } = body
+    const id = uuid || clientId
+    let stats
+    if (id) {
+      stats = await xui.getClientStats(id)
+    } else {
+      const found = await xui.findClientByEmail(email || '')
+      if (!found) return res.status(404).json({ success: false, error: 'Клиент не найден' })
+      stats = await xui.getClientStats(found.client.id)
+    }
+    return res.json({ success: true, stats, data: stats })
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Ошибка получения статистики через n8n',
+      error: error.message || 'Ошибка получения статистики',
     })
   }
+})
+
+/**
+ * Прямое получение статистики клиента из 3x-ui (то же, что client-stats).
+ * Используется фронтом в getClientStatsDirect для загрузки данных из 3x-ui.
+ * POST /api/vpn/client-stats-direct
+ */
+app.post('/api/vpn/client-stats-direct', async (req, res) => {
+  try {
+    const body = req.body || {}
+    let tariffId = body.tariffId
+    let serverId = body.serverId
+    if (!tariffId && !serverId && body.userId && db) {
+      const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${body.userId}`).get()
+      if (userSnap.exists) {
+        const userData = userSnap.data()
+        if (userData?.tariffId) tariffId = userData.tariffId
+      }
+    }
+    const { xui } = await getXuiAndInboundForRequest({
+      tariffId,
+      serverId,
+      inboundId: body.inboundId,
+    })
+    if (!xui || !xui.configured) {
+      return res.status(503).json({
+        success: false,
+        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
+      })
+    }
+    const { uuid, clientId, email } = body
+    const id = uuid || clientId
+    let stats
+    if (id) {
+      stats = await xui.getClientStats(id)
+    } else {
+      const found = await xui.findClientByEmail(email || '')
+      if (!found) return res.status(404).json({ success: false, error: 'Клиент не найден' })
+      stats = await xui.getClientStats(found.client.id)
+    }
+    return res.json({ success: true, stats, data: stats })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Ошибка получения статистики',
+    })
+  }
+})
+
+/**
+ * Трафик клиента по UUID. 3x-ui: GET /panel/api/inbounds/getClientTrafficsById/{uuid}
+ * GET /api/vpn/client-traffics-by-id/:uuid — query: tariffId?, serverId?, inboundId?, userId?
+ * POST /api/vpn/client-traffics-by-id — body: { uuid (required), tariffId?, serverId?, inboundId?, userId? }
+ */
+async function handleClientTrafficsById(req, res) {
+  try {
+    const uuid = req.params?.uuid || req.body?.uuid
+    if (!uuid || typeof uuid !== 'string' || !String(uuid).trim()) {
+      return res.status(400).json({ success: false, error: 'invalid UUID', msg: 'uuid обязателен' })
+    }
+    const body = req.body || {}
+    const query = req.query || {}
+    let tariffId = body.tariffId ?? query.tariffId
+    let serverId = body.serverId ?? query.serverId
+    const userId = body.userId ?? query.userId
+    if (!tariffId && !serverId && userId && db) {
+      const userSnap = await db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`).get()
+      if (userSnap.exists) {
+        const userData = userSnap.data()
+        if (userData?.tariffId) tariffId = userData.tariffId
+      }
+    }
+    const { xui } = await getXuiAndInboundForRequest({
+      tariffId,
+      serverId,
+      inboundId: body.inboundId ?? query.inboundId,
+    })
+    if (!xui || !xui.configured) {
+      return res.status(503).json({
+        success: false,
+        error: '3x-ui не настроен или укажите tariffId/serverId привязанного сервера',
+      })
+    }
+    const data = await xui.getClientTrafficsById(String(uuid).trim())
+    return res.json({ success: true, data })
+  } catch (error) {
+    const status = error.response?.status === 404 ? 404 : error.response?.status === 401 ? 401 : 500
+    res.status(status).json({
+      success: false,
+      error: error.message || 'Ошибка получения трафика по UUID',
+    })
+  }
+}
+
+app.get('/api/vpn/client-traffics-by-id/:uuid', (req, res, next) => {
+  handleClientTrafficsById(req, res).catch(next)
+})
+
+app.post('/api/vpn/client-traffics-by-id', (req, res, next) => {
+  handleClientTrafficsById(req, res).catch(next)
 })
 
 /**
@@ -1800,20 +1834,16 @@ app.post('/api/vpn/client-stats', async (req, res) => {
  */
 app.get('/api/vpn/inbounds', async (req, res) => {
   try {
-    // Добавляем маркировку операции из query параметров или используем по умолчанию
-    const operationData = {
-      operation: req.query.operation || 'get_inbounds',
-      category: req.query.category || 'get_server_data',
-      timestamp: req.query.timestamp || new Date().toISOString(),
-      ...req.query,
+    const xui = getXuiForVpn()
+    if (!xui) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)' })
     }
-    const webhookUrl = getWebhookUrl('getInbounds', req)
-    const result = await callN8NWebhook(webhookUrl, operationData, 'GET')
-    res.json(result)
+    const list = await xui.getInbounds()
+    return res.json({ success: true, obj: list, data: list })
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Ошибка получения списка инбаундов через n8n',
+      error: error.message || 'Ошибка получения списка инбаундов',
     })
   }
 })
@@ -1825,21 +1855,97 @@ app.get('/api/vpn/inbounds', async (req, res) => {
 app.get('/api/vpn/inbounds/:inboundId', async (req, res) => {
   try {
     const { inboundId } = req.params
-    // Добавляем маркировку операции из query параметров или используем по умолчанию
-    const operationData = {
-      operation: req.query.operation || 'get_inbound',
-      category: req.query.category || 'get_server_data',
-      timestamp: req.query.timestamp || new Date().toISOString(),
-      inboundId,
-      ...req.query,
+    const xui = getXuiForVpn()
+    if (!xui) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)' })
     }
-    const webhookUrl = getWebhookUrl('getInbound', req)
-    const result = await callN8NWebhook(webhookUrl, operationData, 'GET')
-    res.json(result)
+    const inbound = await xui.getInbound(inboundId)
+    if (!inbound) return res.status(404).json({ success: false, error: 'Инбаунд не найден' })
+    return res.json({ success: true, obj: inbound, data: inbound })
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Ошибка получения инбаунда через n8n',
+      error: error.message || 'Ошибка получения инбаунда',
+    })
+  }
+})
+
+/**
+ * Список инбаундов по Random Path из настроек сервера (Firestore: settings.servers).
+ * IP, порт и Inbound ID берутся из настроек сервера.
+ * Authentication (POST /login): username и password берутся из настроек сервера (xuiUsername, xuiPassword).
+ * GET /api/:randomPath/inbounds
+ */
+app.get('/api/:randomPath/inbounds', async (req, res) => {
+  try {
+    const { randomPath } = req.params
+    const server = await getServerByRandomPath(randomPath)
+    if (!server) {
+      return res.status(404).json({
+        success: false,
+        error: `Сервер с Random Path "${randomPath}" не найден в настройках`,
+      })
+    }
+    // Логин и пароль для 3x-ui POST /login — из настроек сервера (fallback на env)
+    const xui = createXuiClient({
+      baseUrl: server.baseUrl,
+      username: server.xuiUsername ?? process.env.XUI_USERNAME,
+      password: server.xuiPassword ?? process.env.XUI_PASSWORD,
+    })
+    if (!xui.configured) {
+      return res.status(503).json({ success: false, error: 'У сервера не заданы учётные данные (логин/пароль)' })
+    }
+    const list = await xui.getInbounds()
+    return res.json({
+      success: true,
+      obj: list,
+      data: list,
+      server: { serverIP: server.serverIP, serverPort: server.serverPort, inboundId: server.xuiInboundId },
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Ошибка получения списка инбаундов',
+    })
+  }
+})
+
+/**
+ * Инбаунд по ID по Random Path из настроек сервера (IP, порт, Inbound ID из settings.servers).
+ * Authentication (POST /login): username и password берутся из настроек сервера (xuiUsername, xuiPassword).
+ * GET /api/:randomPath/inbounds/:inboundId
+ */
+app.get('/api/:randomPath/inbounds/:inboundId', async (req, res) => {
+  try {
+    const { randomPath, inboundId } = req.params
+    const server = await getServerByRandomPath(randomPath)
+    if (!server) {
+      return res.status(404).json({
+        success: false,
+        error: `Сервер с Random Path "${randomPath}" не найден в настройках`,
+      })
+    }
+    // Логин и пароль для 3x-ui POST /login — из настроек сервера (fallback на env)
+    const xui = createXuiClient({
+      baseUrl: server.baseUrl,
+      username: server.xuiUsername ?? process.env.XUI_USERNAME,
+      password: server.xuiPassword ?? process.env.XUI_PASSWORD,
+    })
+    if (!xui.configured) {
+      return res.status(503).json({ success: false, error: 'У сервера не заданы учётные данные (логин/пароль)' })
+    }
+    const inbound = await xui.getInbound(inboundId)
+    if (!inbound) return res.status(404).json({ success: false, error: 'Инбаунд не найден' })
+    return res.json({
+      success: true,
+      obj: inbound,
+      data: inbound,
+      server: { serverIP: server.serverIP, serverPort: server.serverPort, xuiInboundId: server.xuiInboundId },
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Ошибка получения инбаунда',
     })
   }
 })
@@ -2234,20 +2340,12 @@ async function fetchOperatorContext3xUi(userId, userData) {
   const uuid = (userData?.uuid ?? '').toString().trim()
   const email = (userData?.email ?? userData?.login ?? '').toString().trim()
   if (!uuid && !email) return 'Нет данных (нет uuid/email для запроса в 3x-ui).'
-  const webhookUrl = N8N_WEBHOOKS.getClientStats || getDefaultWebhooks().getClientStats
-  const payload = {
-    operation: 'get_client_stats',
-    category: 'support_operator',
-    timestamp: new Date().toISOString(),
-    userId,
-    email: email || undefined,
-    uuid: uuid || undefined,
-    clientId: uuid || undefined,
-  }
-  try {
-    const result = await callN8NWebhook(webhookUrl, payload)
-    const stats = result?.stats ?? result?.data ?? result
-    if (!stats || typeof stats !== 'object') return 'Запрос в 3x-ui выполнен, данных о клиенте не получено.'
+
+  const xui = getXuiForVpn()
+  if (!xui) return '3x-ui не настроен.'
+
+  const formatStats = (stats) => {
+    if (!stats || typeof stats !== 'object') return null
     const total = stats.total != null ? Number(stats.total) : null
     const up = stats.up != null ? Number(stats.up) : 0
     const down = stats.down != null ? Number(stats.down) : 0
@@ -2262,6 +2360,34 @@ async function fetchOperatorContext3xUi(userId, userData) {
     if (remainingGB != null) parts.push(`Остаток: ${remainingGB} GB`)
     parts.push(`Срок в панели VPN: ${expiryTime}`)
     return parts.join('; ')
+  }
+
+  try {
+    let client
+    if (uuid) {
+      const inbounds = await xui.getInbounds()
+      for (const ib of inbounds) {
+        const c = (ib.clients || []).find((x) => x.id === uuid)
+        if (c) {
+          client = c
+          break
+        }
+      }
+    } else {
+      const found = await xui.findClientByEmail(email)
+      if (!found) return 'Клиент в 3x-ui не найден.'
+      client = found.client
+    }
+    if (!client) return 'Клиент в 3x-ui не найден.'
+    const traffic = await xui.getClientStats(client.id)
+    const merged = {
+      total: client.totalGB,
+      expiryTime: client.expiryTime > 1000000000000 ? client.expiryTime / 1000 : client.expiryTime,
+      up: traffic.up ?? 0,
+      down: traffic.down ?? 0,
+    }
+    const text = formatStats(merged)
+    return text || 'Данных о клиенте не получено.'
   } catch (err) {
     console.warn('🤖 Майкл: не удалось получить данные 3x-ui для контекста', err.message)
     return `Запрос в 3x-ui не выполнен: ${err.message || 'ошибка'}`
@@ -3300,6 +3426,89 @@ async function getSettingsCached() {
   }
 }
 
+/** Нормализовать random path для сравнения (без ведущих/концевых слэшей). */
+function normalizeRandomPath(p) {
+  return (p || '').toString().trim().replace(/^\/+|\/+$/g, '') || ''
+}
+
+/** Собрать из объекта сервера baseUrl и protocol (для запросов к 3x-ui). */
+function buildServerConnection(s) {
+  if (!s || !s.serverIP || !s.serverPort) return null
+  const protocol = (s.protocol || (s.serverPort === 443 || s.serverPort === 40919 ? 'https' : 'http')).toLowerCase().replace(/[:/]/g, '')
+  const rp = (s.randompath || '').toString().trim()
+  const pathSegment = rp && !rp.startsWith('/') ? `/${rp}` : rp
+  const baseUrl = `${protocol === 'https' ? 'https' : 'http'}://${s.serverIP}:${s.serverPort}${pathSegment}`.replace(/\/+$/, '')
+  return { ...s, protocol: protocol === 'https' ? 'https' : 'http', baseUrl }
+}
+
+/**
+ * Найти сервер в настройках по Random Path (из artifacts/APP_ID/public/settings.servers).
+ * @returns {Object|null} { baseUrl, serverIP, serverPort, protocol, randompath, xuiInboundId, xuiUsername?, xuiPassword?, ... } или null
+ */
+async function getServerByRandomPath(randomPath) {
+  const settings = await getSettingsCached()
+  const servers = settings?.servers || []
+  const want = normalizeRandomPath(randomPath)
+  if (!want) return null
+  for (const s of servers) {
+    const path = normalizeRandomPath(s.randompath)
+    if (path === want) return buildServerConnection(s)
+  }
+  return null
+}
+
+/**
+ * Найти сервер, привязанный к тарифу (server.tariffIds включает tariffId).
+ * Данные сервера (IP, порт, random path, логин/пароль, inboundId) подставляются в запросы к 3x-ui.
+ * @param {string} tariffId - ID тарифа
+ * @returns {Promise<Object|null>} сервер с baseUrl, xuiInboundId, xuiUsername, xuiPassword или null
+ */
+async function getServerByTariffId(tariffId) {
+  if (!tariffId) return null
+  const settings = await getSettingsCached()
+  const servers = settings?.servers || []
+  const s = servers.find((server) => (server.tariffIds || []).includes(tariffId))
+  return s ? buildServerConnection(s) : null
+}
+
+/**
+ * Найти сервер по ID (settings.servers[].id).
+ * @param {string} serverId
+ * @returns {Promise<Object|null>}
+ */
+async function getServerByServerId(serverId) {
+  if (!serverId) return null
+  const settings = await getSettingsCached()
+  const servers = settings?.servers || []
+  const s = servers.find((server) => server.id === serverId)
+  return s ? buildServerConnection(s) : null
+}
+
+/**
+ * Получить xuiClient и inboundId для запроса к 3x-ui.
+ * Приоритет: server по tariffId → server по serverId → глобальный getXuiForVpn() и inboundId из body/env.
+ * @param {{ tariffId?: string, serverId?: string, inboundId?: string|number }} opts
+ * @returns {Promise<{ xui: Object, inboundId: string|number }|{ xui: null, inboundId: string|number }>}
+ */
+async function getXuiAndInboundForRequest(opts = {}) {
+  const { tariffId, serverId, inboundId: bodyInboundId } = opts
+  let server = null
+  if (tariffId) server = await getServerByTariffId(tariffId)
+  if (!server && serverId) server = await getServerByServerId(serverId)
+  if (server) {
+    const xui = createXuiClient({
+      baseUrl: server.baseUrl,
+      username: server.xuiUsername ?? process.env.XUI_USERNAME,
+      password: server.xuiPassword ?? process.env.XUI_PASSWORD,
+    })
+    const inboundId = server.xuiInboundId != null && server.xuiInboundId !== '' ? server.xuiInboundId : (bodyInboundId ?? process.env.XUI_INBOUND_ID ?? 1)
+    return { xui, inboundId }
+  }
+  const xui = getXuiForVpn()
+  const inboundId = bodyInboundId ?? process.env.XUI_INBOUND_ID ?? 1
+  return { xui, inboundId }
+}
+
 /** Сценарий бота из Firestore (artifacts/APP_ID/public/settings.telegramBotScenario). Используется в sendMainMenu и buildMainKeyboard. */
 async function getTelegramScenario() {
   const s = await getSettingsCached()
@@ -3369,13 +3578,71 @@ async function getActiveAiConfig() {
  * @param {string} initData - строка query string из Telegram.WebApp.initData
  * @returns {Promise<{ ok: true, data: Object } | { ok: false, reason: string, message: string }>}
  */
+const TELEGRAM_VERIFY_URL = (process.env.TELEGRAM_VERIFY_URL || '').toString().trim()
+const TELEGRAM_VERIFY_SECRET = (process.env.TELEGRAM_VERIFY_SECRET || '').toString().trim()
+const TELEGRAM_VERIFY_TIMEOUT_MS = Math.max(5000, parseInt(process.env.TELEGRAM_VERIFY_TIMEOUT_MS || '10000', 10))
+
+/**
+ * Запрос проверки Telegram-данных на удалённый сервер (сервер A с токеном бота).
+ * Используется, когда на текущем инстансе (B) нет TELEGRAM_BOT_TOKEN, но заданы TELEGRAM_VERIFY_URL и TELEGRAM_VERIFY_SECRET.
+ * @param {'initData'|'widget'} type
+ * @param {string|object} data - initData string или widgetUser object
+ * @returns {Promise<{ ok: boolean, tgId?: string, user?: object, reason?: string, message?: string }>}
+ */
+async function verifyTelegramRemotely(type, data) {
+  if (!TELEGRAM_VERIFY_URL || !TELEGRAM_VERIFY_SECRET) {
+    return { ok: false, reason: 'no_verify_config', message: 'Удалённая проверка Telegram не настроена (TELEGRAM_VERIFY_URL, TELEGRAM_VERIFY_SECRET).' }
+  }
+  const url = TELEGRAM_VERIFY_URL.includes('/verify') ? TELEGRAM_VERIFY_URL.replace(/\/+$/, '') : TELEGRAM_VERIFY_URL.replace(/\/+$/, '') + '/api/telegram/verify'
+  const body = type === 'initData' ? { type: 'initData', initData: data } : { type: 'widget', widgetUser: data }
+  try {
+    const res = await axios.post(url, body, {
+      headers: { 'X-Telegram-Verify-Secret': TELEGRAM_VERIFY_SECRET },
+      timeout: TELEGRAM_VERIFY_TIMEOUT_MS,
+      validateStatus: () => true,
+    })
+    const d = res.data || {}
+    if (res.status === 401) {
+      return { ok: false, reason: 'unauthorized', message: 'Неверный секрет удалённой проверки.' }
+    }
+    if (d.ok && d.tgId) {
+      return { ok: true, tgId: d.tgId, user: d.user }
+    }
+    return { ok: false, reason: d.reason || 'unknown', message: d.message || 'Проверка не пройдена.' }
+  } catch (e) {
+    const msg = e.response?.data?.message || e.message || 'Ошибка запроса к серверу проверки.'
+    return { ok: false, reason: 'remote_error', message: msg }
+  }
+}
+
+/**
+ * Валидация initData: локально (если есть токен) или через удалённый сервер (TELEGRAM_VERIFY_URL).
+ */
 async function validateTelegramInitDataWithReasonAsync(initData) {
   const token = await getTelegramToken()
-  if (!token) {
-    return { ok: false, reason: 'no_token', message: 'Сервер не настроен для входа через Telegram. Задайте токен бота в .env или в настройках Telegram в админ-панели.' }
+  if (token) {
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
+    return validateTelegramInitDataWithReason(initData, secret)
   }
-  const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
-  return validateTelegramInitDataWithReason(initData, secret)
+  if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) {
+    const remote = await verifyTelegramRemotely('initData', initData)
+    if (remote.ok && remote.tgId) {
+      return { ok: true, data: { user: { id: remote.tgId, ...(remote.user || {}) } } }
+    }
+    return { ok: false, reason: remote.reason || 'unknown', message: remote.message || 'Проверка не пройдена.' }
+  }
+  return { ok: false, reason: 'no_token', message: 'Сервер не настроен для входа через Telegram. Задайте токен бота в .env или в настройках Telegram в админ-панели.' }
+}
+
+/**
+ * Валидация данных виджета: локально (если есть токен) или через TELEGRAM_VERIFY_URL.
+ * Используется в роутере как единая точка входа для auth-widget.
+ */
+async function validateTelegramWidgetDataOrRemote(widgetUser) {
+  const token = await getTelegramToken()
+  if (token) return validateTelegramWidgetData(widgetUser, token)
+  if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) return verifyTelegramRemotely('widget', widgetUser)
+  return { ok: false, reason: 'no_token', message: 'Сервер не настроен для входа через Telegram. Задайте токен бота или TELEGRAM_VERIFY_URL.' }
 }
 
 // ——— Telegram Webhook: проверка secret_token (если задан TELEGRAM_WEBHOOK_SECRET) ———
@@ -3441,25 +3708,46 @@ async function handleMiniAppData(botToken, message) {
     }
   }
 
-  const emptyReq = { body: {}, headers: {} }
-  const webhookUrl = getWebhookUrl('addClient', emptyReq)
-  const payload = {
-    ...data,
-    telegramUserId: fromId,
-    userId: userId || undefined,
-  }
+  const xui = getXuiForVpn()
 
   try {
     if (action === 'create_vpn' || action === 'add_client') {
-      await callN8NWebhook(webhookUrl, { ...payload, operation: 'add_client' })
-      await sendTelegramMessage(botToken, chatId, '✅ Запрос на создание VPN отправлен.')
+      if (!xui) {
+        await sendTelegramMessage(botToken, chatId, '⚠️ 3x-ui не настроен на сервере.')
+        return
+      }
+      const clientId = data.clientId || data.uuid
+      if (!clientId) {
+        await sendTelegramMessage(botToken, chatId, '⚠️ Нет данных для создания конфига (clientId).')
+        return
+      }
+      const inboundId = data.inboundId ?? process.env.XUI_INBOUND_ID ?? 1
+      await xui.addClient(inboundId, {
+        email: (data.email || `tg_${fromId}@local`).toString().trim(),
+        uuid: clientId,
+        totalGB: data.totalGB != null ? Number(data.totalGB) : 0,
+        expiryTime: data.expiryTime != null ? Number(data.expiryTime) : 0,
+        limitIp: data.limitIp != null ? Number(data.limitIp) : 1,
+        tgId: fromId,
+        subId: (data.subId ?? '').toString(),
+      })
+      await sendTelegramMessage(botToken, chatId, '✅ Конфиг VPN создан.')
     } else if (action === 'delete_vpn' || action === 'delete_client') {
-      const deleteUrl = getWebhookUrl('deleteClient', emptyReq)
-      await callN8NWebhook(deleteUrl, { ...payload, operation: 'delete_client' })
-      await sendTelegramMessage(botToken, chatId, '🗑️ Запрос на удаление конфига отправлен.')
+      if (!xui) {
+        await sendTelegramMessage(botToken, chatId, '⚠️ 3x-ui не настроен на сервере.')
+        return
+      }
+      const inboundId = data.inboundId ?? process.env.XUI_INBOUND_ID ?? 1
+      if (data.clientId || data.uuid) {
+        await xui.delClient(inboundId, data.clientId || data.uuid)
+      } else if (data.email) {
+        await xui.delClientByEmail(inboundId, data.email)
+      } else {
+        await sendTelegramMessage(botToken, chatId, '⚠️ Укажите clientId или email для удаления.')
+        return
+      }
+      await sendTelegramMessage(botToken, chatId, '🗑️ Конфиг удалён.')
     } else {
-      // Любой другой action — пробрасываем в n8n для кастомной логики
-      await callN8NWebhook(webhookUrl, payload)
       await sendTelegramMessage(botToken, chatId, '✅ Данные получены.')
     }
   } catch (err) {
@@ -3500,11 +3788,13 @@ app.use('/api/telegram', createTelegramRouter({
   },
   validateTelegramInitDataWithReasonAsync,
   validateTelegramWidgetData,
+  validateTelegramWidgetDataOrRemote,
   logTelegramAuth,
   verifyIdToken,
   verifyTelegramWebhookSecret,
   APP_ID,
   TELEGRAM_WEBHOOK_SECRET,
+  TELEGRAM_VERIFY_SECRET,
   TELEGRAM_SESSION_TTL_MS,
   getBaseUrlForTelegram,
   sendMainMenu,
@@ -4268,625 +4558,335 @@ app.delete('/api/admin/promocodes/:id', async (req, res) => {
 })
 
 /**
- * Генерация ссылки на оплату через YooMoney
+ * Создание заказа на оплату (без внешней платёжной системы)
  * POST /api/payment/generate-link
- * 
- * Принимает данные о платеже и отправляет запрос в n8n workflow
- * для генерации ссылки на оплату
+ *
+ * Генерирует orderId и создаёт запись в Firestore со статусом pending.
+ * paymentUrl не возвращается (оплата — по реквизитам / другой интеграции).
  */
+function isTimeoutError(message) {
+  if (!message || typeof message !== 'string') return false
+  const s = message.toLowerCase()
+  return s.includes('timeout') || s.includes('etimedout') || s.includes('econnaborted')
+}
+
 app.post('/api/payment/generate-link', async (req, res) => {
   try {
-    console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/payment/generate-link', {
-      hasBody: !!req.body,
-      bodyKeys: req.body ? Object.keys(req.body) : [],
-      userId: req.body?.userId,
-      amount: req.body?.amount,
-      tariffId: req.body?.tariffId
-    })
-    
-    const { userId, amount, tariffId, paymentSettings, userData: requestUserData } = req.body
-    
-    if (!userId || !amount || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Необходимо указать userId и amount (сумма должна быть больше 0)',
-      })
-    }
-    
-    // Получаем webhook URL для платежей (приоритет: из запроса > из env > дефолтный)
-    const webhookUrl = getWebhookUrl('addClient', req) // Используем существующий механизм
-    console.log('📤 n8n-webhook-proxy: Отправка запроса в n8n webhook для генерации ссылки:', webhookUrl)
-    
-    // Если paymentSettings не переданы из запроса, загружаем из Firestore
-    let finalPaymentSettings = paymentSettings
-    if (!paymentSettings || Object.keys(paymentSettings).length === 0 || 
-        !paymentSettings.yoomoneyWallet || !paymentSettings.yoomoneySecretKey) {
-      console.log('⚠️ paymentSettings не переданы или неполные, загружаем из Firestore')
-      finalPaymentSettings = await loadPaymentSettings()
-      console.log('📥 n8n-webhook-proxy: Настройки платежей загружены из Firestore', {
-        hasWallet: !!finalPaymentSettings.yoomoneyWallet,
-        hasSecretKey: !!finalPaymentSettings.yoomoneySecretKey
-      })
-    }
-    
-    // Получаем данные пользователя (uuid, email, inboundId)
-    // Приоритет: из запроса > из Firestore
-    let userData = {
-      uuid: null,
-      email: null,
-      inboundId: null,
-      userId: userId
-    }
-    
-    // Если данные пользователя переданы в запросе, используем их
-    if (requestUserData && (requestUserData.uuid || requestUserData.email || requestUserData.inboundId)) {
-      userData.uuid = requestUserData.uuid || null
-      userData.email = requestUserData.email || null
-      userData.inboundId = requestUserData.inboundId || null
-      console.log('✅ n8n-webhook-proxy: Данные пользователя получены из запроса', {
-        userId,
-        hasEmail: !!userData.email,
-        hasUuid: !!userData.uuid,
-        hasInboundId: !!userData.inboundId,
-        email: userData.email,
-        uuid: userData.uuid,
-        inboundId: userData.inboundId
-      })
-    } else {
-      // Если данные не переданы, пытаемся получить из Firestore
-      if (db && userId) {
-        try {
-          const APP_ID = process.env.APP_ID || 'skyputh'
-          
-          console.log('🔍 n8n-webhook-proxy: Загрузка данных пользователя из Firestore', {
-            userId,
-            appId: APP_ID,
-            collectionPath: `artifacts/${APP_ID}/public/data/users_v4`
-          })
-          
-          // Получаем данные пользователя из Firestore
-          const usersCollection = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
-          const userDoc = await usersCollection.doc(userId).get()
-          
-          if (userDoc.exists) {
-            const userDocData = userDoc.data()
-            userData.email = userDocData.email || null
-            userData.uuid = userDocData.uuid || null
-            
-            console.log('✅ n8n-webhook-proxy: Данные пользователя загружены из Firestore для генерации ссылки', {
-              userId,
-              hasEmail: !!userData.email,
-              hasUuid: !!userData.uuid,
-              email: userData.email,
-              uuid: userData.uuid,
-              allUserDataKeys: Object.keys(userDocData)
-            })
-          } else {
-            console.warn('⚠️ n8n-webhook-proxy: Пользователь не найден в Firestore для генерации ссылки', { 
-              userId,
-              appId: APP_ID,
-              collectionPath: `artifacts/${APP_ID}/public/data/users_v4`
-            })
-          }
-        } catch (userDataError) {
-          console.error('❌ n8n-webhook-proxy: Ошибка получения данных пользователя для генерации ссылки', {
-            userId,
-            error: userDataError.message,
-            stack: userDataError.stack
-          })
-          // Продолжаем работу даже если не удалось получить данные пользователя
-        }
-      } else {
-        console.warn('⚠️ n8n-webhook-proxy: Не удалось загрузить данные пользователя', {
-          hasDb: !!db,
-          hasUserId: !!userId
-        })
-      }
-    }
-    
-    // Формируем данные для n8n workflow, включая настройки платежной системы и данные пользователя
-    const paymentData = {
-      mode: 'generateLink',
-      userId,
-      amount: Number(amount),
-      tariffId: tariffId || null,
-      // Данные пользователя
-      userData: {
-        uuid: userData.uuid,
-        email: userData.email,
-        userId: userData.userId,
-        inboundId: userData.inboundId || null // Inbound ID тарифа
-      },
-      // Передаем настройки платежной системы (из запроса или из Firestore)
-      paymentSettings: finalPaymentSettings || {},
-      ...req.body
-    }
-    
-    console.log('📤 n8n-webhook-proxy: Данные для n8n workflow:', {
-      mode: paymentData.mode,
-      userId: paymentData.userId,
-      amount: paymentData.amount,
-      tariffId: paymentData.tariffId,
-      hasUserData: !!paymentData.userData,
-      userData: paymentData.userData,
-      hasPaymentSettings: !!paymentData.paymentSettings && Object.keys(paymentData.paymentSettings).length > 0,
-      paymentSettingsKeys: paymentData.paymentSettings ? Object.keys(paymentData.paymentSettings) : [],
-      fullPaymentData: JSON.stringify(paymentData, null, 2).substring(0, 1000)
-    })
-    
-    let result
-    try {
-      result = await callN8NWebhook(webhookUrl, paymentData)
-    } catch (webhookError) {
-      // Обрабатываем ошибки от callN8NWebhook
-      console.error('❌ n8n-webhook-proxy: Ошибка вызова n8n webhook:', {
-        message: webhookError.message,
-        status: webhookError.response?.status,
-        statusText: webhookError.response?.statusText,
-        errorData: webhookError.response?.data,
-        stack: webhookError.stack?.substring(0, 500)
-      })
-      
-      // Если ошибка уже содержит response.data с errorMessage, используем его
-      if (webhookError.response?.data?.errorMessage) {
-        return res.status(webhookError.response.status || 500).json({
-          success: false,
-          error: webhookError.response.data.errorMessage
-        })
-      }
-      
-      // Иначе используем стандартную обработку
-      const errorMsg = webhookError.message || 'Ошибка вызова n8n workflow'
-      return res.status(webhookError.response?.status || 500).json({
-        success: false,
-        error: errorMsg.includes('No item to return') 
-          ? 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
-          : errorMsg
-      })
-    }
-    
-    console.log('✅ n8n-webhook-proxy: Получен ответ от n8n для генерации ссылки:', {
-      hasResult: !!result,
-      resultType: typeof result,
-      isArray: Array.isArray(result),
-      resultLength: Array.isArray(result) ? result.length : undefined,
-      resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
-      hasError: !!(result?.error || result?.errorMessage || result?.message),
-      errorMessage: result?.error || result?.errorMessage || result?.message,
-      hasPaymentUrl: Array.isArray(result) ? !!result[0]?.paymentUrl : !!result?.paymentUrl,
-      hasOrderId: Array.isArray(result) ? !!result[0]?.orderId : !!result?.orderId,
-      fullResult: JSON.stringify(result, null, 2).substring(0, 2000)
-    })
-
-    // Проверяем, что result не пустой и не является ошибкой
-    if (!result) {
-      console.error('❌ n8n-webhook-proxy: n8n вернул пустой ответ')
-      return res.status(500).json({
-        success: false,
-        error: 'n8n workflow вернул пустой ответ. Проверьте конфигурацию workflow.',
-      })
-    }
-
-    // Проверяем на ошибки от n8n
-    if (result.error || result.errorMessage || result.message) {
-      const errorMsg = result.error || result.errorMessage || result.message
-      console.error('❌ n8n-webhook-proxy: n8n вернул ошибку:', errorMsg)
-      
-      // Специальная обработка для ошибки "No item to return was found"
-      if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId.',
-        })
-      }
-      
-      return res.status(500).json({
-        success: false,
-        error: `Ошибка n8n workflow: ${errorMsg}`,
-      })
-    }
-    
-    // callN8NWebhook возвращает данные из response.data
-    // n8n может вернуть массив или объект, поэтому обрабатываем оба случая
-    let responseData = null
-    
-    if (Array.isArray(result)) {
-      if (result.length === 0) {
-        console.error('❌ n8n-webhook-proxy: n8n вернул пустой массив')
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow вернул пустой массив. Проверьте конфигурацию workflow.',
-        })
-      }
-      
-      // Если ответ - массив, берем первый элемент
-      // n8n может возвращать [{ json: { paymentUrl: ... } }] или [{ paymentUrl: ... }]
-      const firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId)
-      
-      if (!firstItem) {
-        console.error('❌ n8n-webhook-proxy: Не найдены данные платежа в ответе n8n:', {
-          resultLength: result.length,
-          firstItemKeys: result[0] ? Object.keys(result[0]) : [],
-          resultPreview: JSON.stringify(result).substring(0, 500)
-        })
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow не вернул данные платежа. Убедитесь, что workflow возвращает paymentUrl и orderId.',
-        })
-      }
-      
-      // Проверяем, есть ли поле json (стандартный формат n8n)
-      if (firstItem.json) {
-        responseData = firstItem.json
-      } else {
-        responseData = firstItem
-      }
-      
-      console.log('📦 n8n-webhook-proxy: Ответ от n8n - массив, извлечен первый элемент:', {
-        hasPaymentUrl: !!responseData.paymentUrl,
-        hasOrderId: !!responseData.orderId,
-        hasJsonField: !!firstItem.json
-      })
-    } else if (result?.json) {
-      // Если ответ имеет поле json (стандартный формат n8n)
-      responseData = result.json
-    } else if (result?.data) {
-      // Если ответ имеет поле data
-      responseData = result.data
-    } else {
-      // Иначе используем сам result
-      responseData = result || {}
-    }
-    
-    // Извлекаем orderId из paymentUrl, если он не передан в ответе n8n
-    if (!responseData.orderId && responseData.paymentUrl) {
-      try {
-        const url = new URL(responseData.paymentUrl)
-        const label = url.searchParams.get('label')
-        if (label && label.startsWith('order_')) {
-          responseData.orderId = label
-          console.log('✅ n8n-webhook-proxy: orderId извлечен из paymentUrl', {
-            orderId: responseData.orderId,
-            label
-          })
-        }
-      } catch (urlError) {
-        console.warn('⚠️ n8n-webhook-proxy: Не удалось извлечь orderId из paymentUrl', {
-          paymentUrl: responseData.paymentUrl,
-          error: urlError.message
-        })
-      }
-    }
-
-    // Проверяем, что в ответе есть paymentUrl
-    if (!responseData.paymentUrl) {
-      console.error('❌ n8n-webhook-proxy: Отсутствует paymentUrl от n8n workflow:', {
-        responseData,
-        result,
-        resultType: typeof result,
-        isArray: Array.isArray(result),
-        resultKeys: result ? (Array.isArray(result) ? (result[0] ? Object.keys(result[0]) : []) : Object.keys(result)) : []
-      })
-      return res.status(500).json({
-        success: false,
-        error: 'Неполные данные от n8n workflow: отсутствует paymentUrl',
-        receivedData: responseData
-      })
-    }
-
-    // Если orderId все еще отсутствует, генерируем его
-    if (!responseData.orderId) {
-      responseData.orderId = `order_${Date.now()}`
-      console.warn('⚠️ n8n-webhook-proxy: orderId сгенерирован из timestamp', {
-        orderId: responseData.orderId
-      })
-    }
-    
-    console.log('✅ n8n-webhook-proxy: Отправка ответа клиенту:', {
-      paymentUrl: responseData.paymentUrl,
-      orderId: responseData.orderId,
-      amount: responseData.amount || amount,
-      status: responseData.status,
-      allKeys: Object.keys(responseData),
-      fullResponse: JSON.stringify(responseData, null, 2)
-    })
-    
-    // Отправляем ответ клиенту
-    res.json({
-      success: true,
-      paymentUrl: responseData.paymentUrl,
-      orderId: responseData.orderId,
-      amount: responseData.amount || amount, // Используем amount из запроса, если n8n не вернул
-      status: responseData.status || 'pending',
-    })
+    const result = await generatePaymentLinkLocal(req.body)
+    res.json(result)
   } catch (error) {
-    console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса generate-link:', {
-      message: error.message,
-      stack: error.stack
-    })
-    
-    res.status(500).json({
+    const statusCode = error.statusCode || 500
+    console.error('❌ n8n-webhook-proxy: Ошибка generate-link:', { message: error.message })
+    const userMessage = isTimeoutError(error.message)
+      ? 'Платёжный сервис не ответил вовремя. Попробуйте позже.'
+      : (error.message || 'Ошибка создания заказа')
+    res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка генерации ссылки на оплату через n8n',
+      error: userMessage,
     })
   }
 })
 
 /**
- * Создание платежа (обратная совместимость со старым API)
- * POST /api/payments/create
- * 
- * Алиас для /api/payment/generate-link для поддержки старой версии фронтенда
+ * Создание платежа (обратная совместимость)
+ * POST /api/payments/create — тот же поток, что и /api/payment/generate-link.
  */
 app.post('/api/payments/create', async (req, res) => {
-  console.log('📥 n8n-webhook-proxy: Получен запрос POST /api/payments/create (legacy endpoint)', {
-    body: req.body,
-    timestamp: new Date().toISOString()
-  })
-  
-  // Используем тот же код, что и для /api/payment/generate-link
   try {
-    const { userId, amount, tariffId, paymentSettings, userData: requestUserData } = req.body
-
-    // Валидация
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId обязателен'
-      })
-    }
-
-    if (!amount || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'amount должен быть больше 0'
-      })
-    }
-
-    // Если paymentSettings не переданы из запроса, загружаем из Firestore
-    let finalPaymentSettings = paymentSettings
-    if (!paymentSettings || Object.keys(paymentSettings).length === 0 || 
-        !paymentSettings.yoomoneyWallet || !paymentSettings.yoomoneySecretKey) {
-      console.log('⚠️ paymentSettings не переданы или неполные, загружаем из Firestore')
-      finalPaymentSettings = await loadPaymentSettings()
-      console.log('📝 Загружены настройки платежей из Firestore:', {
-        hasWallet: !!finalPaymentSettings.yoomoneyWallet,
-        hasSecretKey: !!finalPaymentSettings.yoomoneySecretKey
-      })
-    }
-
-    // Получаем webhook URL
-    const webhookUrl = getWebhookUrl('addClient', req)
-    
-    if (!webhookUrl) {
-      console.error('❌ n8n-webhook-proxy: Webhook URL не найден')
-      return res.status(500).json({
-        success: false,
-        error: 'Webhook URL не настроен'
-      })
-    }
-
-    // Формируем данные для n8n workflow
-    const paymentData = {
-      mode: 'createPayment',
-      operation: 'generatePaymentLink',
-      action: 'createPayment',
-      taskType: 'payment',
-      userId: userId,
-      amount: Number(amount),
-      tariffId: tariffId || null,
-      userData: requestUserData || null,
-      paymentSettings: finalPaymentSettings || {},
-    }
-
-    console.log('📤 n8n-webhook-proxy: Отправка webhook в n8n для создания платежа:', {
-      webhookUrl,
-      mode: paymentData.mode,
-      userId: paymentData.userId,
-      amount: paymentData.amount,
-      tariffId: paymentData.tariffId,
-      hasUserData: !!paymentData.userData,
-      hasPaymentSettings: !!paymentData.paymentSettings && Object.keys(paymentData.paymentSettings).length > 0
-    })
-
-    let result
-    try {
-      result = await callN8NWebhook(webhookUrl, paymentData)
-    } catch (webhookError) {
-      // Обрабатываем ошибки от callN8NWebhook
-      console.error('❌ n8n-webhook-proxy: Ошибка вызова n8n webhook (payments/create):', {
-        message: webhookError.message,
-        status: webhookError.response?.status,
-        statusText: webhookError.response?.statusText,
-        errorData: webhookError.response?.data,
-        stack: webhookError.stack?.substring(0, 500)
-      })
-      
-      // Если ошибка уже содержит response.data с errorMessage, используем его
-      if (webhookError.response?.data?.errorMessage) {
-        return res.status(webhookError.response.status || 500).json({
-          success: false,
-          error: webhookError.response.data.errorMessage
-        })
-      }
-      
-      // Иначе используем стандартную обработку
-      const errorMsg = webhookError.message || 'Ошибка вызова n8n workflow'
-      return res.status(webhookError.response?.status || 500).json({
-        success: false,
-        error: errorMsg.includes('No item to return') 
-          ? 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId через узел "Respond to Webhook".'
-          : errorMsg
-      })
-    }
-
-    console.log('📥 n8n-webhook-proxy: Получен ответ от n8n для создания платежа:', {
-      resultType: typeof result,
-      isArray: Array.isArray(result),
-      arrayLength: Array.isArray(result) ? result.length : null,
-      resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
-      hasError: !!(result?.error || result?.errorMessage || result?.message),
-      errorMessage: result?.error || result?.errorMessage || result?.message,
-      resultPreview: JSON.stringify(result).substring(0, 2000)
-    })
-
-    // Проверяем, что result не пустой и не является ошибкой
-    if (!result) {
-      console.error('❌ n8n-webhook-proxy: n8n вернул пустой ответ')
-      return res.status(500).json({
-        success: false,
-        error: 'n8n workflow вернул пустой ответ. Проверьте конфигурацию workflow.',
-      })
-    }
-
-    // Проверяем на ошибки от n8n
-    if (result.error || result.errorMessage || result.message) {
-      const errorMsg = result.error || result.errorMessage || result.message
-      console.error('❌ n8n-webhook-proxy: n8n вернул ошибку:', errorMsg)
-      
-      // Специальная обработка для ошибки "No item to return was found"
-      if (errorMsg.includes('No item to return') || errorMsg.includes('No item to return was found')) {
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow не вернул данные. Убедитесь, что workflow правильно настроен и возвращает paymentUrl и orderId.',
-        })
-      }
-      
-      return res.status(500).json({
-        success: false,
-        error: `Ошибка n8n workflow: ${errorMsg}`,
-      })
-    }
-
-    // Обрабатываем ответ от n8n
-    // n8n может возвращать массив [{ json: {...} }] или объект { paymentUrl: ... }
-    let firstItem = null
-    let responseData = null
-
-    if (Array.isArray(result)) {
-      if (result.length === 0) {
-        console.error('❌ n8n-webhook-proxy: n8n вернул пустой массив')
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow вернул пустой массив. Проверьте конфигурацию workflow.',
-        })
-      }
-      firstItem = result[0] || result.find(item => item?.paymentUrl || item?.json?.paymentUrl || item?.orderId || item?.json?.orderId)
-      if (!firstItem) {
-        console.error('❌ n8n-webhook-proxy: Не найдены данные платежа в ответе n8n:', {
-          resultLength: result.length,
-          firstItemKeys: result[0] ? Object.keys(result[0]) : [],
-          resultPreview: JSON.stringify(result).substring(0, 500)
-        })
-        return res.status(500).json({
-          success: false,
-          error: 'n8n workflow не вернул данные платежа. Убедитесь, что workflow возвращает paymentUrl и orderId.',
-        })
-      }
-      responseData = firstItem.json || firstItem
-    } else {
-      // Если result - объект, используем его напрямую
-      responseData = result
-    }
-
-    console.log('📦 n8n-webhook-proxy: Обработанные данные от n8n:', {
-      hasPaymentUrl: !!responseData?.paymentUrl,
-      hasOrderId: !!responseData?.orderId,
-      responseDataKeys: responseData ? Object.keys(responseData) : [],
-      paymentUrl: responseData?.paymentUrl,
-      orderId: responseData?.orderId
-    })
-
-    // Извлекаем orderId из paymentUrl, если он не передан в ответе n8n
-    if (!responseData.orderId && responseData.paymentUrl) {
-      try {
-        const url = new URL(responseData.paymentUrl)
-        const label = url.searchParams.get('label')
-        if (label && label.startsWith('order_')) {
-          responseData.orderId = label
-        }
-      } catch (urlError) {
-        console.warn('⚠️ n8n-webhook-proxy: Не удалось извлечь orderId из paymentUrl', {
-          paymentUrl: responseData.paymentUrl,
-          error: urlError.message
-        })
-      }
-    }
-
-    // Проверяем, что в ответе есть paymentUrl
-    if (!responseData.paymentUrl) {
-      console.error('❌ n8n-webhook-proxy: Отсутствует paymentUrl от n8n workflow:', {
-        result,
-        responseData,
-        firstItem
-      })
-      return res.status(500).json({
-        success: false,
-        error: 'Неполные данные от n8n workflow: отсутствует paymentUrl',
-      })
-    }
-    
-    // Отправляем ответ клиенту
-    res.json({
-      success: true,
-      paymentUrl: responseData.paymentUrl,
-      orderId: responseData.orderId,
-      amount: responseData.amount || amount,
-      status: responseData.status || 'pending',
-    })
+    const result = await generatePaymentLinkLocal(req.body)
+    res.json(result)
   } catch (error) {
-    console.error('❌ n8n-webhook-proxy: Ошибка при обработке запроса payments/create:', {
-      message: error.message,
-      stack: error.stack
-    })
-    
-    res.status(500).json({
+    const statusCode = error.statusCode || 500
+    const userMessage = isTimeoutError(error.message)
+      ? 'Платёжный сервис не ответил вовремя. Попробуйте позже.'
+      : (error.message || 'Ошибка создания заказа')
+    res.status(statusCode).json({
       success: false,
-      error: error.message || 'Ошибка создания платежа',
+      error: userMessage,
     })
   }
 })
 
 /**
- * Загрузка настроек платежей из Firestore
+ * Загрузка настроек платежей из Firestore (для webhook и др.; без привязки к конкретному провайдеру)
  */
 async function loadPaymentSettings() {
-  // Если Firebase Admin SDK еще не инициализирован, пытаемся инициализировать
-  if (!db) {
-    await initFirebaseAdmin()
-  }
-
-  if (!db) {
-    console.log('⚠️ Firestore недоступен, настройки платежей не загружены')
+  if (!db) await initFirebaseAdmin()
+  if (!db) return {}
+  try {
+    const data = await getSettingsCached()
+    if (Object.keys(data || {}).length) return data
+    return {}
+  } catch (err) {
+    console.error('❌ Ошибка загрузки настроек платежей:', err.message)
     return {}
   }
+}
 
+const PLATEGA_API_BASE = 'https://app.platega.io'
+const PLATEGA_API_URL = `${PLATEGA_API_BASE}/transaction/process`
+// Коды методов: 2 = СБП QR, 10 = карты RUB, 13 = криптовалюта. Можно задать PLATEGA_PAYMENT_METHOD в .env
+const PLATEGA_PAYMENT_METHOD_DEFAULT = 2
+
+/** Маппинг статусов Platega (PaymentStatus) в внутренний статус платежа */
+const PLATEGA_STATUS_MAP = {
+  PENDING: 'pending',
+  CANCELED: 'cancelled',
+  CONFIRMED: 'completed',
+  CHARGEBACKED: 'chargebacked',
+}
+
+/**
+ * Проверка статуса транзакции в Platega.
+ * GET /transaction/{id}
+ * @param {string} transactionId - UUID транзакции в Platega
+ * @param {string} merchantId - ID мерчанта (X-MerchantId)
+ * @param {string} secretKey - API ключ (X-Secret)
+ * @returns {Promise<{ id: string, status: string, paymentDetails?: object }|null>} Данные транзакции или null при ошибке
+ */
+async function getPlategaTransactionStatus(transactionId, merchantId, secretKey) {
+  if (!transactionId || !merchantId || !secretKey) return null
+  const url = `${PLATEGA_API_BASE}/transaction/${encodeURIComponent(transactionId)}`
   try {
-    const APP_ID = process.env.APP_ID || 'skyputh'
-    const data = await getSettingsCached()
-    if (Object.keys(data).length) {
-      console.log('🔍 n8n-webhook-proxy: Настройки платежей (из кэша или Firestore)', { appId: APP_ID })
-      const paymentSettings = {
-        yoomoneyWallet: data.yoomoneyWallet || data.yooMoneyWallet || null,
-        yoomoneySecretKey: data.yoomoneySecretKey || data.yooMoneySecretKey || null,
+    const response = await axios.get(url, {
+      headers: {
+        'X-MerchantId': merchantId,
+        'X-Secret': secretKey,
+      },
+      timeout: 10000,
+      validateStatus: (s) => s === 200 || s === 404 || s >= 400,
+    })
+    if (response.status !== 200) {
+      if (response.status === 404) {
+        console.log('ℹ️ Platega: транзакция не найдена', { transactionId })
+        return null
       }
-      console.log('✅ n8n-webhook-proxy: Настройки платежей загружены из Firestore', {
-        hasWallet: !!paymentSettings.yoomoneyWallet,
-        hasSecretKey: !!paymentSettings.yoomoneySecretKey,
-        wallet: paymentSettings.yoomoneyWallet ? `${paymentSettings.yoomoneyWallet.substring(0, 5)}...` : null,
-        allSettingsKeys: Object.keys(data)
-      })
-      return paymentSettings
-    } else {
-      console.warn('⚠️ n8n-webhook-proxy: Документ settings не найден или пуст', { appId: APP_ID })
-      return {}
+      console.warn('⚠️ Platega GET /transaction/:id', { status: response.status, data: response.data })
+      return null
+    }
+    const data = response.data || {}
+    return {
+      id: data.id,
+      status: data.status,
+      paymentDetails: data.paymentDetails,
     }
   } catch (err) {
-    console.error('❌ n8n-webhook-proxy: Ошибка загрузки настроек платежей из Firestore:', {
-      error: err.message,
-      stack: err.stack
+    console.error('❌ Platega: ошибка запроса статуса транзакции', { transactionId, message: err.message })
+    return null
+  }
+}
+
+/**
+ * Создание платежа через Platega.io
+ * @param {Object} params - merchantId, secretKey, amount (рубли), orderId, userId, tariffId, userData, baseUrl
+ * @param {number} [paymentMethodOverride] - код метода (2=СБП, 13=крипто). Если не передан — из env или 2.
+ * @returns {Promise<{ paymentUrl: string, transactionId?: string }>}
+ */
+async function createPlategaPayment(params, paymentMethodOverride) {
+  const {
+    merchantId,
+    secretKey,
+    amount,
+    orderId,
+    userId,
+    tariffId,
+    userData,
+    baseUrl,
+  } = params
+
+  const returnUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payment/success?orderId=${encodeURIComponent(orderId)}` : null
+  const failedUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payment/fail?orderId=${encodeURIComponent(orderId)}` : null
+
+  const paymentMethod = paymentMethodOverride != null ? Number(paymentMethodOverride) : (Number(process.env.PLATEGA_PAYMENT_METHOD) || PLATEGA_PAYMENT_METHOD_DEFAULT)
+  const payload = {
+    paymentMethod,
+    paymentDetails: {
+      amount: Number(amount),
+      currency: 'RUB',
+    },
+    description: `VPN тариф ${tariffId || 'подписка'}`,
+    ...(returnUrl && { return: returnUrl }),
+    ...(failedUrl && { failedUrl }),
+    payload: JSON.stringify({
+      userId,
+      tariffId: tariffId || null,
+      uuid: userData?.uuid || null,
+      orderId,
+    }),
+  }
+
+  const plategaTimeoutMs = Number(process.env.PLATEGA_REQUEST_TIMEOUT_MS) || 30000
+  let response
+  try {
+    response = await axios.post(PLATEGA_API_URL, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-MerchantId': merchantId,
+        'X-Secret': secretKey,
+      },
+      timeout: plategaTimeoutMs,
+      validateStatus: () => true,
     })
-    return {}
+  } catch (reqErr) {
+    const code = reqErr.code || ''
+    const msg = (reqErr.message || '').toLowerCase()
+    const isTimeout = code === 'ECONNABORTED' || msg.includes('timeout')
+    const isNetwork = ['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET', 'ENETUNREACH'].includes(code)
+    if (isTimeout || isNetwork) {
+      console.warn('⚠️ Platega не отвечает:', { code, message: reqErr.message, orderId })
+      throw new Error('Платёжная система временно не отвечает. Проверьте подключение к интернету и попробуйте позже.')
+    }
+    throw reqErr
+  }
+
+  function toUserMessage(raw) {
+    const s = (raw && String(raw).trim()) || ''
+    if (/providers are disabled|unhealthy/i.test(s)) {
+      return 'Платёжный провайдер Platega временно недоступен или в кабинете app.platega.io отключены/недоступны способы оплаты. Проверьте раздел «Методы оплаты» в настройках мерчанта; если всё активно — повторите попытку позже или напишите в поддержку Platega.'
+    }
+    return s || `HTTP ${response.status}`
+  }
+
+  if (response.status !== 200 || !response.data) {
+    console.warn('⚠️ Platega API ответ (ошибка):', { status: response.status, data: response.data, paymentMethod })
+    const msg = response.data?.message || response.data?.error || `HTTP ${response.status}`
+    throw new Error(toUserMessage(msg))
+  }
+
+  const data = response.data
+  if (data.redirect) {
+    return { paymentUrl: data.redirect, transactionId: data.transactionId }
+  }
+  console.warn('⚠️ Platega API ответ (нет redirect):', { data, paymentMethod })
+  const rawMessage = data.message || data.error || 'Нет ссылки на оплату в ответе Platega'
+  throw new Error(toUserMessage(rawMessage))
+}
+
+/**
+ * Локальное создание заказа на оплату.
+ * Если настроен Platega (PLATEGA_MERCHANT_ID + PLATEGA_SECRET_KEY или настройки в Firestore) — создаёт платёж в Platega и возвращает paymentUrl.
+ * Иначе создаёт только запись в Firestore и возвращает пустой paymentUrl.
+ * @param {Object} body - Тело запроса (userId, amount, tariffId, userData, tariffName, devices, periodMonths, discount, promocodeId, originalAmount, email)
+ * @returns {Promise<{ success: true, paymentUrl: string, orderId: string, amount: number, status: string, transactionId?: string }>}
+ */
+async function generatePaymentLinkLocal(body) {
+  const {
+    userId,
+    amount,
+    tariffId,
+    userData: requestUserData,
+    tariffName,
+    devices,
+    periodMonths,
+    discount,
+    promocodeId,
+    originalAmount,
+    operationType,
+    newDevicesCount,
+  } = body || {}
+
+  if (!userId || !amount || amount <= 0) {
+    const err = new Error('Необходимо указать userId и amount (сумма должна быть больше 0)')
+    err.statusCode = 400
+    throw err
+  }
+
+  const orderId = `vpn_${Date.now()}`
+  const amountNum = Number(amount)
+  const baseUrl = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '') || null
+
+  let paymentUrl = ''
+  let transactionId = null
+
+  const merchantId = process.env.PLATEGA_MERCHANT_ID || null
+  const secretKey = process.env.PLATEGA_SECRET_KEY || null
+  const settings = await loadPaymentSettings()
+  const effectiveMerchantId = merchantId || settings.plategaMerchantId || null
+  const effectiveSecretKey = secretKey || settings.plategaSecretKey || null
+
+  if (!effectiveMerchantId || !effectiveSecretKey) {
+    console.log('ℹ️ Platega не настроен (PLATEGA_MERCHANT_ID / PLATEGA_SECRET_KEY или plategaMerchantId / plategaSecretKey в настройках). Создаём только заказ в Firestore.')
+  }
+
+  if (effectiveMerchantId && effectiveSecretKey) {
+    const plategaParams = {
+      merchantId: effectiveMerchantId,
+      secretKey: effectiveSecretKey,
+      amount: amountNum,
+      orderId,
+      userId,
+      tariffId: tariffId || null,
+      userData: requestUserData || null,
+      baseUrl,
+    }
+    const primaryMethod = Number(process.env.PLATEGA_PAYMENT_METHOD) || PLATEGA_PAYMENT_METHOD_DEFAULT
+    const fallbackMethod = primaryMethod === 2 ? 13 : 2 // 2=СБП, 13=крипто — при ошибке «providers disabled» пробуем другой
+    let lastError = null
+    for (const method of [primaryMethod, fallbackMethod]) {
+      if (method === fallbackMethod && primaryMethod === fallbackMethod) continue
+      try {
+        const plategaResult = await createPlategaPayment(plategaParams, method)
+        paymentUrl = plategaResult.paymentUrl || ''
+        transactionId = plategaResult.transactionId || null
+        console.log('✅ Platega: платёж создан', { orderId, transactionId: transactionId || '—', paymentMethod: method })
+        break
+      } catch (apiError) {
+        lastError = apiError
+        const msg = (apiError.message || '').toLowerCase()
+        const isProvidersDisabled = msg.includes('providers are disabled') || msg.includes('отключены или недоступны')
+        if (isProvidersDisabled && method === primaryMethod) {
+          console.warn('⚠️ Platega: метод', primaryMethod, 'вернул «providers disabled», пробуем метод', fallbackMethod)
+          continue
+        }
+        console.error('❌ Ошибка Platega API:', { orderId, message: apiError.message, response: apiError.response?.data })
+        const err = new Error(apiError.message || apiError.response?.data?.message || apiError.response?.data?.error || 'Ошибка создания платежа в платёжной системе')
+        err.statusCode = 500
+        throw err
+      }
+    }
+    if (!paymentUrl && lastError) {
+      console.error('❌ Ошибка Platega API (оба метода):', { orderId, message: lastError.message })
+      const err = new Error(lastError.message || 'Ошибка создания платежа в платёжной системе')
+      err.statusCode = 500
+      throw err
+    }
+  }
+
+  if (!db) await initFirebaseAdmin()
+  if (db) {
+    const APP_ID = process.env.APP_ID || 'skyputh'
+    const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+    const email = requestUserData?.email ?? body?.email ?? null
+    const paymentDoc = {
+      userId,
+      email,
+      orderId,
+      tariffId: tariffId || null,
+      tariffName: tariffName || null,
+      amount: amountNum,
+      originalAmount: originalAmount != null ? Number(originalAmount) : amountNum,
+      discount: discount != null ? Number(discount) : 0,
+      status: 'pending',
+      devices: devices != null ? Number(devices) : 1,
+      periodMonths: periodMonths != null ? Number(periodMonths) : 1,
+      promocodeId: promocodeId || null,
+      createdAt: new Date().toISOString(),
+    }
+    if (operationType) paymentDoc.operationType = operationType
+    if (newDevicesCount != null) paymentDoc.newDevicesCount = Number(newDevicesCount)
+    if (transactionId) paymentDoc.transactionId = transactionId
+    if (paymentUrl) paymentDoc.paymentProvider = 'platega'
+    await paymentsRef.add(paymentDoc)
+    console.log('✅ Запись платежа создана в Firestore', { orderId, userId })
+  }
+
+  return {
+    success: true,
+    paymentUrl,
+    orderId,
+    amount: amountNum,
+    status: 'pending',
+    ...(transactionId && { transactionId }),
   }
 }
 
@@ -5059,7 +5059,7 @@ function validateWebhookIP(req) {
 }
 
 /**
- * Обработка webhook от YooMoney
+ * Обработка webhook об оплате
  * POST /api/payment/webhook
  * 
  * КРИТИЧЕСКИ ВАЖНО:
@@ -5074,7 +5074,7 @@ function validateWebhookIP(req) {
  * - БЕЗ CORS для webhook endpoints (только прямые запросы)
  * 
  * Процесс:
- * 1. Получает webhook от YooMoney
+ * 1. Получает webhook от платёжного провайдера
  * 2. Проверяет идемпотентность по operation_id
  * 3. Отправляет в n8n для проверки оплаты
  * 4. n8n проверяет оплату и возвращает результат
@@ -5099,7 +5099,7 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
     const operationId = req.body?.operation_id
     const label = req.body?.label
 
-    console.log('📥 n8n-webhook-proxy: Получен webhook от YooMoney', {
+    console.log('📥 n8n-webhook-proxy: Получен webhook об оплате', {
       hasBody: !!req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
       notificationType: req.body?.notification_type,
@@ -5119,7 +5119,7 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
         })
         
         // Возвращаем 200 OK с предыдущим результатом
-        // YooMoney ожидает 200 OK для успешной обработки
+        // Провайдер ожидает 200 OK для успешной обработки
         return res.status(200).json({
           success: true,
           idempotent: true,
@@ -5136,8 +5136,7 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
     // Загружаем настройки платежей из Firestore
     const paymentSettings = await loadPaymentSettings()
     console.log('📥 n8n-webhook-proxy: Настройки платежей загружены', {
-      hasWallet: !!paymentSettings.yoomoneyWallet,
-      hasSecretKey: !!paymentSettings.yoomoneySecretKey
+      hasPaymentSettings: !!paymentSettings && Object.keys(paymentSettings).length > 0
     })
     
     // Формируем дату и время оплаты в формате DD-MM-YYYY и время ЧЧ:ММ
@@ -5166,7 +5165,7 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
       paymentDate: paymentDate, // Формат: DD-MM-YYYY
       paymentTime: paymentTime, // Формат: ЧЧ:ММ
       paymentDateTime: paymentDateTime.toISOString(), // ISO формат для совместимости
-      // Оригинальные данные от YooMoney
+      // Оригинальные данные от платёжного провайдера
       ...req.body
     }
     
@@ -5257,7 +5256,7 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
             orderId: paymentData.orderId
           })
         } catch (activationError) {
-          // Логируем ошибку, но не прерываем ответ YooMoney
+          // Логируем ошибку, но не прерываем ответ провайдеру
           console.error('❌ n8n-webhook-proxy: Ошибка активации подписки после оплаты', {
             userId: paymentData.userId,
             orderId: paymentData.orderId,
@@ -5283,10 +5282,10 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
       })
     }
     
-    // YooMoney ожидает ответ 200 OK для успешной обработки
+    // Провайдер ожидает ответ 200 OK для успешной обработки
     res.status(200).json(result)
   } catch (error) {
-    console.error('❌ n8n-webhook-proxy: Ошибка при обработке webhook от YooMoney:', {
+    console.error('❌ n8n-webhook-proxy: Ошибка при обработке webhook об оплате:', {
       message: error.message,
       stack: error.stack,
       operationId: req.body?.operation_id
@@ -5302,11 +5301,11 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
       })
     }
     
-    // YooMoney может повторять запросы при ошибках, поэтому возвращаем 200
+    // Провайдер может повторять запросы при ошибках, поэтому возвращаем 200
     // но с информацией об ошибке
     res.status(200).json({
       success: false,
-      error: error.message || 'Ошибка обработки webhook от YooMoney',
+      error: error.message || 'Ошибка обработки webhook об оплате',
     })
   }
 })
@@ -5427,7 +5426,7 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
       const paymentSnapshot = await paymentQuery.get()
 
       if (paymentSnapshot.empty) {
-        console.log('⚠️ Платеж не найден', { orderId })
+        console.log('⚠️ GET /api/payment/status: платёж не найден', { orderId })
         return res.status(404).json({
           success: false,
           error: 'Платеж не найден',
@@ -5435,22 +5434,88 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
         })
       }
 
+      const paymentDocRef = paymentSnapshot.docs[0].ref
       const paymentDoc = paymentSnapshot.docs[0]
-      const paymentData = {
+      let paymentData = {
         id: paymentDoc.id,
         ...paymentDoc.data(),
       }
 
+      let statusToReturn = paymentData.status
+      let plategaTransaction = null
+
+      // Для платежей Platega всегда отправляем проверку статуса в API (при наличии transactionId)
+      const transactionId = paymentData.transactionId || paymentData.transaction_id
+      if (transactionId && (paymentData.paymentProvider === 'platega' || !paymentData.paymentProvider)) {
+        const paymentSettings = await loadPaymentSettings()
+        const merchantId = process.env.PLATEGA_MERCHANT_ID || paymentSettings.plategaMerchantId || null
+        const secretKey = process.env.PLATEGA_SECRET_KEY || paymentSettings.plategaSecretKey || null
+        if (merchantId && secretKey) {
+          console.log('📤 Отправка проверки статуса платежа в Platega', { orderId, transactionId })
+          const plategaResult = await getPlategaTransactionStatus(transactionId, merchantId, secretKey)
+          if (plategaResult) {
+            plategaTransaction = {
+              id: plategaResult.id,
+              status: plategaResult.status,
+              paymentDetails: plategaResult.paymentDetails,
+            }
+            const mappedStatus = PLATEGA_STATUS_MAP[plategaResult.status] || paymentData.status
+            statusToReturn = mappedStatus
+            // Синхронизируем Firestore при смене статуса на завершённый
+            if (paymentData.status === 'pending' && mappedStatus === 'completed') {
+              try {
+                await paymentDocRef.update({
+                  status: 'completed',
+                  completedAt: new Date().toISOString(),
+                  plategaStatus: plategaResult.status,
+                })
+                paymentData = { ...paymentData, status: 'completed', completedAt: new Date().toISOString() }
+                console.log('✅ Статус платежа обновлён по Platega', { orderId, transactionId, status: 'completed' })
+                // После успешной оплаты — активация подписки и обновление клиента в 3x-ui
+                if (paymentData.userId && paymentData.tariffId) {
+                  try {
+                    await activateSubscriptionAfterPayment(paymentData)
+                    console.log('✅ Обновление клиента 3x-ui после успешной оплаты выполнено', { orderId, userId: paymentData.userId })
+                  } catch (activationErr) {
+                    console.error('❌ Ошибка активации подписки / обновления 3x-ui после оплаты', {
+                      orderId,
+                      userId: paymentData.userId,
+                      error: activationErr.message,
+                    })
+                  }
+                }
+              } catch (updateErr) {
+                console.warn('⚠️ Не удалось обновить статус платежа в Firestore', { orderId, message: updateErr.message })
+              }
+            } else if (paymentData.status === 'pending' && (mappedStatus === 'cancelled' || mappedStatus === 'chargebacked')) {
+              try {
+                await paymentDocRef.update({
+                  status: mappedStatus,
+                  plategaStatus: plategaResult.status,
+                })
+                paymentData = { ...paymentData, status: mappedStatus }
+              } catch (updateErr) {
+                console.warn('⚠️ Не удалось обновить статус платежа в Firestore', { orderId, message: updateErr.message })
+              }
+            }
+          }
+        }
+      } else if ((paymentData.paymentProvider === 'platega' || !paymentData.paymentProvider) && !transactionId) {
+        console.log('📤 GET /api/payment/status: у платежа нет transactionId, проверка в Platega не отправляется', { orderId })
+      }
+
       console.log('📊 Статус платежа проверен', {
         orderId,
-        status: paymentData.status,
-        userId: paymentData.userId
+        status: statusToReturn,
+        userId: paymentData.userId,
+        fromPlatega: !!plategaTransaction,
       })
 
       res.json({
         success: true,
         orderId,
-        status: paymentData.status,
+        status: statusToReturn,
+        ...(plategaTransaction && { plategaTransaction }),
         payment: {
           id: paymentData.id,
           orderId: paymentData.orderId,
@@ -5460,10 +5525,11 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
           tariffName: paymentData.tariffName,
           devices: paymentData.devices,
           periodMonths: paymentData.periodMonths,
-          status: paymentData.status,
+          status: statusToReturn,
           createdAt: paymentData.createdAt,
           completedAt: paymentData.completedAt,
-          operationId: paymentData.operationId
+          operationId: paymentData.operationId,
+          ...(transactionId && { transactionId }),
         }
       })
     } catch (firestoreError) {
@@ -6070,29 +6136,76 @@ async function getActiveSubscription(userId) {
 }
 
 /**
- * Активация клиента в 3x-ui через n8n с retry механизмом
- * 
- * RETRY МЕХАНИЗМ:
- * - Выполняет до 3 попыток с exponential backoff (2s, 4s, 8s)
- * - Все попытки происходят внутри одного вызова функции
- * - Если все попытки не удались, возвращает {success: false, error: ...}
- * 
- * ВАЖНО: Это внутренний retry для одного вызова активации.
- * Внешний retry (через activationAttempt) происходит при повторных вызовах
- * activateSubscriptionAfterPayment (например, через cron job или ручную синхронизацию).
- * 
- * @param {Object} params - Параметры активации
- * @param {string} params.clientId - UUID клиента
- * @param {string} params.userId - ID пользователя
- * @param {string} params.tariffId - ID тарифа
- * @param {Object} params.tariffData - Данные тарифа
- * @param {Object} params.userData - Данные пользователя
- * @param {Object} params.paymentData - Данные платежа
- * @param {number} params.expiresAt - Дата окончания подписки (timestamp)
- * @param {number} params.devices - Количество устройств
- * @param {number} params.periodMonths - Период подписки в месяцах
- * @param {boolean} params.needsClientCreation - Нужно ли создавать нового клиента
+ * Отправка создания/обновления клиента 3x-ui через webhook n8n (как раньше).
+ * n8n workflow создаёт или обновляет клиента в 3x-ui по переданным данным.
+ * @param {Object} params - те же параметры, что и для activateClientIn3XUI
  * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function activateClientViaWebhook({
+  clientId,
+  userId,
+  tariffId,
+  tariffData,
+  userData,
+  paymentData,
+  expiresAt,
+  devices,
+  periodMonths,
+  needsClientCreation
+}) {
+  const email = paymentData.email || userData.email || null
+  const trafficGB = tariffData.trafficGB > 0 ? tariffData.trafficGB : 0
+  const { inboundId } = await getXuiAndInboundForRequest({
+    tariffId,
+    serverId: tariffData.serverId,
+    inboundId: tariffData.inboundId,
+  })
+
+  const webhookUrl = N8N_WEBHOOKS.addClient
+  if (!webhookUrl || !webhookUrl.trim()) {
+    console.warn('⚠️ n8n-webhook-proxy: Webhook addClient не настроен (N8N_WEBHOOK_ADD_CLIENT)')
+    return { success: false, error: 'Webhook addClient не настроен' }
+  }
+
+  const payload = {
+    mode: 'activateClient',
+    operation: 'addClient',
+    clientId,
+    userId,
+    tariffId,
+    inboundId: inboundId != null ? String(inboundId) : undefined,
+    email: email || `user_${userId}@local`,
+    totalGB: trafficGB,
+    expiryTime: expiresAt,
+    limitIp: devices,
+    needsClientCreation: !!needsClientCreation,
+    orderId: paymentData.orderId || null,
+    tgId: (userData?.tgId ?? '').toString(),
+    subId: (userData?.subId ?? '').toString(),
+    periodMonths: periodMonths || 1,
+  }
+
+  try {
+    await callN8NWebhook(webhookUrl, payload)
+    console.log('✅ n8n-webhook-proxy: Запрос на создание/обновление клиента отправлен в n8n', {
+      userId,
+      uuid: clientId,
+      isNew: needsClientCreation,
+    })
+    return { success: true }
+  } catch (error) {
+    console.error('❌ n8n-webhook-proxy: Ошибка вызова webhook для активации клиента', {
+      userId,
+      uuid: clientId,
+      error: error.message,
+    })
+    return { success: false, error: error.message || 'Ошибка вызова webhook' }
+  }
+}
+
+/**
+ * Активация клиента в 3x-ui через n8n с retry механизмом (прямой вызов xui — запасной вариант).
+ * Сейчас по умолчанию используется activateClientViaWebhook (отправка в n8n).
  */
 async function activateClientIn3XUI({
   clientId,
@@ -6106,50 +6219,52 @@ async function activateClientIn3XUI({
   periodMonths,
   needsClientCreation
 }) {
-  const webhookUrl = N8N_WEBHOOKS.addClient
-  const addClientData = {
-    operation: 'add_client',
-    category: needsClientCreation ? 'new_subscription' : 'update_subscription',
-    clientId: clientId,
-    email: paymentData.email || userData.email || null,
-    userId: userId,
-    tariffId: tariffId,
-    devices: devices,
-    periodMonths: periodMonths,
-    inboundId: tariffData.inboundId || null,
-    expiryTime: expiresAt, // В миллисекундах
-    totalGB: tariffData.trafficGB > 0 ? tariffData.trafficGB * 1024 * 1024 * 1024 : 0, // В байтах
-    limitIp: devices
+  const email = paymentData.email || userData.email || null
+  const trafficBytes = tariffData.trafficGB > 0 ? tariffData.trafficGB * 1024 * 1024 * 1024 : 0
+
+  const { xui, inboundId } = await getXuiAndInboundForRequest({
+    tariffId,
+    serverId: tariffData.serverId,
+    inboundId: tariffData.inboundId,
+  })
+  if (!xui || !xui.configured) {
+    console.warn('⚠️ n8n-webhook-proxy: 3x-ui не настроен или сервер для тарифа не найден (tariffId:', tariffId, ')')
+    return { success: false, error: '3x-ui не настроен или сервер для тарифа не найден' }
   }
-  
-  // Retry с exponential backoff: 3 попытки, базовая задержка 2 секунды
-  // Задержки: 2s, 4s, 8s
+
   try {
-    await retryWithBackoff(
-      () => callN8NWebhook(webhookUrl, addClientData),
-      3, // maxAttempts
-      2000 // baseDelayMs (2 секунды)
-    )
-    
-    console.log('✅ n8n-webhook-proxy: Клиент успешно активирован в 3x-ui', { 
-      userId, 
+    await retryWithBackoff(async () => {
+      if (needsClientCreation) {
+        await xui.addClient(inboundId, {
+          email: email || `user_${userId}@local`,
+          uuid: clientId,
+          totalGB: trafficBytes,
+          expiryTime: expiresAt,
+          limitIp: devices,
+          tgId: (userData?.tgId ?? '').toString(),
+          subId: (userData?.subId ?? '').toString(),
+        })
+      } else {
+        await xui.updateClient(inboundId, clientId, {
+          totalGB: trafficBytes,
+          expiryTime: expiresAt,
+          limitIp: devices,
+        })
+      }
+    }, 3, 2000)
+    console.log('✅ n8n-webhook-proxy: Клиент успешно активирован в 3x-ui', {
+      userId,
       uuid: clientId,
-      isNew: needsClientCreation
+      isNew: needsClientCreation,
     })
-    
     return { success: true }
   } catch (error) {
-    console.error('❌ n8n-webhook-proxy: Ошибка активации клиента в 3x-ui после всех попыток', {
+    console.error('❌ n8n-webhook-proxy: Ошибка активации клиента в 3x-ui', {
       userId,
       uuid: clientId,
       error: error.message,
-      stack: error.stack
     })
-    
-    return { 
-      success: false, 
-      error: error.message || 'Неизвестная ошибка активации клиента'
-    }
+    return { success: false, error: error.message || 'Неизвестная ошибка активации клиента' }
   }
 }
 
@@ -6394,9 +6509,8 @@ async function activateSubscriptionAfterPayment(paymentData) {
       })
     }
     
-    // Вызываем создание/обновление клиента в 3x-ui через n8n с retry механизмом
-    // ВАЖНО: Вызываем даже если UUID уже есть - нужно обновить expiryTime и другие параметры
-    const activationResult = await activateClientIn3XUI({
+    // Отправляем создание/обновление клиента в 3x-ui через webhook n8n (как раньше)
+    const activationResult = await activateClientViaWebhook({
       clientId,
       userId,
       tariffId,
@@ -6647,7 +6761,7 @@ async function activateSubscriptionAfterPayment(paymentData) {
       }
     }
     
-    // Не пробрасываем ошибку, чтобы не прервать ответ YooMoney
+    // Не пробрасываем ошибку, чтобы не прервать ответ провайдеру
     // Ошибка уже залогирована
   }
 }

@@ -326,6 +326,8 @@
     "confirmUnsubscribeQuestion": "Вы уверены, что хотите отменить подписку? Это действие удалит вашу VPN конфигурацию и прекратит доступ к сервису.",
     "tariffTableHeader": "Тариф",
     "statusTableHeader": "Статус",
+    "actionsTableHeader": "Действия",
+    "recheckPaymentStatus": "Проверить статус",
     "cancelSubscription": "Отменить подписку",
     "cancelEditAria": "Отмена редактирования",
     "editProfileAria": "Редактировать профиль",

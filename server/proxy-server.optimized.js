@@ -26,6 +26,7 @@ import { fileURLToPath } from 'url'
 import fs from 'fs/promises'
 import { cache } from './cache.js'
 import { startCluster, getWorkerInfo } from './cluster.js'
+import { getXuiClient } from './lib/xuiClient.js'
 
 // Загружаем переменные окружения
 dotenv.config()
@@ -205,172 +206,53 @@ async function createApp() {
     })
   })
 
-  // ========== ОПТИМИЗАЦИЯ: Кэширование сессий авторизации ==========
-  /**
-   * Получить или создать сессию авторизации
-   * Кэширует cookie сессии на 1 час для избежания повторных логинов
-   */
-  async function getOrCreateSession() {
-    const cacheKey = 'xui_session_cookie'
-    let sessionCookie = cache.get(cacheKey)
-
-    if (sessionCookie) {
-      return sessionCookie
-    }
-
-    // Создаем новую сессию
-    const xuiHost = process.env.XUI_HOST
-    const xuiUsername = process.env.XUI_USERNAME || process.env.VITE_XUI_USERNAME
-    const xuiPassword = process.env.XUI_PASSWORD || process.env.VITE_XUI_PASSWORD
-
-    if (!xuiHost || !xuiUsername || !xuiPassword) {
-      return null
-    }
-
-    try {
-      const loginUrl = `${xuiHost}/login`
-      const loginResponse = await axios.post(loginUrl, {
-        username: xuiUsername,
-        password: xuiPassword
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        validateStatus: () => true,
-        timeout: 10000
-      })
-
-      if (loginResponse.headers['set-cookie']) {
-        const cookies = Array.isArray(loginResponse.headers['set-cookie']) 
-          ? loginResponse.headers['set-cookie'] 
-          : [loginResponse.headers['set-cookie']]
-        
-        const sessionCookieValue = cookies.find(c => c.includes('3x-ui='))
-        if (sessionCookieValue) {
-          const cookieValue = sessionCookieValue.split(';')[0]
-          // Кэшируем на 1 час (3600 секунд)
-          cache.set(cacheKey, cookieValue, 3600)
-          return cookieValue
-        }
-      }
-    } catch (error) {
-      console.error('❌ Failed to create session:', error.message)
-    }
-
-    return null
-  }
-
-  // Прокси для всех запросов к 3x-ui
-  // ОПТИМИЗАЦИЯ: Добавлено кэширование GET запросов и сессий
+  // Прокси для всех запросов к 3x-ui через модуль server/lib/xuiClient.js
+  // ОПТИМИЗАЦИЯ: кэширование GET-ответов на 30 сек
   app.all('/api/xui/*', async (req, res) => {
     try {
-      const xuiPath = req.path.replace('/api/xui', '')
-      const xuiHost = process.env.XUI_HOST
-      const xuiUsername = process.env.XUI_USERNAME || process.env.VITE_XUI_USERNAME
-      const xuiPassword = process.env.XUI_PASSWORD || process.env.VITE_XUI_PASSWORD
-
-      if (!xuiHost) {
+      const xui = getXuiClient()
+      if (!xui.configured) {
         return res.status(500).json({
           success: false,
           msg: 'XUI_HOST не настроен в переменных окружения'
         })
       }
 
-      // ========== ОПТИМИЗАЦИЯ: Кэширование GET запросов ==========
-      // Кэшируем только GET запросы на 30 секунд
+      const xuiPath = req.path.replace('/api/xui', '')
+      const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''
+      const pathWithQuery = xuiPath + queryString
+
       if (req.method === 'GET') {
         const cacheKey = `xui_api_${req.path}_${req.url}`
-        const cachedResponse = cache.get(cacheKey)
-        
-        if (cachedResponse) {
+        const cached = cache.get(cacheKey)
+        if (cached) {
           console.log(`💾 Cache HIT: ${req.path}`)
-          return res.status(cachedResponse.status).json(cachedResponse.data)
+          return res.status(cached.status).json(cached.data)
         }
       }
 
-      // Формируем полный URL с правильной обработкой query параметров
-      const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''
-      const xuiUrl = `${xuiHost}${xuiPath}${queryString}`
+      console.log(`🔄 Proxy (xuiClient): ${req.method} ${req.path} → ${xui.baseUrl}${pathWithQuery}`)
 
-      console.log(`🔄 Proxy: ${req.method} ${req.path} → ${xuiUrl}`)
-
-      // Настройка запроса
-      const requestConfig = {
-        method: req.method,
-        url: xuiUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        validateStatus: () => true, // Не бросать ошибку на любой статус
-        timeout: 30000 // 30 секунд таймаут
-      }
-
-      // Добавляем тело запроса для POST/PUT
-      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-        requestConfig.data = req.body
-      }
-
-      // Проброс cookies из запроса клиента
-      if (req.headers.cookie) {
-        requestConfig.headers['Cookie'] = req.headers.cookie
-      }
-
-      // Проброс авторизации если есть
-      if (req.headers.authorization) {
-        requestConfig.headers['Authorization'] = req.headers.authorization
-      }
-      
-      // ========== ОПТИМИЗАЦИЯ: Используем кэшированную сессию ==========
-      // БЕЗОПАСНОСТЬ: Автоматическая авторизация на сервере, если требуется
-      const needsAuth = ['/panel/api/inbounds', '/panel/api/clients'].some(path => xuiPath.includes(path))
-      const hasSessionCookie = req.headers.cookie && req.headers.cookie.includes('3x-ui=')
-      
-      if (needsAuth && !hasSessionCookie) {
-        // Используем кэшированную сессию вместо создания новой каждый раз
-        const sessionCookie = await getOrCreateSession()
-        if (sessionCookie) {
-          requestConfig.headers['Cookie'] = sessionCookie
-          // Также устанавливаем cookie в ответ для клиента
-          res.setHeader('Set-Cookie', `${sessionCookie}; Path=/`)
-        }
-      }
-
-      // Выполняем запрос
-      const response = await axios(requestConfig)
-
-      // ========== ОПТИМИЗАЦИЯ: Сохраняем GET запросы в кэш ==========
-      if (req.method === 'GET' && response.status === 200) {
-        const cacheKey = `xui_api_${req.path}_${req.url}`
-        // Кэшируем на 30 секунд
-        cache.set(cacheKey, {
-          status: response.status,
-          data: response.data
-        }, 30)
-      }
-
-      // Проброс всех заголовков обратно (особенно cookies)
-      // НЕ устанавливаем CORS заголовки здесь - они уже установлены cors middleware
-      Object.entries(response.headers).forEach(([key, value]) => {
-        // Пропускаем некоторые заголовки и CORS заголовки (они уже установлены middleware)
-        const lowerKey = key.toLowerCase()
-        if (!['content-encoding', 'transfer-encoding', 'connection', 
-              'access-control-allow-origin', 'access-control-allow-credentials',
-              'access-control-allow-methods', 'access-control-allow-headers'].includes(lowerKey)) {
-          res.setHeader(key, value)
-        }
+      const result = await xui.requestRaw(req.method, pathWithQuery, {
+        body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? req.body : undefined
       })
 
-      // Отправляем ответ
-      res.status(response.status).json(response.data)
+      if (req.method === 'GET' && result.status === 200) {
+        const cacheKey = `xui_api_${req.path}_${req.url}`
+        cache.set(cacheKey, { status: result.status, data: result.data }, 30)
+      }
 
+      const setCookie = result.headers['set-cookie']
+      if (setCookie) {
+        const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
+        cookies.forEach(c => res.setHeader('Set-Cookie', c))
+      }
+
+      res.status(result.status).json(result.data)
     } catch (error) {
       console.error('❌ Proxy error:', error.message)
-      
       const statusCode = error.response?.status || 500
       const errorMessage = error.response?.data?.msg || error.message || 'Proxy server error'
-
       res.status(statusCode).json({
         success: false,
         msg: errorMessage,

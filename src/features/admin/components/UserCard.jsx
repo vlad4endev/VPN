@@ -17,18 +17,20 @@ import XUIService from '../../vpn/services/XUIService.js'
 /** Проверка, что объект похож на статистику 3x-ui (есть хотя бы одно из полей). */
 function hasStatsFields(obj) {
   return obj && typeof obj === 'object' && (
-    obj.total != null || obj.up != null || obj.down != null || obj.expiryTime != null
+    obj.total != null || obj.up != null || obj.down != null || obj.expiryTime != null || obj.id != null
   )
 }
 
 /**
- * Извлекает объект статистики из ответа webhook/n8n (разные форматы).
+ * Извлекает объект статистики из ответа webhook/n8n/3x-ui (разные форматы).
+ * 3x-ui часто возвращает { success, obj: { up, down, total, expiryTime } }.
  * @param {*} res — ответ getClientStats (response.data с бэкенда)
  * @returns {{ total?, up?, down?, expiryTime?, lastSeen? } | null}
  */
 function normalizeClientStatsResponse(res) {
   if (res == null) return null
   const candidates = [
+    res?.obj,
     res?.stats,
     res?.data,
     res?.result,
@@ -45,10 +47,12 @@ function normalizeClientStatsResponse(res) {
     }
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       if (hasStatsFields(raw)) return raw
+      if (raw.obj != null && hasStatsFields(raw.obj)) return raw.obj
       if (raw.data != null) {
         const inner = Array.isArray(raw.data) ? raw.data[0] : raw.data
-        const obj = inner && typeof inner === 'object' ? (inner.json ?? inner) : null
+        const obj = inner && typeof inner === 'object' ? (inner.json ?? inner ?? inner.obj) : null
         if (hasStatsFields(obj)) return obj
+        if (inner?.obj != null && hasStatsFields(inner.obj)) return inner.obj
       }
       if (raw.body && typeof raw.body === 'object' && hasStatsFields(raw.body)) return raw.body
     }
@@ -187,6 +191,7 @@ const UserCard = ({
     setClientStats3x(null)
     const payload = {
       userId: u.id,
+      tariffId: tariffId || undefined,
       email: u.email || u.login,
       uuid: u.uuid,
       clientId: u.uuid,
@@ -197,21 +202,60 @@ const UserCard = ({
     }
     try {
       const xui = XUIService.getInstance()
-      const res = await xui.getClientStats(payload)
-      const stats = normalizeClientStatsResponse(res)
-      if (stats) {
-        setClientStats3x(stats)
-        return
+      let stats = null
+      let lastError = null
+
+      // 1) Запрос статистики клиента (GET /panel/api/clients/{id}/stats)
+      try {
+        const res = await xui.getClientStats(payload)
+        stats = normalizeClientStatsResponse(res)
+        if (!stats) {
+          const direct = await xui.getClientStatsDirect(payload)
+          if (direct?.success && direct?.data) stats = direct.data
+          else if (direct?.error) lastError = direct.error
+        }
+      } catch (e) {
+        lastError = e.response?.data?.error || e.message || lastError
       }
-      // Ответ пустой или в неизвестном формате — запрашиваем напрямую через бэкенд (fallback)
-      const direct = await xui.getClientStatsDirect(payload)
-      if (direct?.success && direct?.data) {
-        setClientStats3x(direct.data)
+
+      // 2) При наличии UUID — запрос трафика по UUID (GET /panel/api/inbounds/getClientTrafficsById/{uuid})
+      if (u.uuid) {
+        const trafficsRes = await xui.getClientTrafficsById({
+          uuid: u.uuid,
+          userId: u.id,
+          tariffId: tariffId || undefined,
+        })
+        if (trafficsRes?.success && trafficsRes?.data != null) {
+          const t = typeof trafficsRes.data === 'object' && trafficsRes.data.obj != null
+            ? trafficsRes.data.obj
+            : trafficsRes.data
+          if (t && typeof t === 'object') {
+            stats = {
+              ...(stats || {}),
+              up: t.up ?? stats?.up,
+              down: t.down ?? stats?.down,
+              total: t.total ?? stats?.total,
+              expiryTime: t.expiryTime ?? stats?.expiryTime,
+              lastSeen: t.lastSeen ?? stats?.lastSeen,
+            }
+          }
+        } else if (trafficsRes?.error && !stats) {
+          lastError = trafficsRes.error
+        }
+      }
+
+      const hasAny = stats && (stats.up != null || stats.down != null || stats.total != null || stats.expiryTime != null)
+      if (hasAny) {
+        setClientStats3x(stats)
       } else {
-        setClientStats3x({ _error: direct?.error || 'Не удалось загрузить данные из 3x-ui' })
+        const msg = lastError && lastError.trim()
+          ? lastError
+          : 'Не удалось загрузить данные из 3x-ui. Проверьте, что XUI_HOST, XUI_USERNAME, XUI_PASSWORD заданы в proxy/бэкенде и клиент есть в панели по этому UUID.'
+        setClientStats3x({ _error: msg })
       }
     } catch (err) {
-      setClientStats3x({ _error: err.message || 'Ошибка запроса к 3x-ui' })
+      const msg = err.response?.data?.error || err.message || 'Ошибка запроса к 3x-ui'
+      setClientStats3x({ _error: msg })
     } finally {
       setClientStats3xLoading(false)
     }

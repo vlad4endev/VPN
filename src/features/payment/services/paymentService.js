@@ -5,15 +5,17 @@ import logger from '../../../shared/utils/logger.js'
  */
 class PaymentService {
   /**
-   * Генерация ссылки на оплату
+   * Генерация ссылки на оплату.
+   * Запись платежа создаётся только на бэкенде (POST /api/payment/generate-link); дублировать её на фронте не нужно.
    * @param {string} userId - ID пользователя
    * @param {number} amount - Сумма платежа
    * @param {string} tariffId - ID тарифа (опционально)
-   * @param {Object} paymentSettings - Настройки платежной системы (yoomoneyWallet, yoomoneySecretKey)
+   * @param {Object} paymentSettings - Настройки платежной системы
    * @param {Object} userData - Данные пользователя (uuid, email, inboundId) - опционально
+   * @param {Object} [paymentDetails] - tariffName, devices, periodMonths, discount, originalAmount — для одной записи на бэкенде
    * @returns {Promise<Object>} Объект с paymentUrl и orderId
    */
-  async generatePaymentLink(userId, amount, tariffId = null, paymentSettings = {}, userData = null) {
+  async generatePaymentLink(userId, amount, tariffId = null, paymentSettings = {}, userData = null, paymentDetails = null) {
     try {
       logger.info('Payment', 'Генерация ссылки на оплату', { 
         userId, 
@@ -21,7 +23,7 @@ class PaymentService {
         tariffId,
         hasPaymentSettings: !!paymentSettings && Object.keys(paymentSettings).length > 0,
         hasUserData: !!userData,
-        userData: userData
+        hasPaymentDetails: !!paymentDetails,
       })
 
       const requestBody = {
@@ -29,6 +31,15 @@ class PaymentService {
         amount: Number(amount),
         tariffId,
         paymentSettings: paymentSettings || {},
+      }
+      if (paymentDetails && typeof paymentDetails === 'object') {
+        if (paymentDetails.tariffName != null) requestBody.tariffName = paymentDetails.tariffName
+        if (paymentDetails.devices != null) requestBody.devices = paymentDetails.devices
+        if (paymentDetails.periodMonths != null) requestBody.periodMonths = paymentDetails.periodMonths
+        if (paymentDetails.discount != null) requestBody.discount = paymentDetails.discount
+        if (paymentDetails.originalAmount != null) requestBody.originalAmount = paymentDetails.originalAmount
+        if (paymentDetails.operationType != null) requestBody.operationType = paymentDetails.operationType
+        if (paymentDetails.newDevicesCount != null) requestBody.newDevicesCount = paymentDetails.newDevicesCount
       }
 
       // Добавляем данные пользователя, если они переданы
@@ -76,13 +87,15 @@ class PaymentService {
           responseText: responseText.substring(0, 500)
         })
         
-        const errorMessage = errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`
-        
+        let errorMessage = errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`
+        // Понятное сообщение для ошибки Platega «All providers are disabled or unhealthy»
+        if (/providers are disabled|unhealthy|отключены или недоступны/i.test(errorMessage)) {
+          errorMessage = 'Платёжный провайдер Platega временно недоступен или в кабинете app.platega.io отключены/недоступны способы оплаты. Проверьте раздел «Методы оплаты» в настройках мерчанта; если всё активно — повторите попытку позже или напишите в поддержку Platega.'
+        }
         // Специальная обработка для ошибки "No item to return was found"
         if (errorMessage.includes('No item to return') || errorMessage.includes('No item to return was found')) {
           throw new Error('Ошибка n8n workflow: workflow не вернул данные. Проверьте конфигурацию workflow в n8n и убедитесь, что узел "Respond to Webhook" правильно настроен.')
         }
-        
         throw new Error(errorMessage)
       }
 
@@ -199,48 +212,27 @@ class PaymentService {
         throw new Error('Неполный ответ от сервера: данные отсутствуют или имеют неверный формат')
       }
 
-      // Детальная проверка обязательных полей с информативным сообщением
-      const requiredFields = ['paymentUrl']
-      const optionalFields = ['orderId', 'amount', 'status', 'statusPay']
-      
-      logger.info('Payment', 'Проверка обязательных полей в ответе', {
-        paymentDataKeys: Object.keys(paymentData),
-        hasPaymentUrl: !!paymentData.paymentUrl,
-        hasOrderId: !!paymentData.orderId,
-        hasAmount: !!paymentData.amount,
-        hasStatus: !!paymentData.status,
-        hasStatusPay: !!paymentData.statusPay,
-        paymentUrlType: typeof paymentData.paymentUrl,
-        paymentUrlValue: paymentData.paymentUrl ? String(paymentData.paymentUrl).substring(0, 100) : null,
-        fullPaymentData: paymentData
-      })
-
-      // Проверяем наличие обязательных полей
+      // Обязателен orderId; paymentUrl может быть пустым (оплата по реквизитам / без внешней страницы)
+      const requiredFields = ['orderId']
       const missingFields = requiredFields.filter(field => {
         const value = paymentData[field]
         return !value || (typeof value === 'string' && value.trim() === '')
       })
-
       if (missingFields.length > 0) {
         logger.error('Payment', 'Неполный ответ от сервера: отсутствуют обязательные поля', {
           missingFields,
           receivedFields: Object.keys(paymentData),
-          paymentData: paymentData,
-          originalData: data,
-          paymentUrlCheck: {
-            exists: !!paymentData.paymentUrl,
-            type: typeof paymentData.paymentUrl,
-            value: paymentData.paymentUrl,
-            isEmpty: paymentData.paymentUrl === '' || paymentData.paymentUrl === null || paymentData.paymentUrl === undefined
-          }
         })
         throw new Error(`Неполный ответ от сервера. Отсутствуют обязательные поля: ${missingFields.join(', ')}. Полученные поля: ${Object.keys(paymentData).join(', ')}`)
       }
 
-      // Извлекаем orderId из paymentUrl, если он не передан в ответе
-      if (!paymentData.orderId && paymentData.paymentUrl) {
+      // Нормализуем paymentUrl (может быть пустой строкой)
+      const paymentUrl = paymentData.paymentUrl != null ? String(paymentData.paymentUrl) : ''
+
+      // Извлекаем orderId из paymentUrl, если он не передан в ответе и URL не пустой
+      if (!paymentData.orderId && paymentUrl) {
         try {
-          const url = new URL(paymentData.paymentUrl)
+          const url = new URL(paymentUrl)
           const label = url.searchParams.get('label')
           if (label && label.startsWith('order_')) {
             paymentData.orderId = label
@@ -265,21 +257,27 @@ class PaymentService {
         })
       }
 
-      logger.info('Payment', 'Ссылка на оплату успешно сгенерирована', {
+      logger.info('Payment', 'Заказ создан', {
         userId,
         orderId: paymentData.orderId,
-        hasPaymentUrl: !!paymentData.paymentUrl,
+        hasPaymentUrl: !!paymentUrl,
         amount: paymentData.amount
       })
 
       return {
         success: true,
-        paymentUrl: paymentData.paymentUrl,
+        paymentUrl: paymentUrl || paymentData.paymentUrl || '',
         orderId: paymentData.orderId,
         amount: paymentData.amount || amount,
       }
     } catch (error) {
       logger.error('Payment', 'Ошибка генерации ссылки на оплату', { userId, amount, tariffId }, error)
+      // Сеть не отвечает (fetch failed, timeout, нет интернета)
+      const msg = (error?.message || '').toLowerCase()
+      const isNetworkError = msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('load failed') || msg.includes('network request failed') || msg.includes('не отвечает')
+      if (isNetworkError) {
+        throw new Error('Платёжная система не отвечает. Проверьте подключение к интернету и попробуйте позже.')
+      }
       throw error
     }
   }

@@ -2420,10 +2420,11 @@ export default function VPNServiceApp() {
         throw new Error('Не удалось создать подписку: сервис не вернул данные')
       }
       
-      // Если результат содержит ссылку на оплату, возвращаем её БЕЗ создания подписки
-      if (updatedData && updatedData.paymentUrl && updatedData.requiresPayment) {
+      // Если результат содержит требование оплаты (orderId + requiresPayment), не создаём подписку в UI
+      // paymentUrl может быть пустым (оплата по реквизитам / Platega не настроен) — тогда показываем "Ожидайте подтверждения"
+      if (updatedData && updatedData.requiresPayment && updatedData.orderId) {
         return {
-          paymentUrl: updatedData.paymentUrl,
+          paymentUrl: updatedData.paymentUrl || '',
           orderId: updatedData.orderId,
           amount: updatedData.amount,
           requiresPayment: true,
@@ -2435,13 +2436,13 @@ export default function VPNServiceApp() {
           discount: updatedData.discount || discount || 0
         }
       }
-      
-      // Если мы дошли до этого места, подписка была создана успешно
-      // ВАЖНО: Если paymentMode === 'pay_now' и testPeriod === false, то платеж уже оплачен
-      // Устанавливаем paymentStatus в 'paid', даже если updatedData.paymentStatus не установлен
-      const finalPaymentStatus = (paymentMode === 'pay_now' && !testPeriod) 
-        ? 'paid' 
-        : (updatedData.paymentStatus || currentUser.paymentStatus || 'pending')
+
+      // Подписка создана успешно (тест или после подтверждения оплаты через webhook/verify).
+      // Статус оплаты — только из бэкенда или текущий; не ставим 'paid' до подтверждения цепочки: генерация → оплата → webhook/verify.
+      const finalPaymentStatus =
+        updatedData.paymentStatus ??
+        currentUser.paymentStatus ??
+        (testPeriod ? 'test_period' : 'pending')
       
       logger.info('Dashboard', 'Подписка создана через Backend Proxy', { 
         email: currentUser.email,
@@ -2462,14 +2463,10 @@ export default function VPNServiceApp() {
         ...currentUser,
         uuid: updatedData.uuid || currentUser.uuid,
         plan: updatedData.plan || currentUser.plan,
-        // ВАЖНО: После успешной оплаты expiresAt должен быть пересчитан от текущей даты + период
-        // Если updatedData.expiresAt есть (даже если это timestamp), используем его
-        // Если нет, но период оплачен (pay_now), вычисляем от текущей даты
-        expiresAt: updatedData.expiresAt !== undefined && updatedData.expiresAt !== null 
-          ? updatedData.expiresAt 
-          : (paymentMode === 'pay_now' && !testPeriod 
-              ? (Date.now() + (periodMonths * 30 * 24 * 60 * 60 * 1000))
-              : currentUser.expiresAt),
+        // expiresAt только из бэкенда (после webhook/активации); не продлеваем до подтверждения оплаты
+        expiresAt: updatedData.expiresAt !== undefined && updatedData.expiresAt !== null
+          ? updatedData.expiresAt
+          : currentUser.expiresAt,
         tariffName: updatedData.tariffName || currentUser.tariffName || tariff.name,
         tariffId: updatedData.tariffId || currentUser.tariffId || tariff.id,
         devices: updatedData.devices || devices || currentUser.devices || 1,

@@ -11,7 +11,8 @@ import { getUserStatus } from '../../../shared/utils/userStatus.js'
 import VirtualizedUserTable from './VirtualizedUserTable.jsx'
 import UserCard from './UserCard.jsx'
 import N8nPanel from './N8nPanel.jsx'
-import YooMoneyPanel from './YooMoneyPanel.jsx'
+import PlategaPanel from './PlategaPanel.jsx'
+import XuiHttpRequestsPanel from './XuiHttpRequestsPanel.jsx'
 import PromocodesPanel from './PromocodesPanel.jsx'
 import ReviewsPanel from './ReviewsPanel.jsx'
 import SupportTicketsPanel from './SupportTicketsPanel.jsx'
@@ -668,6 +669,29 @@ const AdminPanel = ({
 
             </div>
 
+            {/* Подраздел 3x-ui: HTTP запросы */}
+            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
+              <div className="mb-4 sm:mb-5 md:mb-6">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-1.5 sm:mb-2 flex items-center gap-2">
+                  <Activity className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                  <span className="truncate">HTTP запросы (3x-ui)</span>
+                </h2>
+                <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">
+                  Все запросы к API 3x-ui по методам. Можно редактировать path и body, подставлять переменные из настроек сервера и пользователя.
+                </p>
+              </div>
+              {settingsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-7 h-7 border-2 border-slate-600 border-t-blue-600 rounded-full animate-spin" />
+                </div>
+              ) : (
+                <XuiHttpRequestsPanel
+                  servers={servers}
+                  settings={settings}
+                />
+              )}
+            </div>
+
             {/* Блок 2: Ссылки на приложения HAPP Proxy - Mobile First */}
             <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
               <div className="mb-4 sm:mb-5 md:mb-6">
@@ -777,7 +801,7 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'payments' && (
-          <YooMoneyPanel onSaveSettings={onHandleSaveSettings} />
+          <PlategaPanel onSaveSettings={onHandleSaveSettings} />
         )}
 
         {adminTab === 'promocodes' && (

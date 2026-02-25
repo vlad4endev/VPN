@@ -23,6 +23,7 @@ import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
+import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 
 // Загружаем переменные окружения
 dotenv.config()
@@ -203,6 +204,71 @@ const backendBase = (BACKEND_URL && BACKEND_URL.replace(/\/+$/, '')) || 'http://
 // пути относительно /api (в app.use('/api', ...) req.path будет /vpn/..., /payment/...)
 const BACKEND_API_PREFIXES = ['/vpn', '/payment', '/auth', '/admin', '/analytics', '/promocodes', '/ai', '/public', '/init', '/referral']
 
+// ——— Локальная обработка client-stats / client-stats-direct / client-traffics-by-id (без полного бэкенда) ———
+// Использует один XUI из env (XUI_HOST, XUI_USERNAME, XUI_PASSWORD).
+app.post('/api/vpn/client-stats', async (req, res) => {
+  try {
+    const xui = getXuiClient()
+    if (!xui || !xui.configured) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)' })
+    }
+    const body = req.body || {}
+    const id = body.uuid || body.clientId
+    let stats
+    if (id) {
+      stats = await xui.getClientStats(id)
+    } else {
+      const found = await xui.findClientByEmail(body.email || '')
+      if (!found) return res.status(404).json({ success: false, error: 'Клиент не найден' })
+      stats = await xui.getClientStats(found.client.id)
+    }
+    return res.json({ success: true, stats, data: stats })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка получения статистики' })
+  }
+})
+
+app.post('/api/vpn/client-stats-direct', async (req, res) => {
+  try {
+    const xui = getXuiClient()
+    if (!xui || !xui.configured) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)' })
+    }
+    const body = req.body || {}
+    const id = body.uuid || body.clientId
+    let stats
+    if (id) {
+      stats = await xui.getClientStats(id)
+    } else {
+      const found = await xui.findClientByEmail(body.email || '')
+      if (!found) return res.status(404).json({ success: false, error: 'Клиент не найден' })
+      stats = await xui.getClientStats(found.client.id)
+    }
+    return res.json({ success: true, stats, data: stats })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка получения статистики' })
+  }
+})
+
+app.post('/api/vpn/client-traffics-by-id', async (req, res) => {
+  try {
+    const body = req.body || {}
+    const uuid = body.uuid || body.clientId
+    if (!uuid || !String(uuid).trim()) {
+      return res.status(400).json({ success: false, error: 'invalid UUID', msg: 'uuid обязателен' })
+    }
+    const xui = getXuiClient()
+    if (!xui || !xui.configured) {
+      return res.status(503).json({ success: false, error: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)' })
+    }
+    const data = await xui.getClientTrafficsById(String(uuid).trim())
+    return res.json({ success: true, data })
+  } catch (err) {
+    const status = err.response?.status === 404 ? 404 : err.response?.status === 401 ? 401 : 500
+    return res.status(status).json({ success: false, error: err.message || 'Ошибка получения трафика по UUID' })
+  }
+})
+
 app.use('/api', (req, res, next) => {
   if (!BACKEND_API_PREFIXES.some((p) => req.path.startsWith(p))) return next()
   const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
@@ -234,129 +300,100 @@ if (BACKEND_URL) {
   console.log(`💡 Чтобы работала Аналитика и др.: запустите n8n-webhook-proxy на 3002: PORT=3002 node server/n8n-webhook-proxy.js`)
 }
 
-// Прокси для всех запросов к 3x-ui
-// БЕЗОПАСНОСТЬ: Пароли 3x-ui хранятся на сервере, не в клиентском коде
+// Прокси для всех запросов к 3x-ui через модуль server/lib/xuiClient.js
 app.all('/api/xui/*', async (req, res) => {
   try {
-    const xuiPath = req.path.replace('/api/xui', '')
-    const xuiHost = process.env.XUI_HOST
-    // БЕЗОПАСНОСТЬ: Используем серверные переменные окружения (не VITE_)
-    const xuiUsername = process.env.XUI_USERNAME || process.env.VITE_XUI_USERNAME
-    const xuiPassword = process.env.XUI_PASSWORD || process.env.VITE_XUI_PASSWORD
-
-    if (!xuiHost) {
+    const xui = getXuiClient()
+    if (!xui.configured) {
       return res.status(500).json({
         success: false,
         msg: 'XUI_HOST не настроен в переменных окружения'
       })
     }
 
-    // Формируем полный URL с правильной обработкой query параметров
+    const xuiPath = req.path.replace('/api/xui', '')
     const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''
-    const xuiUrl = `${xuiHost}${xuiPath}${queryString}`
+    const pathWithQuery = xuiPath + queryString
 
-    console.log(`🔄 Proxy: ${req.method} ${req.path} → ${xuiUrl}`)
+    console.log(`🔄 Proxy (xuiClient): ${req.method} ${req.path} → ${xui.baseUrl}${pathWithQuery}`)
 
-    // Настройка запроса
-    const requestConfig = {
-      method: req.method,
-      url: xuiUrl,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      validateStatus: () => true, // Не бросать ошибку на любой статус
-      timeout: 30000 // 30 секунд таймаут
-    }
-
-    // Добавляем тело запроса для POST/PUT
-    if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-      requestConfig.data = req.body
-    }
-
-    // Проброс cookies из запроса клиента
-    if (req.headers.cookie) {
-      requestConfig.headers['Cookie'] = req.headers.cookie
-    }
-
-    // Проброс авторизации если есть
-    if (req.headers.authorization) {
-      requestConfig.headers['Authorization'] = req.headers.authorization
-    }
-    
-    // БЕЗОПАСНОСТЬ: Автоматическая авторизация на сервере, если требуется
-    // Если запрос требует авторизации и нет cookie сессии, выполняем login
-    // Это позволяет скрыть пароли от клиента
-    const needsAuth = ['/panel/api/inbounds', '/panel/api/clients'].some(path => xuiPath.includes(path))
-    const hasSessionCookie = req.headers.cookie && req.headers.cookie.includes('3x-ui=')
-    
-    if (needsAuth && !hasSessionCookie && xuiUsername && xuiPassword) {
-      try {
-        // Выполняем авторизацию на сервере
-        const loginUrl = `${xuiHost}/login`
-        const loginResponse = await axios.post(loginUrl, {
-          username: xuiUsername,
-          password: xuiPassword
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          validateStatus: () => true,
-          timeout: 10000
-        })
-        
-        // Извлекаем cookie из ответа login
-        if (loginResponse.headers['set-cookie']) {
-          const cookies = Array.isArray(loginResponse.headers['set-cookie']) 
-            ? loginResponse.headers['set-cookie'] 
-            : [loginResponse.headers['set-cookie']]
-          
-          // Добавляем cookie к запросу
-          const sessionCookie = cookies.find(c => c.includes('3x-ui='))
-          if (sessionCookie) {
-            const cookieValue = sessionCookie.split(';')[0]
-            requestConfig.headers['Cookie'] = cookieValue
-            // Также устанавливаем cookie в ответ для клиента
-            res.setHeader('Set-Cookie', sessionCookie)
-          }
-        }
-      } catch (loginError) {
-        // Если авторизация не удалась, продолжаем с оригинальным запросом
-        // (возможно, сессия уже есть или авторизация не требуется)
-        logger.warn('Proxy', 'Не удалось выполнить автоматическую авторизацию', { 
-          error: loginError.message 
-        })
-      }
-    }
-
-    // Выполняем запрос
-    const response = await axios(requestConfig)
-
-    // Проброс всех заголовков обратно (особенно cookies)
-    // НЕ устанавливаем CORS заголовки здесь - они уже установлены cors middleware
-    Object.entries(response.headers).forEach(([key, value]) => {
-      // Пропускаем некоторые заголовки и CORS заголовки (они уже установлены middleware)
-      const lowerKey = key.toLowerCase()
-      if (!['content-encoding', 'transfer-encoding', 'connection', 
-            'access-control-allow-origin', 'access-control-allow-credentials',
-            'access-control-allow-methods', 'access-control-allow-headers'].includes(lowerKey)) {
-        res.setHeader(key, value)
-      }
+    const result = await xui.requestRaw(req.method, pathWithQuery, {
+      body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? req.body : undefined
     })
 
-    // Отправляем ответ
-    res.status(response.status).json(response.data)
+    // Проброс Set-Cookie от 3x-ui к клиенту (сессия)
+    const setCookie = result.headers['set-cookie']
+    if (setCookie) {
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
+      cookies.forEach(c => res.setHeader('Set-Cookie', c))
+    }
 
+    res.status(result.status).json(result.data)
   } catch (error) {
     console.error('❌ Proxy error:', error.message)
-    
     const statusCode = error.response?.status || 500
     const errorMessage = error.response?.data?.msg || error.message || 'Proxy server error'
-
     res.status(statusCode).json({
       success: false,
       msg: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    })
+  }
+})
+
+// Выполнение произвольного запроса к 3x-ui с учётом выбранного сервера из настроек (для раздела «HTTP запросы» в админке)
+app.post('/api/xui-request', async (req, res) => {
+  try {
+    const { server, method, path, body } = req.body || {}
+
+    if (!method || !path) {
+      return res.status(400).json({
+        success: false,
+        msg: 'method и path обязательны'
+      })
+    }
+
+    const baseUrl = server?.baseUrl || (() => {
+      if (!server?.serverIP || !server?.serverPort) return process.env.XUI_HOST || ''
+      const protocol = (server.protocol || (server.serverPort === 443 ? 'https' : 'http')).replace(/\/+$/, '')
+      const pathPart = server.randompath ? `/${String(server.randompath).replace(/^\/+|\/+$/g, '')}` : ''
+      return `${protocol}://${server.serverIP}:${server.serverPort}${pathPart}`.replace(/\/+$/, '')
+    })()
+
+    const username = server?.xuiUsername ?? process.env.XUI_USERNAME ?? ''
+    const password = server?.xuiPassword ?? process.env.XUI_PASSWORD ?? ''
+
+    const xui = baseUrl && username && password
+      ? createXuiClient({ baseUrl, username, password })
+      : getXuiClient()
+
+    if (!xui.configured) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Не заданы baseUrl и учётные данные (сервер в настройках или XUI_HOST/XUI_USERNAME/XUI_PASSWORD)'
+      })
+    }
+
+    const pathNorm = path.startsWith('/') ? path : `/${path}`
+    const opts = {}
+    if (['POST', 'PUT', 'PATCH'].includes(String(method).toUpperCase()) && body !== undefined) {
+      opts.body = body
+    }
+
+    const result = await xui.requestRaw(String(method).toUpperCase(), pathNorm, opts)
+
+    const setCookie = result.headers['set-cookie']
+    if (setCookie) {
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
+      cookies.forEach(c => res.setHeader('Set-Cookie', c))
+    }
+
+    res.status(result.status).json(result.data)
+  } catch (error) {
+    console.error('❌ xui-request error:', error.message)
+    res.status(error.response?.status || 500).json({
+      success: false,
+      msg: error.message || 'xui-request failed',
       error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     })
   }

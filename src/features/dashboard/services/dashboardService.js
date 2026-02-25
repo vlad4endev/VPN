@@ -674,7 +674,7 @@ export const dashboardService = {
    */
   async initiatePayment(user, tariff, amount, devices = null, periodMonths = 1, discount = 0, promocodeId = null, options = null) {
     try {
-      logger.info('Dashboard', 'Инициация оплаты через YooMoney', {
+      logger.info('Dashboard', 'Инициация оплаты через Platega', {
         userId: user?.id,
         tariffId: tariff?.id,
         amount,
@@ -755,12 +755,12 @@ export const dashboardService = {
         if (settingsSnapshot.exists()) {
           const settingsData = settingsSnapshot.data()
           paymentSettings = {
-            yoomoneyWallet: settingsData.yoomoneyWallet || null,
-            yoomoneySecretKey: settingsData.yoomoneySecretKey || null,
+            plategaMerchantId: settingsData.plategaMerchantId || null,
+            plategaSecretKey: settingsData.plategaSecretKey || null,
           }
           logger.info('Dashboard', 'Настройки платежной системы загружены', {
-            hasWallet: !!paymentSettings.yoomoneyWallet,
-            hasSecretKey: !!paymentSettings.yoomoneySecretKey
+            hasMerchantId: !!paymentSettings.plategaMerchantId,
+            hasSecretKey: !!paymentSettings.plategaSecretKey
           })
         } else {
           logger.warn('Dashboard', 'Документ settings не найден в Firestore')
@@ -812,8 +812,7 @@ export const dashboardService = {
         }, inboundIdError)
       }
 
-      // Генерируем ссылку на оплату через n8n, передавая настройки платежной системы
-      // Передаем также данные пользователя (uuid, email) и inboundId тарифа для отправки в n8n
+      // Генерируем ссылку на оплату (Platega). Запись платежа создаётся только на бэкенде (generate-link), не дублируем на фронте.
       const paymentServiceInstance = paymentService.getInstance()
       const paymentResult = await paymentServiceInstance.generatePaymentLink(
         user.id,
@@ -824,39 +823,19 @@ export const dashboardService = {
           uuid: user.uuid || null,
           email: user.email || null,
           inboundId: tariffInboundId || null
+        },
+        {
+          tariffName: tariff.name ?? null,
+          devices: devices ?? tariff.devices ?? 1,
+          periodMonths: periodMonths ?? 1,
+          discount: discount ?? 0,
+          originalAmount: amount,
+          ...(options?.operationType === 'add_devices' && options?.newDevicesCount != null && {
+            operationType: 'add_devices',
+            newDevicesCount: options.newDevicesCount,
+          }),
         }
       )
-
-      // Сохраняем заказ в Firestore со статусом 'pending'
-      if (paymentResult.orderId) {
-        const paymentsCollection = collection(db, `artifacts/${APP_ID}/public/data/payments`)
-        const paymentDoc = {
-          userId: user.id,
-          email: user.email,
-          orderId: paymentResult.orderId,
-          tariffId: tariff.id,
-          tariffName: tariff.name,
-          amount: finalAmount,
-          originalAmount: amount,
-          discount: discount || 0,
-          status: 'pending',
-          devices: devices || tariff.devices || 1,
-          periodMonths: periodMonths || 1,
-          promocodeId: promocodeId || null,
-          createdAt: new Date().toISOString(),
-        }
-        if (options && options.operationType === 'add_devices' && options.newDevicesCount != null) {
-          paymentDoc.operationType = 'add_devices'
-          paymentDoc.newDevicesCount = options.newDevicesCount
-        }
-        await addDoc(paymentsCollection, paymentDoc)
-
-        logger.info('Dashboard', 'Заказ создан со статусом pending', {
-          userId: user.id,
-          orderId: paymentResult.orderId,
-          amount: finalAmount
-        })
-      }
 
       return {
         success: true,
@@ -1112,6 +1091,35 @@ export const dashboardService = {
     } catch (error) {
       logger.error('Dashboard', 'Ошибка проверки статуса платежа', { orderId }, error)
       throw error
+    }
+  },
+
+  /**
+   * Запрос статуса платежа через API (GET /api/payment/status/:orderId).
+   * Используется для опроса после оплаты; бэкенд при необходимости запрашивает Platega и синхронизирует Firestore.
+   * @param {string} orderId - ID заказа
+   * @returns {Promise<{ success: boolean, status: string, payment?: object, plategaTransaction?: object }>}
+   */
+  async fetchPaymentStatus(orderId) {
+    if (!orderId) {
+      return { success: false, status: 'pending' }
+    }
+    try {
+      const response = await fetch(`/api/payment/status/${encodeURIComponent(orderId)}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        logger.warn('Dashboard', 'Ответ API статуса платежа не OK', { orderId, status: response.status, data })
+        return { success: false, status: 'pending' }
+      }
+      return {
+        success: !!data.success,
+        status: data.status || 'pending',
+        payment: data.payment,
+        plategaTransaction: data.plategaTransaction,
+      }
+    } catch (error) {
+      logger.warn('Dashboard', 'Ошибка запроса статуса платежа', { orderId }, error)
+      return { success: false, status: 'pending' }
     }
   },
 
@@ -1720,7 +1728,10 @@ export const dashboardService = {
         responseKeys: result ? Object.keys(result) : []
       })
       
-      if (!result || (!result.vpnUuid && !result.success)) {
+      // Успех: явные vpnUuid/success или формат n8n (массив с sub/KEY/ПодпискаДо)
+      const hasN8nFormat = Array.isArray(result) && result.length > 0 && (result[0].sub != null || result[0].KEY != null)
+      const hasSuccess = result && (result.vpnUuid || result.success || hasN8nFormat)
+      if (!hasSuccess) {
         logger.warn('Dashboard', '⚠️ Ответ от Proxy получен, но без UUID или success', {
           result: result
         })

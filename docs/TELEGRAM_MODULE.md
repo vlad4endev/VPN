@@ -199,6 +199,7 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 | Метод | Путь | Описание |
 |-------|------|----------|
 | POST | `/api/telegram/webhook` | **Webhook от Telegram** (обновления бота). Обрабатывает `/start`, `/start <token>`, `/menu`, callback_query, web_app_data. Ответ 200 отдаётся сразу; обработка — без блокировки. |
+| POST | `/api/telegram/verify` | **Удалённая проверка** (для сценария «B запрашивает у A»). Заголовок `X-Telegram-Verify-Secret` или `Authorization: Bearer <secret>`. Тело: `{ "type": "initData", "initData": "..." }` или `{ "type": "widget", "widgetUser": { ... } }`. Ответ: `{ ok: true, tgId, user? }` или `{ ok: false, reason, message }`. Вызывается только сервером B (у которого нет токена бота). |
 | GET | `/api/telegram/bind-link` | Выдать ссылку для привязки. Требуется `Authorization: Bearer <Firebase ID token>`. |
 | POST | `/api/telegram/unbind` | Отвязать Telegram от текущего пользователя. Требуется авторизация. |
 | POST | `/api/telegram/send-reminders` | Отправить напоминания об истечении подписки (для вызова из cron). Заголовок `X-Telegram-Secret` или тело `{ "secret": "…" }` должен совпадать с `TELEGRAM_WEBHOOK_SECRET`. |
@@ -222,6 +223,22 @@ curl -X POST "https://your-domain.com/api/telegram/send-reminders" \
 ```
 
 Сервер найдёт пользователей с заполненным `tgId` и датой окончания подписки в ближайшие 7 дней (или уже истёкшей) и отправит им сообщение с предложением продлить подписку.
+
+## Удалённая проверка Telegram (B запрашивает у A)
+
+Если **API-сервер (B)** не имеет токена бота (например, отдельный инстанс без доступа к секретам), а **сервер с ботом (A)** — имеет, можно настроить проверку так, чтобы B запрашивал проверку у A.
+
+**Сервер A** (с `TELEGRAM_BOT_TOKEN`):
+
+- Задайте в `.env`: `TELEGRAM_VERIFY_SECRET=<общий_секрет>`.
+- Эндпоинт `POST /api/telegram/verify` уже включён: он проверяет заголовок `X-Telegram-Verify-Secret` (или `Authorization: Bearer <secret>`) и по телу `{ type: "initData", initData }` или `{ type: "widget", widgetUser }` выполняет локальную валидацию и возвращает `{ ok: true, tgId, user? }` или `{ ok: false, reason, message }`.
+
+**Сервер B** (без токена бота):
+
+- Задайте в `.env`: `TELEGRAM_VERIFY_URL=<базовый URL сервера A>`, `TELEGRAM_VERIFY_SECRET=<тот же секрет>`. Опционально: `TELEGRAM_VERIFY_TIMEOUT_MS=10000`.
+- При вызове `POST /api/telegram/auth` (initData) или `POST /api/telegram/auth-widget` (виджет) сервер B при отсутствии локального токена сам отправит запрос на A (`POST .../api/telegram/verify`), получит `tgId` (и при необходимости `user`) и продолжит выдачу customToken и создание/обновление пользователя как обычно.
+
+Итог: один инстанс с ботом (A) хранит токен и проверяет данные; второй инстанс (B) делегирует проверку A и по ответу выдаёт авторизацию.
 
 ## Структура (фронтенд)
 

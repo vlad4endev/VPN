@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
@@ -81,6 +81,8 @@ const Dashboard = ({
   const handleManualPaymentCheckRef = useRef(() => {})
   /** Защита от двойного создания: orderId, для которых подписка уже создаётся или создана (до следующего нового платежа). */
   const subscriptionCreatedForOrderIdsRef = useRef(new Set())
+  /** orderId, для которого идёт повторная проверка статуса из истории платежей */
+  const [recheckingOrderId, setRecheckingOrderId] = useState(null)
 
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
@@ -228,382 +230,141 @@ const Dashboard = ({
       setPaymentProcessingStatus('waiting')
     }, 5000)
 
-    // Этап 2: Через 10 секунд (итого 15 секунд) начинаем проверку (увеличено с 5 до 15 секунд, чтобы дать время на оплату)
+    // Этап 2: Через 10 секунд начинаем проверку статуса (до 20 попыток, каждые 3 с — успех или отказ)
     const checkingTimeout = setTimeout(async () => {
-      logger.debug('Dashboard', 'Начинаем проверку платежа через webhook', { orderId: paymentOrderId })
+      logger.debug('Dashboard', 'Начинаем проверку статуса платежа (Platega API)', { orderId: paymentOrderId })
       setPaymentProcessingMessage(t('dashboard.statusChecking'))
       setPaymentProcessingStatus('checking')
 
-      // Функция проверки платежа через webhook
+      const MAX_PAYMENT_CHECK_ATTEMPTS = 20
+
+      // Функция проверки: только GET /api/payment/status (Platega)
       const checkPaymentViaWebhook = async () => {
         try {
           const { dashboardService } = await import('../services/dashboardService.js')
-          
-          logger.debug('Dashboard', 'Отправка webhook для проверки платежа', {
+          const attempt = paymentCheckAttemptsRef.current + 1
+
+          logger.debug('Dashboard', 'Проверка статуса платежа', {
             orderId: paymentOrderId,
-            attempt: paymentCheckAttemptsRef.current + 1
+            attempt,
+            maxAttempts: MAX_PAYMENT_CHECK_ATTEMPTS
           })
 
-          // Отправляем webhook для проверки платежа
-          const verifyResult = await dashboardService.verifyPayment(paymentOrderId)
-
-          if (verifyResult && verifyResult.success) {
-            logger.info('Dashboard', 'Результат проверки платежа получен от n8n', {
+          // Сначала запрос статуса к API (бэкенд опрашивает Platega и синхронизирует Firestore)
+          const statusResult = await dashboardService.fetchPaymentStatus(paymentOrderId)
+          if (statusResult.success && statusResult.status === 'completed' && statusResult.payment) {
+            const payment = statusResult.payment
+            logger.info('Dashboard', 'Платёж подтверждён (API статуса)', {
               orderId: paymentOrderId,
-              attempt: paymentCheckAttemptsRef.current + 1,
-              hasPayment: !!verifyResult.payment,
-              paymentStatus: verifyResult.payment?.status
+              attempt,
+              status: payment.status
             })
-
-            // Получаем данные платежа из результата от n8n
-            // n8n ищет запись в базе данных по orderId и возвращает данные, если найдена
-            // n8n может вернуть массив или объект, данные уже обработаны на сервере
-            let payment = verifyResult.payment
-
-            logger.info('Dashboard', 'Получены данные платежа от n8n', {
-              orderId: paymentOrderId,
-              attempt: paymentCheckAttemptsRef.current + 1,
-              hasPayment: !!payment,
-              hasResult: !!verifyResult.result,
-              resultIsArray: Array.isArray(verifyResult.result),
-              resultLength: Array.isArray(verifyResult.result) ? verifyResult.result.length : 'N/A'
-            })
-
-            // Если payment не найден в verifyResult.payment, проверяем result (массив или объект от n8n)
-            if (!payment && verifyResult.result) {
-              // Обработка массива от n8n
-              if (Array.isArray(verifyResult.result) && verifyResult.result.length > 0) {
-                const n8nPayment = verifyResult.result[0]
-                logger.info('Dashboard', 'Обрабатываем данные из массива n8n (автоматическая проверка)', {
-                  orderid: n8nPayment?.orderid,
-                  statuspay: n8nPayment?.statuspay
-                })
-                
-                // Маппим данные из формата n8n
-                const statuspay = n8nPayment?.statuspay || ''
-                const statuspayLower = String(statuspay).toLowerCase().trim()
-                const isPaidStatus = statuspayLower === 'оплачено' || 
-                                    statuspayLower === 'оплачен' || 
-                                    statuspayLower === 'paid' || 
-                                    statuspayLower === 'completed' ||
-                                    statuspayLower === 'успешно'
-                
-                if (isPaidStatus) {
-                  // Получаем данные подписки из subscriptionSuccess или currentUser (используем refs для стабильности)
-                  const subscriptionData = subscriptionSuccessRef.current || {}
-                  const tariffsList = tariffsRef.current || []
-                  const currentUserData = currentUserRef.current
-                  
-                  // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
-                  const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
-                  
-                  // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
-                  const tariffId = n8nTariffId
-                    || subscriptionData.tariffId 
-                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
-                    || currentUserData?.tariffId
-                  const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
-                  
-                  // Создаем объект payment из данных n8n
-                  payment = {
-                    orderId: n8nPayment?.orderid || paymentOrderId,
-                    status: 'completed',
-                    originalStatus: n8nPayment?.statuspay,
-                    amount: parseFloat(n8nPayment?.sum) || subscriptionData.amount || 0,
-                    userId: n8nPayment?.uuid || currentUserData?.id || null,
-                    tariffId: tariff?.id || null,
-                    tariffName: tariff?.name || subscriptionData.tariffName || null,
-                    devices: subscriptionData.devices || currentUserData?.devices || 1,
-                    periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
-                    discount: subscriptionData.discount || 0
-                  }
-                  
-                  logger.info('Dashboard', '✅ Статус ОПЛАЧЕНО найден в массиве n8n, данные платежа подготовлены', {
-                    orderId: payment.orderId,
-                    tariffId: payment.tariffId,
-                    status: payment.status
-                  })
-                }
-              } 
-              // Обработка объекта от n8n (когда n8n возвращает объект, а не массив)
-              else if (typeof verifyResult.result === 'object' && !Array.isArray(verifyResult.result)) {
-                const n8nPayment = verifyResult.result
-                logger.info('Dashboard', 'Обрабатываем данные из объекта n8n (автоматическая проверка)', {
-                  orderid: n8nPayment?.orderid,
-                  statuspay: n8nPayment?.statuspay,
-                  statuspayType: typeof n8nPayment?.statuspay,
-                  allKeys: Object.keys(n8nPayment || {})
-                })
-                
-                // Маппим данные из формата n8n
-                const statuspay = n8nPayment?.statuspay || ''
-                const statuspayLower = String(statuspay).toLowerCase().trim()
-                logger.info('Dashboard', 'Проверка статуса платежа из объекта n8n (автоматическая проверка)', {
-                  statuspay: statuspay,
-                  statuspayLower: statuspayLower,
-                  isPaid: statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно'
-                })
-                
-                const isPaidStatus = statuspayLower === 'оплачено' || 
-                                    statuspayLower === 'оплачен' || 
-                                    statuspayLower === 'paid' || 
-                                    statuspayLower === 'completed' ||
-                                    statuspayLower === 'успешно'
-                
-                if (isPaidStatus) {
-                  // Получаем данные подписки из subscriptionSuccess или currentUser
-                  // Используем refs для стабильности
-                  const subscriptionData = subscriptionSuccessRef.current || {}
-                  const tariffsList = tariffsRef.current || []
-                  const currentUserData = currentUserRef.current
-                  
-                  // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
-                  const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
-                  
-                  logger.info('Dashboard', 'Получение данных подписки из объекта n8n (автоматическая проверка)', {
-                    hasSubscriptionSuccess: !!subscriptionSuccessRef.current,
-                    n8nTariffId: n8nTariffId,
-                    subscriptionTariffId: subscriptionData.tariffId,
-                    subscriptionTariffName: subscriptionData.tariffName,
-                    currentUserTariffId: currentUserData?.tariffId,
-                    availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
-                  })
-                  
-                  // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
-                  const tariffId = n8nTariffId
-                    || subscriptionData.tariffId 
-                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
-                    || currentUserData?.tariffId
-                  const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
-                  
-                  // Создаем объект payment из данных n8n
-                  payment = {
-                    orderId: n8nPayment?.orderid || paymentOrderId,
-                    status: 'completed',
-                    originalStatus: n8nPayment?.statuspay,
-                    amount: parseFloat(n8nPayment?.sum) || subscriptionData.amount || 0,
-                    userId: n8nPayment?.uuid || currentUserData?.id || null,
-                    tariffId: tariff?.id || null,
-                    tariffName: tariff?.name || subscriptionData.tariffName || null,
-                    devices: subscriptionData.devices || currentUserData?.devices || 1,
-                    periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
-                    discount: subscriptionData.discount || 0
-                  }
-                  
-                  logger.info('Dashboard', '✅ Статус ОПЛАЧЕНО найден в объекте n8n, данные платежа подготовлены', {
-                    orderId: payment.orderId,
-                    tariffId: payment.tariffId,
-                    tariffName: payment.tariffName,
-                    status: payment.status,
-                    amount: payment.amount
-                  })
-                }
+            // Останавливаем проверки и запускаем блок успеха (ниже)
+            if (paymentCheckTimeoutRef.current) {
+              clearTimeout(paymentCheckTimeoutRef.current)
+              paymentCheckTimeoutRef.current = null
+            }
+            if (paymentPollingIntervalRef.current) {
+              clearTimeout(paymentPollingIntervalRef.current)
+              paymentPollingIntervalRef.current = null
+            }
+            const tariffsList = tariffsRef.current || []
+            const subscriptionData = subscriptionSuccessRef.current || {}
+            const currentUserData = currentUserRef.current
+            let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
+            if (!tariff) {
+              const tariffId = subscriptionData.tariffId || currentUserData?.tariffId
+              tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
+              if (tariff) {
+                payment.tariffId = tariff.id
+                payment.tariffName = tariff.name
               }
             }
-
-            // Проверяем статус платежа из n8n
-            // Статус уже нормализован на сервере: 'completed', 'paid', 'failed', 'cancelled', 'pending'
-            const paymentStatus = payment?.status
-            const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
-            
-            logger.info('Dashboard', 'Проверка статуса платежа', {
-              orderId: paymentOrderId,
-              hasPayment: !!payment,
-              paymentStatus: paymentStatus,
-              originalStatus: payment?.originalStatus,
-              isPaid: isPaid
-            })
-
-            if (payment && isPaid) {
-          logger.info('Dashboard', 'Платеж подтвержден n8n (статус: оплачено), создаем подписку', {
-            orderId: paymentOrderId,
-            amount: payment.amount,
-            tariffId: payment.tariffId,
-            tariffName: payment.tariffName,
-            devices: payment.devices,
-            periodMonths: payment.periodMonths,
-            status: payment.status
-          })
-
-              // Останавливаем все проверки
-              if (paymentCheckTimeoutRef.current) {
-                clearTimeout(paymentCheckTimeoutRef.current)
-                paymentCheckTimeoutRef.current = null
-              }
-              if (paymentPollingIntervalRef.current) {
-                clearTimeout(paymentPollingIntervalRef.current)
-                paymentPollingIntervalRef.current = null
-              }
-
+            if (!tariff) {
+              logger.error('Dashboard', 'Тариф не найден для завершённого платежа', { orderId: paymentOrderId })
+              window.location.reload()
+              return true
+            }
+            if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
               try {
-                // Находим тариф по tariffId из платежа (используем refs для стабильности)
-                const tariffsList = tariffsRef.current || []
-                const subscriptionData = subscriptionSuccessRef.current || {}
-                const currentUserData = currentUserRef.current
-                
-                let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
-                
-                if (!tariff) {
-                  // Сначала пытаемся использовать tariffId напрямую, затем ищем по tariffName
-                  const tariffId = subscriptionData.tariffId 
-                    || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
-                    || currentUserData?.tariffId
-                  tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
-                  
-                  if (tariff) {
-                    payment.tariffId = tariff.id
-                    payment.tariffName = tariff.name
-                  }
-                }
-                
-                if (!tariff) {
-                  logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
-                    tariffId: payment.tariffId,
-                    orderId: paymentOrderId,
-                    availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
-                  })
-                  window.location.reload()
-                  return
-                }
-
-                // Оплата «добавить устройства» (Super): только обновляем devices в Firestore и 3x-ui
-                const subData = subscriptionSuccessRef.current || {}
-                if (subData.operationType === 'add_devices' && subData.newDevicesCount != null && currentUserData) {
-                  try {
-                    await dashboardService.applyAddDevicesAfterPayment(currentUserData, subData.newDevicesCount)
-                    await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
-                    setShowSuccessModal(false)
-                    setSubscriptionSuccess(null)
-                    subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
-                    if (paymentCheckTimeoutRef.current) clearTimeout(paymentCheckTimeoutRef.current)
-                    paymentPollingIntervalRef.current = null
-                    return
-                  } catch (addDevErr) {
-                    logger.error('Dashboard', 'Ошибка применения добавления устройств', { orderId: paymentOrderId }, addDevErr)
-                    throw addDevErr
-                  }
-                }
-
-                // Создаем подписку с данными из платежа
-                logger.info('Dashboard', 'Создание подписки после успешной оплаты', {
-                  userId: currentUserData?.id,
-                  tariffId: tariff.id,
-                  tariffName: tariff.name,
-                  devices: payment.devices || 1,
-                  periodMonths: payment.periodMonths || 1,
-                  discount: payment.discount || 0,
-                  paymentStatus: payment.status,
-                  fullPayment: payment
-                })
-
-                // Вызываем создание подписки через onHandleCreateSubscription (используем ref для стабильности)
-                // ВАЖНО: передаем periodMonths и devices из payment, чтобы подписка была создана с правильными параметрами
-                // paymentMode: 'paid' - платёж уже оплачен, поэтому используем режим 'paid' для правильной обработки
-                const subscriptionResult = await onHandleCreateSubscriptionRef.current(
-                  tariff,
-                  payment.devices || 1,
-                  null, // natrockPort - не используется для SUPER тарифа
-                  payment.periodMonths || 1,
-                  false, // testPeriod - уже оплачено
-                  'paid', // paymentMode - платёж УЖЕ оплачен, используем режим 'paid' для правильной обработки
-                  payment.discount || 0
-                )
-
-                logger.info('Dashboard', 'Подписка создана после успешной оплаты', {
-                  hasVpnLink: !!subscriptionResult?.vpnLink,
-                  tariffName: subscriptionResult?.tariffName,
-                  devices: subscriptionResult?.devices,
-                  periodMonths: subscriptionResult?.periodMonths,
-                  paymentStatus: subscriptionResult?.paymentStatus,
-                  expiresAt: subscriptionResult?.expiresAt,
-                  fullResult: subscriptionResult
-                })
-
-                // Отправляем уведомление об успешной оплате
-                try {
-                  const notificationInstance = notificationService.getInstance()
-                  if (notificationInstance.hasPermission()) {
-                    await notificationInstance.notifyPaymentSuccess(
-                      payment.tariffName || tariff.name || t('dashboard.subscriptionFallback'),
-                      payment.amount || 0
-                    )
-                    logger.info('Dashboard', 'Уведомление об успешной оплате отправлено')
-                  }
-                } catch (notificationError) {
-                  logger.warn('Dashboard', 'Ошибка отправки уведомления об успешной оплате', null, notificationError)
-                }
-
-                // Закрываем модальное окно обработки
-                setShowPaymentProcessing(false)
-                setPaymentOrderId(null)
-                setPaymentWindowRef(null)
-
-                // Закрываем модальное окно успеха (если открыто)
+                await dashboardService.applyAddDevicesAfterPayment(currentUserData, subscriptionData.newDevicesCount)
+                await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
                 setShowSuccessModal(false)
                 setSubscriptionSuccess(null)
-
-                // Обновляем страницу, чтобы загрузить обновленные данные пользователя
-                // Увеличиваем задержку, чтобы убедиться, что данные сохранились в Firestore
-                logger.info('Dashboard', 'Ожидание перед перезагрузкой страницы для применения изменений', {
-                  orderId: paymentOrderId
-                })
-                setTimeout(() => {
-                  logger.info('Dashboard', 'Перезагрузка страницы после успешной оплаты')
-                  window.location.reload()
-                }, 1500) // Увеличиваем до 1.5 секунды для надежного сохранения данных
-              } catch (error) {
-                logger.error('Dashboard', 'Ошибка создания подписки после успешной оплаты', {
-                  orderId: paymentOrderId
-                }, error)
-                setTimeout(() => {
-                  window.location.reload()
-                }, 1000)
-              }
-              return true // Платеж найден и обработан
-            } else if (payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected')) {
-              logger.warn('Dashboard', 'Платеж не прошел', {
-                orderId: paymentOrderId,
-                status: payment.status
-              })
-
-              // Останавливаем все проверки
-              if (paymentCheckTimeoutRef.current) {
-                clearTimeout(paymentCheckTimeoutRef.current)
-                paymentCheckTimeoutRef.current = null
-              }
-              if (paymentPollingIntervalRef.current) {
-                clearTimeout(paymentPollingIntervalRef.current)
-                paymentPollingIntervalRef.current = null
-              }
-
-              // Показываем ошибку
-              setPaymentProcessingMessage(t('paymentProcessing.paymentFailed'))
-              setPaymentProcessingStatus('error')
-
-              // Очищаем состояние через 3 секунды
-              setTimeout(() => {
+                subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
                 setShowPaymentProcessing(false)
                 setPaymentOrderId(null)
                 setPaymentWindowRef(null)
-                setPaymentProcessingStatus('processing')
-                setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-              }, 3000)
-
-              return true // Платеж обработан (не прошел)
+                setTimeout(() => window.location.reload(), 1500)
+                return true
+              } catch (addDevErr) {
+                logger.error('Dashboard', 'Ошибка применения добавления устройств', { orderId: paymentOrderId }, addDevErr)
+              }
             }
+            try {
+              await onHandleCreateSubscriptionRef.current(
+                tariff,
+                payment.devices || 1,
+                null,
+                payment.periodMonths || 1,
+                false,
+                'paid',
+                payment.discount || 0
+              )
+              try {
+                const notificationInstance = notificationService.getInstance()
+                if (notificationInstance.hasPermission()) {
+                  await notificationInstance.notifyPaymentSuccess(
+                    payment.tariffName || tariff.name || t('dashboard.subscriptionFallback'),
+                    payment.amount || 0
+                  )
+                }
+              } catch (_) {}
+              setShowPaymentProcessing(false)
+              setPaymentOrderId(null)
+              setPaymentWindowRef(null)
+              setShowSuccessModal(false)
+              setSubscriptionSuccess(null)
+              setTimeout(() => window.location.reload(), 1500)
+            } catch (err) {
+              logger.error('Dashboard', 'Ошибка создания подписки после оплаты', { orderId: paymentOrderId }, err)
+              setTimeout(() => window.location.reload(), 1000)
+            }
+            return true
+          }
+          if (statusResult.success && ['cancelled', 'failed', 'chargebacked'].includes(statusResult.status)) {
+            logger.warn('Dashboard', 'Платёж не прошёл (отказ)', { orderId: paymentOrderId, status: statusResult.status })
+            if (paymentCheckTimeoutRef.current) {
+              clearTimeout(paymentCheckTimeoutRef.current)
+              paymentCheckTimeoutRef.current = null
+            }
+            if (paymentPollingIntervalRef.current) {
+              clearTimeout(paymentPollingIntervalRef.current)
+              paymentPollingIntervalRef.current = null
+            }
+            setPaymentProcessingMessage(t('paymentProcessing.paymentFailed'))
+            setPaymentProcessingStatus('error')
+            setTimeout(() => {
+              setShowPaymentProcessing(false)
+              setPaymentOrderId(null)
+              setPaymentWindowRef(null)
+              setPaymentProcessingStatus('processing')
+              setPaymentProcessingMessage(t('paymentProcessing.accountant'))
+            }, 3000)
+            return true
           }
 
-          // Если платеж не найден, продолжаем проверку
+          // Статус ещё pending или ошибка API — следующая попытка через 3 с (только Platega)
           paymentCheckAttemptsRef.current++
-          logger.debug('Dashboard', 'Платеж не найден, продолжаем проверку', {
+          logger.debug('Dashboard', 'Статус pending, следующая проверка через 3 с', {
             orderId: paymentOrderId,
             attempt: paymentCheckAttemptsRef.current,
-            maxAttempts: 6
+            maxAttempts: MAX_PAYMENT_CHECK_ATTEMPTS
           })
 
-          return false // Платеж не найден
+          return false
         } catch (error) {
-          logger.error('Dashboard', 'Ошибка проверки платежа через webhook', {
+          logger.error('Dashboard', 'Ошибка проверки платежа', {
             orderId: paymentOrderId,
             attempt: paymentCheckAttemptsRef.current + 1
           }, error)
@@ -612,9 +373,9 @@ const Dashboard = ({
         }
       }
 
-      // Выполняем проверку сразу и затем каждые 3 секунды, максимум 6 попыток
+      // Проверка каждые 3 секунды, максимум 20 попыток — до успеха или отказа
       const performCheck = async () => {
-        if (paymentCheckAttemptsRef.current >= 6) {
+        if (paymentCheckAttemptsRef.current >= MAX_PAYMENT_CHECK_ATTEMPTS) {
           logger.warn('Dashboard', 'Достигнуто максимальное количество попыток проверки платежа', {
             orderId: paymentOrderId,
             attempts: paymentCheckAttemptsRef.current
@@ -644,7 +405,7 @@ const Dashboard = ({
 
         const found = await checkPaymentViaWebhook()
 
-        if (!found && paymentCheckAttemptsRef.current < 6) {
+        if (!found && paymentCheckAttemptsRef.current < MAX_PAYMENT_CHECK_ATTEMPTS) {
           // Продолжаем проверку через 3 секунды
           paymentPollingIntervalRef.current = setTimeout(performCheck, 3000)
         }
@@ -652,7 +413,7 @@ const Dashboard = ({
 
       // Запускаем первую проверку
       performCheck()
-    }, 10000) // Итого 15 секунд (5 сек ожидание + 10 сек до начала проверки) - увеличено для дачи времени на оплату
+    }, 10000) // Через 10 с после показа ожидания начинаем опрос (до 20 попыток по 3 с — успех или отказ)
 
     // Cleanup: останавливаем все таймауты и интервалы
     return () => {
@@ -694,103 +455,24 @@ const Dashboard = ({
           // Сразу запускаем проверку статуса платежа через webhook
           setTimeout(async () => {
             try {
-              logger.info('Dashboard', 'Окно оплаты закрыто, запускаем проверку статуса платежа через webhook', {
+              logger.info('Dashboard', 'Окно оплаты закрыто, проверка статуса через Platega API', {
                 orderId: paymentOrderId
               })
 
               const { dashboardService } = await import('../services/dashboardService.js')
-              
-              // Отправляем запрос на проверку платежа через webhook в n8n
-              const verifyResult = await dashboardService.verifyPayment(paymentOrderId)
+              const statusResult = await dashboardService.fetchPaymentStatus(paymentOrderId)
 
-              logger.info('Dashboard', 'Запрос на проверку платежа через webhook отправлен', {
+              logger.info('Dashboard', 'Результат проверки статуса (Platega)', {
                 orderId: paymentOrderId,
-                success: verifyResult?.success,
-                hasPayment: !!verifyResult?.payment,
-                hasResult: !!verifyResult?.result
+                success: statusResult?.success,
+                status: statusResult?.status,
+                hasPayment: !!statusResult?.payment
               })
 
-              // Обрабатываем результат от n8n (может быть объект или массив)
-              let payment = verifyResult?.payment
-              
-              // Если payment не найден, обрабатываем result (массив или объект от n8n)
-              if (!payment && verifyResult?.result) {
-                // Обработка массива от n8n
-                if (Array.isArray(verifyResult.result) && verifyResult.result.length > 0) {
-                  const n8nPayment = verifyResult.result[0]
-                  const statuspay = n8nPayment?.statuspay || ''
-                  const statuspayLower = String(statuspay).toLowerCase().trim()
-                  const isPaidStatus = statuspayLower === 'оплачено' || 
-                                      statuspayLower === 'оплачен' || 
-                                      statuspayLower === 'paid' || 
-                                      statuspayLower === 'completed' ||
-                                      statuspayLower === 'успешно'
-                  
-                  if (isPaidStatus) {
-                    // Используем refs для стабильности
-                    const subscriptionData = subscriptionSuccessRef.current || {}
-                    const tariffsList = tariffsRef.current || []
-                    const currentUserData = currentUserRef.current
-                    const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
-                    const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
-                    
-                    payment = {
-                      orderId: n8nPayment?.orderid || paymentOrderId,
-                      status: 'completed',
-                      originalStatus: n8nPayment?.statuspay,
-                      amount: parseFloat(n8nPayment?.sum) || 0,
-                      userId: n8nPayment?.uuid || currentUserData?.id || null,
-                      tariffId: tariff?.id || null,
-                      tariffName: tariff?.name || subscriptionData.tariffName || null,
-                      devices: subscriptionData.devices || currentUserData?.devices || 1,
-                      periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
-                      discount: subscriptionData.discount || 0
-                    }
-                  }
-                }
-                // Обработка объекта от n8n (когда n8n возвращает объект, а не массив)
-                else if (typeof verifyResult.result === 'object' && !Array.isArray(verifyResult.result)) {
-                  const n8nPayment = verifyResult.result
-                  const statuspay = n8nPayment?.statuspay || ''
-                  const statuspayLower = String(statuspay).toLowerCase().trim()
-                  const isPaidStatus = statuspayLower === 'оплачено' || 
-                                      statuspayLower === 'оплачен' || 
-                                      statuspayLower === 'paid' || 
-                                      statuspayLower === 'completed' ||
-                                      statuspayLower === 'успешно'
-                  
-                  if (isPaidStatus) {
-                    // Используем refs для стабильности
-                    const subscriptionData = subscriptionSuccessRef.current || {}
-                    const tariffsList = tariffsRef.current || []
-                    const currentUserData = currentUserRef.current
-                    const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
-                    const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
-                    
-                    payment = {
-                      orderId: n8nPayment?.orderid || paymentOrderId,
-                      status: 'completed',
-                      originalStatus: n8nPayment?.statuspay,
-                      amount: parseFloat(n8nPayment?.sum) || 0,
-                      userId: n8nPayment?.uuid || currentUserData?.id || null,
-                      tariffId: tariff?.id || null,
-                      tariffName: tariff?.name || subscriptionData.tariffName || null,
-                      devices: subscriptionData.devices || currentUserData?.devices || 1,
-                      periodMonths: subscriptionData.periodMonths || currentUserData?.periodMonths || 1,
-                      discount: subscriptionData.discount || 0
-                    }
-                    
-                    logger.info('Dashboard', '✅ Статус ОПЛАЧЕНО найден в объекте n8n (после закрытия окна), данные платежа подготовлены', {
-                      orderId: payment.orderId,
-                      tariffId: payment.tariffId,
-                      status: payment.status
-                    })
-                  }
-                }
-              }
-              
+              const payment = statusResult?.success && statusResult?.status === 'completed' ? statusResult.payment : null
+
               if (payment && (payment.status === 'completed' || payment.status === 'paid')) {
-                logger.info('Dashboard', 'Платеж подтвержден n8n (после закрытия окна), создаем подписку', {
+                logger.info('Dashboard', 'Платеж подтверждён (Platega, после закрытия окна), создаем подписку', {
                   orderId: paymentOrderId,
                   status: payment.status
                 })
@@ -1086,11 +768,48 @@ const Dashboard = ({
       
       console.log('🔍 Dashboard: result после await onHandleCreateSubscription:', result)
       
-      // Если результат содержит ссылку на оплату, открываем её в miniapp
-      // Проверяем наличие paymentUrl, даже если requiresPayment не указан явно
+      // Если результат содержит требование оплаты (orderId + requiresPayment), показываем модалку ожидания
+      // paymentUrl может быть пустым (оплата по реквизитам / Platega не настроен)
       if (paymentProcessingMessageTimerRef.current) {
         clearTimeout(paymentProcessingMessageTimerRef.current)
         paymentProcessingMessageTimerRef.current = null
+      }
+      if (result && result.requiresPayment && result.orderId) {
+        const subscriptionSuccessData = {
+          vpnLink: null,
+          paymentUrl: result.paymentUrl || '',
+          orderId: result.orderId,
+          amount: result.amount,
+          requiresPayment: true,
+          message: result.message || t('dashboard.paymentRequiredForActivation'),
+          tariffId: result.tariffId || subscriptionData.tariff?.id || null,
+          tariffName: result.tariffName || subscriptionData.tariff?.name || null,
+          devices: result.devices || subscriptionData.devices || 1,
+          periodMonths: result.periodMonths || subscriptionData.periodMonths || 1,
+          discount: result.discount || subscriptionData.discount || 0
+        }
+        setSubscriptionSuccess(subscriptionSuccessData)
+        setShowSuccessModal(true)
+        setShowPaymentProcessing(false)
+        if (result.orderId) setPaymentOrderId(result.orderId)
+        // Открываем окно оплаты только если есть ссылка
+        if (result.paymentUrl) {
+          logger.info('Dashboard', 'Открываем ссылку на оплату в мини-окне', {
+            paymentUrl: result.paymentUrl,
+            orderId: result.orderId
+          })
+          const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+          const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+          if (paymentWindow) {
+            paymentWindow.focus()
+            setPaymentWindowRef(paymentWindow)
+            setPaymentProcessingMessage(t('paymentProcessing.redirecting'))
+            setPaymentProcessingStatus('processing')
+          } else {
+            logger.warn('Dashboard', 'Не удалось открыть окно оплаты (возможно, заблокировано браузером)')
+          }
+        }
+        return
       }
       if (result && result.paymentUrl) {
         logger.info('Dashboard', 'Открываем ссылку на оплату в мини-окне', {
@@ -1207,7 +926,7 @@ const Dashboard = ({
           devices: result.devices || subscriptionData.devices || 1,
           periodMonths: result.periodMonths || subscriptionData.periodMonths || 1,
           expiresAt: result.expiresAt || null,
-          paymentStatus: result.paymentStatus || (subscriptionData.testPeriod ? 'test_period' : 'paid'),
+          paymentStatus: result.paymentStatus ?? (subscriptionData.testPeriod ? 'test_period' : 'pending'),
           testPeriod: result.testPeriod !== undefined ? result.testPeriod : (subscriptionData.testPeriod || false),
           discount: result.discount || subscriptionData.discount || 0
         })
@@ -1281,341 +1000,45 @@ const Dashboard = ({
 
       const { dashboardService } = await import('../services/dashboardService.js')
       
-      // Отправляем webhook для проверки платежа
-      const verifyResult = await dashboardService.verifyPayment(orderId)
+      // Проверка статуса через Platega API (GET /api/payment/status)
+      const statusResult = await dashboardService.fetchPaymentStatus(orderId)
 
-      if (verifyResult && verifyResult.success) {
-        // Получаем данные платежа из результата от n8n
-        // n8n ищет запись в базе данных по orderId и возвращает данные, если найдена
-        // n8n может вернуть массив или объект, данные уже обработаны на сервере
-        let payment = verifyResult.payment
+      logger.info('Dashboard', 'Результат проверки статуса (Platega, ручная проверка)', {
+        orderId,
+        success: statusResult?.success,
+        status: statusResult?.status,
+        hasPayment: !!statusResult?.payment
+      })
 
-        logger.info('Dashboard', 'Получен результат проверки от n8n (ручная проверка)', {
-          orderId,
-          hasPayment: !!payment,
-          paymentStatus: payment?.status,
-          paymentOriginalStatus: payment?.originalStatus,
-          hasResult: !!verifyResult.result,
-          resultIsArray: Array.isArray(verifyResult.result),
-          resultLength: Array.isArray(verifyResult.result) ? verifyResult.result.length : 'N/A',
-          verifyResultKeys: Object.keys(verifyResult || {}),
-          fullVerifyResult: JSON.stringify(verifyResult).substring(0, 2000)
-        })
+      let payment = null
+      if (statusResult.success && statusResult.status === 'completed' && statusResult.payment) {
+        payment = statusResult.payment
+      } else if (statusResult.success && ['cancelled', 'failed', 'chargebacked'].includes(statusResult.status)) {
+        throw new Error('Платёж не прошёл')
+      } else {
+        throw new Error('Платёж ещё не найден или не оплачен. Попробуйте позже.')
+      }
 
-        // Если payment не найден в verifyResult.payment, проверяем result (массив от n8n)
-        if (!payment && verifyResult?.result) {
-          logger.info('Dashboard', 'payment не найден в verifyResult.payment, проверяем result', {
-            resultIsArray: Array.isArray(verifyResult.result),
-            resultLength: Array.isArray(verifyResult.result) ? verifyResult.result.length : 'N/A',
-            firstItemKeys: Array.isArray(verifyResult.result) && verifyResult.result[0] ? Object.keys(verifyResult.result[0]) : 'N/A'
-          })
-          
-          // Если result - массив, берем первый элемент и обрабатываем
-          if (Array.isArray(verifyResult.result) && verifyResult.result.length > 0) {
-            const n8nPayment = verifyResult.result[0]
-            logger.info('Dashboard', 'Обрабатываем данные из массива n8n', {
-              orderid: n8nPayment?.orderid,
-              statuspay: n8nPayment?.statuspay,
-              statuspayType: typeof n8nPayment?.statuspay,
-              allKeys: Object.keys(n8nPayment || {}),
-              fullN8nPayment: JSON.stringify(n8nPayment).substring(0, 1000)
-            })
-            
-            // Маппим данные из формата n8n в формат приложения
-            const statuspay = n8nPayment?.statuspay || ''
-            const statuspayLower = String(statuspay).toLowerCase().trim()
-            logger.info('Dashboard', 'Проверка статуса платежа', {
-              statuspay: statuspay,
-              statuspayLower: statuspayLower,
-              isPaid: statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно'
-            })
-            
-            const isPaidStatus = statuspayLower === 'оплачено' || 
-                                statuspayLower === 'оплачен' || 
-                                statuspayLower === 'paid' || 
-                                statuspayLower === 'completed' ||
-                                statuspayLower === 'успешно'
-            
-            if (isPaidStatus) {
-              logger.info('Dashboard', '✅ Статус ОПЛАЧЕНО найден в данных n8n, создаем подписку', {
-                orderId: n8nPayment?.orderid || orderId,
-                statuspay: n8nPayment?.statuspay,
-                amount: n8nPayment?.sum
-              })
-              
-              // Создаем объект payment для дальнейшей обработки
-              // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
-              const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
-              
-              payment = {
-                orderId: n8nPayment?.orderid || orderId,
-                status: 'completed',
-                originalStatus: n8nPayment?.statuspay,
-                amount: parseFloat(n8nPayment?.sum) || 0,
-                userId: n8nPayment?.uuid || currentUser?.id || null,
-                tariffId: n8nTariffId, // Извлекаем из n8n, затем попробуем восстановить из других источников
-                devices: 1,
-                periodMonths: 1,
-                discount: 0
-              }
-              
-              // Получаем данные подписки из subscriptionSuccess или currentUser
-              const subscriptionData = subscriptionSuccess || {}
-              logger.info('Dashboard', 'Получение данных подписки', {
-                hasSubscriptionSuccess: !!subscriptionSuccess,
-                n8nTariffId: n8nTariffId,
-                subscriptionTariffId: subscriptionData.tariffId,
-                subscriptionTariffName: subscriptionData.tariffName,
-                currentUserTariffId: currentUser?.tariffId,
-                availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-              })
-              
-              // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
-              const tariffId = n8nTariffId
-                || subscriptionData.tariffId 
-                || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
-                || currentUser?.tariffId
-              const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
-              
-              if (!tariff) {
-                logger.error('Dashboard', 'Тариф не найден для создания подписки', {
-                  tariffId,
-                  tariffName: subscriptionData.tariffName,
-                  availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-                })
-                throw new Error('Тариф не найден')
-              }
-              
-              payment.tariffId = tariff.id
-              payment.tariffName = tariff.name
-              payment.devices = subscriptionData.devices || currentUser?.devices || 1
-              payment.periodMonths = subscriptionData.periodMonths || currentUser?.periodMonths || 1
-              
-              logger.info('Dashboard', 'Данные платежа подготовлены, создаем подписку', {
-                tariffId: payment.tariffId,
-                tariffName: payment.tariffName,
-                devices: payment.devices,
-                periodMonths: payment.periodMonths
-              })
-              if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUser) {
-                if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
-                subscriptionCreatedForOrderIdsRef.current.add(orderId)
-                try {
-                  await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionData.newDevicesCount)
-                  await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
-                  await onRefreshUserAfterPayment?.().catch(() => {})
-                  setShowSuccessModal(false)
-                  setSubscriptionSuccess(null)
-                  setTimeout(() => { window.location.reload() }, 1000)
-                } catch (addDevErr) {
-                  subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-                  throw addDevErr
-                }
-                return
-              }
-              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
-                logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n массив)', { orderId })
-                return
-              }
-              subscriptionCreatedForOrderIdsRef.current.add(orderId)
-              try {
-                const isFirstPayment = !currentUser?.uuid || !currentUser?.tariffId
-                await onHandleCreateSubscription(
-                  tariff,
-                  payment.devices,
-                  null,
-                  payment.periodMonths,
-                  false,
-                  'paid',
-                  payment.discount
-                )
-                logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n')
-                await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
-                const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
-                const cleanUrl = window.location.origin + cleanPath
-                if (typeof window.history?.replaceState === 'function') {
-                  window.history.replaceState({}, '', cleanUrl)
-                }
-                await onRefreshUserAfterPayment?.().catch(() => {})
-                if (isFirstPayment && typeof onSetShowKeyModal === 'function') {
-                  setShowSuccessModal(false)
-                  setSubscriptionSuccess(null)
-                  onSetShowKeyModal(true)
-                } else {
-                  if (reloadDelayMs > 2000) {
-                    logger.info('Dashboard', 'Перезагрузка через 8 сек. В DevTools → Console → включите «Preserve log», чтобы логи не пропадали.')
-                  }
-                  setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
-                }
-              } catch (err) {
-                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-                throw err
-              }
-              return
-            } else {
-              logger.warn('Dashboard', 'Статус платежа не ОПЛАЧЕНО', {
-                statuspay: statuspay,
-                statuspayLower: statuspayLower,
-                orderId: n8nPayment?.orderid || orderId,
-                fullPaymentData: JSON.stringify(n8nPayment).substring(0, 500)
-              })
-              throw new Error(`Платеж найден, но статус: ${statuspay || 'неизвестен'}`)
-            }
-          } else if (verifyResult.result && typeof verifyResult.result === 'object' && !Array.isArray(verifyResult.result)) {
-            // Если result - объект (не массив) с данными платежа от n8n
-            const n8nPayment = verifyResult.result
-            logger.info('Dashboard', 'result - объект (не массив) с данными n8n, обрабатываем его', {
-              orderid: n8nPayment?.orderid,
-              statuspay: n8nPayment?.statuspay,
-              statuspayType: typeof n8nPayment?.statuspay,
-              allKeys: Object.keys(n8nPayment || {})
-            })
-            
-            // Маппим данные из формата n8n в формат приложения
-            const statuspay = n8nPayment?.statuspay || ''
-            const statuspayLower = String(statuspay).toLowerCase().trim()
-            logger.info('Dashboard', 'Проверка статуса платежа из объекта n8n', {
-              statuspay: statuspay,
-              statuspayLower: statuspayLower,
-              isPaid: statuspayLower === 'оплачено' || statuspayLower === 'оплачен' || statuspayLower === 'paid' || statuspayLower === 'completed' || statuspayLower === 'успешно'
-            })
-            
-            const isPaidStatus = statuspayLower === 'оплачено' || 
-                                statuspayLower === 'оплачен' || 
-                                statuspayLower === 'paid' || 
-                                statuspayLower === 'completed' ||
-                                statuspayLower === 'успешно'
-            
-            if (isPaidStatus) {
-              logger.info('Dashboard', '✅ Статус ОПЛАЧЕНО найден в объекте n8n, создаем подписку', {
-                orderId: n8nPayment?.orderid || orderId,
-                statuspay: n8nPayment?.statuspay,
-                amount: n8nPayment?.sum
-              })
-              
-              // Создаем объект payment для дальнейшей обработки
-              // Извлекаем tariffid из данных n8n (может быть tariffid или tariffId)
-              const n8nTariffId = n8nPayment?.tariffid || n8nPayment?.tariffId || null
-              
-              payment = {
-                orderId: n8nPayment?.orderid || orderId,
-                status: 'completed',
-                originalStatus: n8nPayment?.statuspay,
-                amount: parseFloat(n8nPayment?.sum) || 0,
-                userId: n8nPayment?.uuid || currentUser?.id || null,
-                tariffId: n8nTariffId, // Извлекаем из n8n, затем попробуем восстановить из других источников
-                devices: 1,
-                periodMonths: 1,
-                discount: 0
-              }
-              
-              // Получаем данные подписки из subscriptionSuccess или currentUser
-              const subscriptionData = subscriptionSuccess || {}
-              logger.info('Dashboard', 'Получение данных подписки из объекта n8n', {
-                hasSubscriptionSuccess: !!subscriptionSuccess,
-                n8nTariffId: n8nTariffId,
-                subscriptionTariffId: subscriptionData.tariffId,
-                subscriptionTariffName: subscriptionData.tariffName,
-                currentUserTariffId: currentUser?.tariffId,
-                availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-              })
-              
-              // Сначала используем tariffId из n8n, затем из subscriptionSuccess, затем из currentUser
-              const tariffId = n8nTariffId
-                || subscriptionData.tariffId 
-                || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
-                || currentUser?.tariffId
-              const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
-              
-              if (!tariff) {
-                logger.error('Dashboard', 'Тариф не найден для создания подписки', {
-                  tariffId,
-                  tariffName: subscriptionData.tariffName,
-                  availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-                })
-                throw new Error('Тариф не найден')
-              }
-              
-              payment.tariffId = tariff.id
-              payment.tariffName = tariff.name
-              payment.devices = subscriptionData.devices || currentUser?.devices || 1
-              payment.periodMonths = subscriptionData.periodMonths || currentUser?.periodMonths || 1
-              
-              logger.info('Dashboard', 'Данные платежа подготовлены из объекта n8n, создаем подписку', {
-                tariffId: payment.tariffId,
-                tariffName: payment.tariffName,
-                devices: payment.devices,
-                periodMonths: payment.periodMonths
-              })
-              if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUser) {
-                if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
-                subscriptionCreatedForOrderIdsRef.current.add(orderId)
-                try {
-                  await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionData.newDevicesCount)
-                  await dashboardService.updatePaymentStatus(n8nPayment?.orderid || orderId, 'completed').catch(() => {})
-                  await onRefreshUserAfterPayment?.().catch(() => {})
-                  setShowSuccessModal(false)
-                  setSubscriptionSuccess(null)
-                  setTimeout(() => { window.location.reload() }, 1000)
-                } catch (addDevErr) {
-                  subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-                  throw addDevErr
-                }
-                return
-              }
-              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
-                logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (n8n объект)', { orderId })
-                return
-              }
-              subscriptionCreatedForOrderIdsRef.current.add(orderId)
-              try {
-                const isFirstPaymentObj = !currentUser?.uuid || !currentUser?.tariffId
-                await onHandleCreateSubscription(
-                  tariff,
-                  payment.devices,
-                  null,
-                  payment.periodMonths,
-                  false,
-                  'paid',
-                  payment.discount
-                )
-                logger.info('Dashboard', '✅ Подписка создана после проверки оплаты через n8n (объект)')
-                await dashboardService.updatePaymentStatus(n8nPayment?.orderid || orderId, 'completed').catch(() => {})
-                const cleanPathObj = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
-                const cleanUrlObj = window.location.origin + cleanPathObj
-                if (typeof window.history?.replaceState === 'function') {
-                  window.history.replaceState({}, '', cleanUrlObj)
-                }
-                await onRefreshUserAfterPayment?.().catch(() => {})
-                if (isFirstPaymentObj && typeof onSetShowKeyModal === 'function') {
-                  setShowSuccessModal(false)
-                  setSubscriptionSuccess(null)
-                  onSetShowKeyModal(true)
-                } else {
-                  setTimeout(() => { window.location.replace(cleanUrlObj) }, reloadDelayMs)
-                }
-              } catch (err) {
-                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-                throw err
-              }
-              return
-            } else {
-              logger.warn('Dashboard', 'Статус платежа в объекте n8n не ОПЛАЧЕНО', {
-                statuspay: statuspay,
-                statuspayLower: statuspayLower,
-                orderId: n8nPayment?.orderid || orderId
-              })
-              throw new Error(`Платеж найден, но статус: ${statuspay || 'неизвестен'}`)
-            }
-          }
+      // Дополняем payment из subscriptionSuccess при необходимости (tariffId, devices, periodMonths)
+      const subscriptionData = subscriptionSuccess || {}
+      if (payment && !payment.tariffId && (subscriptionData.tariffId || subscriptionData.tariffName)) {
+        const tariffId = subscriptionData.tariffId
+          || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
+          || currentUser?.tariffId
+        const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+        if (tariff) {
+          payment.tariffId = tariff.id
+          payment.tariffName = tariff.name
+          payment.devices = subscriptionData.devices ?? currentUser?.devices ?? payment.devices ?? 1
+          payment.periodMonths = subscriptionData.periodMonths ?? currentUser?.periodMonths ?? payment.periodMonths ?? 1
         }
+      }
 
-        // Проверяем статус платежа из n8n
-        // Статус уже нормализован на сервере: 'completed', 'paid', 'failed', 'cancelled', 'pending'
-        const paymentStatus = payment?.status
-        const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
+      // Проверяем статус платежа (из Platega API). Статус нормализован: 'completed', 'paid', 'failed', 'cancelled', 'pending'
+      const paymentStatus = payment?.status
+      const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
 
-        if (payment && isPaid) {
+      if (payment && isPaid) {
           // Восстанавливаем tariffId из subscriptionSuccess, если он отсутствует в payment
           if (!payment.tariffId) {
             logger.info('Dashboard', 'Восстановление tariffId из subscriptionSuccess', {
@@ -1650,7 +1073,7 @@ const Dashboard = ({
             }
           }
 
-          logger.info('Dashboard', 'Платеж подтвержден n8n (статус: оплачено, ручная проверка), создаем подписку', {
+          logger.info('Dashboard', 'Платеж подтвержден (Platega, ручная проверка), создаем подписку', {
             orderId,
             amount: payment.amount,
             tariffId: payment.tariffId,
@@ -1714,8 +1137,7 @@ const Dashboard = ({
               return
             }
             subscriptionCreatedForOrderIdsRef.current.add(orderId)
-            try {
-              const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
+            const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
               await onHandleCreateSubscription(
                 tariff,
                 payment.devices || 1,
@@ -1743,15 +1165,12 @@ const Dashboard = ({
                 }
                 setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
               }
-            } catch (err) {
-              subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-              throw err
-            }
-          } catch (error) {
+          } catch (err) {
+            subscriptionCreatedForOrderIdsRef.current.delete(orderId)
             logger.error('Dashboard', 'Ошибка создания подписки после ручной проверки оплаты', {
               orderId
-            }, error)
-            throw error
+            }, err)
+            throw err
           }
         } else if (payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected')) {
           logger.warn('Dashboard', 'Платеж не прошел (ручная проверка)', {
@@ -1770,25 +1189,14 @@ const Dashboard = ({
             })
             throw new Error(`Платеж найден, но статус: ${payment.status || payment.originalStatus || 'неизвестен'}`)
           } else {
-            logger.warn('Dashboard', 'Платеж не найден или статус не оплачено в ответе от n8n (ручная проверка)', {
+            logger.warn('Dashboard', 'Платеж не найден или статус не оплачено в ответе API (ручная проверка)', {
               orderId,
-              hasVerifyResult: !!verifyResult,
               hasPayment: !!payment,
-              paymentStatus: payment?.status,
-              hasResult: !!verifyResult?.result,
-              resultIsArray: Array.isArray(verifyResult?.result),
-              resultLength: Array.isArray(verifyResult?.result) ? verifyResult.result.length : 'N/A',
-              resultType: typeof verifyResult?.result,
-              resultKeys: verifyResult?.result && typeof verifyResult.result === 'object' ? Object.keys(verifyResult.result) : 'N/A',
-              firstItem: Array.isArray(verifyResult?.result) && verifyResult.result.length > 0 ? verifyResult.result[0] : null,
-              fullVerifyResult: JSON.stringify(verifyResult).substring(0, 2000)
+              paymentStatus: payment?.status
             })
             throw new Error('Платеж еще не завершен. Попробуйте позже.')
           }
         }
-      } else {
-        throw new Error('Не удалось проверить статус платежа')
-      }
     } catch (error) {
       logger.error('Dashboard', 'Ошибка при ручной проверке статуса оплаты', { orderId }, error)
       throw error
@@ -1796,6 +1204,22 @@ const Dashboard = ({
   }
 
   handleManualPaymentCheckRef.current = handleManualPaymentCheck
+
+  // Повторная проверка статуса оплаты из истории платежей
+  const handleRecheckPaymentStatusFromHistory = async (orderId) => {
+    if (!orderId || !loadPayments) return
+    setRecheckingOrderId(orderId)
+    try {
+      await handleManualPaymentCheck(orderId)
+      loadPayments()
+    } catch (err) {
+      logger.error('Dashboard', 'Ошибка повторной проверки статуса из истории', { orderId }, err)
+      const msg = err?.message || t('paymentProcessing.checkStatusError', 'Ошибка при проверке статуса.')
+      alert(msg)
+    } finally {
+      setRecheckingOrderId(null)
+    }
+  }
 
   // Автопроверка платежа: через 3 с после показа модалки «требуется оплата» — 20 запросов раз в 4 с до статуса «Оплачено»
   // В тестовом режиме и при paymentUrl без requiresPayment тоже запускаем (orderId обязателен)
@@ -1831,14 +1255,9 @@ const Dashboard = ({
         setPaymentPollAttempt(attempt)
         try {
           const { dashboardService } = await import('../services/dashboardService.js')
-          const res = await dashboardService.verifyPayment(orderId)
+          const res = await dashboardService.fetchPaymentStatus(orderId)
           if (!res?.success) return
-          const payStatus = res?.payment?.status
-          const payOk = payStatus === 'completed' || payStatus === 'paid'
-          const first = Array.isArray(res?.result) && res.result.length > 0 ? res.result[0] : res?.result && typeof res.result === 'object' ? res.result : null
-          const statuspay = (first?.statuspay ?? '').toString().toLowerCase().trim()
-          const n8nOk = statuspay === 'оплачено' || statuspay === 'оплачен' || statuspay === 'paid' || statuspay === 'completed' || statuspay === 'успешно'
-          const isPaid = payOk || n8nOk
+          const isPaid = res.status === 'completed'
           if (isPaid) {
             if (paymentAutoPollIntervalRef.current) {
               clearInterval(paymentAutoPollIntervalRef.current)
@@ -2731,6 +2150,24 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                             </span>
                           </div>
                         </div>
+                        {payment.orderId && (
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRecheckPaymentStatusFromHistory(payment.orderId)}
+                              disabled={recheckingOrderId === payment.orderId}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
+                              title={t('dashboard.recheckPaymentStatus', 'Проверить статус оплаты')}
+                            >
+                              {recheckingOrderId === payment.orderId ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                              ) : (
+                                <RefreshCw className="w-3.5 h-3.5" aria-hidden />
+                              )}
+                              {t('dashboard.recheckPaymentStatus', 'Проверить статус')}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2746,6 +2183,7 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                           <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.tariffTableHeader')}</th>
                           <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.amount')}</th>
                           <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.statusTableHeader')}</th>
+                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.actionsTableHeader', 'Действия')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2762,6 +2200,26 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                               }`}>
                                 {payment.status === 'completed' ? 'Успех' : payment.status}
                               </span>
+                            </td>
+                            <td className="py-3 px-2 sm:px-4">
+                              {payment.orderId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRecheckPaymentStatusFromHistory(payment.orderId)}
+                                  disabled={recheckingOrderId === payment.orderId}
+                                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
+                                  title={t('dashboard.recheckPaymentStatus', 'Проверить статус оплаты')}
+                                >
+                                  {recheckingOrderId === payment.orderId ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                                  ) : (
+                                    <RefreshCw className="w-3.5 h-3.5" aria-hidden />
+                                  )}
+                                  <span className="hidden sm:inline">{t('dashboard.recheckPaymentStatus', 'Проверить статус')}</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-500 text-xs">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

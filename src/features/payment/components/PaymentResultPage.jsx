@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, XCircle, Loader2, CreditCard, Package, Calendar, Smartphone, ArrowRight } from 'lucide-react'
 
-const PAYMENT_METHOD_LABEL = 'ЮMoney'
+const PAYMENT_METHOD_LABEL = 'Platega'
 
 /**
  * Страница результата оплаты (успех или неудача).
