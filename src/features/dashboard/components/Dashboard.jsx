@@ -268,13 +268,21 @@ const Dashboard = ({
               clearTimeout(paymentPollingIntervalRef.current)
               paymentPollingIntervalRef.current = null
             }
+            // Тариф только из платежа или subscriptionSuccess (выбранный при оплате). Не подставлять currentUser.tariffId и не tariffs[0].
             const tariffsList = tariffsRef.current || []
             const subscriptionData = subscriptionSuccessRef.current || {}
             const currentUserData = currentUserRef.current
             let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
-            if (!tariff) {
-              const tariffId = subscriptionData.tariffId || currentUserData?.tariffId
-              tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
+            if (!tariff && (payment.tariffName || subscriptionData.tariffName)) {
+              const name = (payment.tariffName || subscriptionData.tariffName || '').trim()
+              tariff = name ? tariffsList.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
+              if (tariff) {
+                payment.tariffId = tariff.id
+                payment.tariffName = tariff.name
+              }
+            }
+            if (!tariff && subscriptionData.tariffId) {
+              tariff = tariffsList.find(t => t.id === subscriptionData.tariffId)
               if (tariff) {
                 payment.tariffId = tariff.id
                 payment.tariffName = tariff.name
@@ -478,14 +486,24 @@ const Dashboard = ({
                 })
                 
                 // Находим тариф (используем refs для стабильности)
+                // Тариф только из платежа или subscriptionSuccess (выбранный при оплате)
                 const tariffsList = tariffsRef.current || []
                 const subscriptionData = subscriptionSuccessRef.current || {}
                 const currentUserData = currentUserRef.current
-                
                 let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
-                if (!tariff) {
-                  const tariffId = subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : currentUserData?.tariffId
-                  tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
+                if (!tariff && (payment.tariffName || subscriptionData.tariffName)) {
+                  const name = (payment.tariffName || subscriptionData.tariffName || '').trim()
+                  tariff = name ? tariffsList.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
+                }
+                if (!tariff && subscriptionData.tariffId) {
+                  tariff = tariffsList.find(t => t.id === subscriptionData.tariffId)
+                }
+                if (!tariff && (payment.tariffId || payment.tariffName)) {
+                  logger.warn('Dashboard', 'Тариф из платежа не найден в списке тарифов (окно закрыто). Нажмите «Проверить статус» в истории платежей.', {
+                    orderId: paymentOrderId,
+                    paymentTariffId: payment.tariffId,
+                    paymentTariffName: payment.tariffName
+                  })
                 }
                 
                 if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
@@ -1039,37 +1057,18 @@ const Dashboard = ({
       const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
 
       if (payment && isPaid) {
-          // Восстанавливаем tariffId из subscriptionSuccess, если он отсутствует в payment
-          if (!payment.tariffId) {
-            logger.info('Dashboard', 'Восстановление tariffId из subscriptionSuccess', {
-              orderId,
-              hasSubscriptionSuccess: !!subscriptionSuccess,
-              subscriptionTariffId: subscriptionSuccess?.tariffId,
-              subscriptionTariffName: subscriptionSuccess?.tariffName,
-              currentUserTariffId: currentUser?.tariffId
-            })
-            
-            const subscriptionData = subscriptionSuccess || {}
-            // Сначала пытаемся использовать tariffId напрямую, затем ищем по tariffName
-            let tariffId = subscriptionData.tariffId 
-              || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
-              || currentUser?.tariffId
-            
+          // Восстанавливаем tariffId только из subscriptionSuccess (тариф, выбранный при открытии оплаты), не из currentUser
+          if (!payment.tariffId && subscriptionSuccess) {
+            const subscriptionData = subscriptionSuccess
+            const tariffId = subscriptionData.tariffId ||
+              (subscriptionData.tariffName ? tariffs.find(t => (t.name || '').toLowerCase() === (subscriptionData.tariffName || '').toLowerCase())?.id : null)
             if (tariffId) {
               payment.tariffId = tariffId
               payment.tariffName = subscriptionData.tariffName || tariffs.find(t => t.id === tariffId)?.name
-              payment.devices = subscriptionData.devices || payment.devices || currentUser?.devices || 1
-              payment.periodMonths = subscriptionData.periodMonths || payment.periodMonths || currentUser?.periodMonths || 1
-              payment.discount = subscriptionData.discount || payment.discount || 0
-              
-              logger.info('Dashboard', 'tariffId восстановлен из subscriptionSuccess', {
-                orderId,
-                tariffId: payment.tariffId,
-                tariffName: payment.tariffName,
-                devices: payment.devices,
-                periodMonths: payment.periodMonths,
-                discount: payment.discount
-              })
+              payment.devices = subscriptionData.devices ?? payment.devices ?? 1
+              payment.periodMonths = subscriptionData.periodMonths ?? payment.periodMonths ?? 1
+              payment.discount = subscriptionData.discount ?? payment.discount ?? 0
+              logger.info('Dashboard', 'tariffId восстановлен из subscriptionSuccess', { orderId, tariffId: payment.tariffId, tariffName: payment.tariffName })
             }
           }
 
@@ -1077,35 +1076,29 @@ const Dashboard = ({
             orderId,
             amount: payment.amount,
             tariffId: payment.tariffId,
+            tariffName: payment.tariffName,
             status: payment.status
           })
 
           try {
-            // Находим тариф по tariffId из платежа
+            // Тариф только из платежа или subscriptionSuccess (оплаченный тариф). Не подставлять другой тариф.
             let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
-            
-            // Если тариф не найден по tariffId, пытаемся найти по tariffName из subscriptionSuccess
-            if (!tariff && subscriptionSuccess?.tariffName) {
-              tariff = tariffs.find(t => t.name === subscriptionSuccess.tariffName)
+            if (!tariff && (payment.tariffName || subscriptionSuccess?.tariffName)) {
+              const name = (payment.tariffName || subscriptionSuccess?.tariffName || '').trim()
+              tariff = name ? tariffs.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
               if (tariff) {
                 payment.tariffId = tariff.id
-                logger.info('Dashboard', 'Тариф найден по tariffName из subscriptionSuccess', {
-                  tariffId: tariff.id,
-                  tariffName: tariff.name
-                })
+                payment.tariffName = tariff.name
+                logger.info('Dashboard', 'Тариф найден по имени из платежа/subscriptionSuccess', { tariffId: tariff.id, tariffName: tariff.name })
               }
             }
-            
-            // Если тариф все еще не найден, используем первый доступный тариф
-            if (!tariff && tariffs.length > 0) {
-              tariff = tariffs[0]
-              payment.tariffId = tariff.id
-              logger.warn('Dashboard', 'Использован первый доступный тариф (fallback)', {
-                tariffId: tariff.id,
-                tariffName: tariff.name
-              })
+            if (!tariff && subscriptionSuccess?.tariffId) {
+              tariff = tariffs.find(t => t.id === subscriptionSuccess.tariffId)
+              if (tariff) {
+                payment.tariffId = tariff.id
+                payment.tariffName = tariff.name
+              }
             }
-            
             if (!tariff) {
               logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
                 tariffId: payment.tariffId,
