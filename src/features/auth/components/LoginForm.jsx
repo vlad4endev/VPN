@@ -23,12 +23,22 @@ const AUTH_FALLBACKS = {
   'common.or': 'или',
 }
 
-/** Перевод с подстраховкой: если t() вернул ключ — подставляем русский fallback */
-function labelT (t, key) {
+/** Нормализованный ключ для сравнения (lowercase, точки как в ключах auth.xxx / common.xxx) */
+function normalizeKey (s) {
+  if (typeof s !== 'string') return ''
+  return s.toLowerCase().trim()
+}
+
+/** Перевод с подстраховкой: в Telegram и на мобильных всегда fallback; иначе — если t() вернул ключ, подставляем русский */
+function labelT (t, key, forceFallback) {
+  if (forceFallback) return AUTH_FALLBACKS[key] ?? key
   const value = t(key)
-  if (value == null || value === '' || value === key || (typeof value === 'string' && value.includes('.') && value.length < 60)) {
-    return AUTH_FALLBACKS[key] ?? value ?? key
-  }
+  if (value == null || value === '') return AUTH_FALLBACKS[key] ?? key
+  if (value === key) return AUTH_FALLBACKS[key] ?? key
+  const v = normalizeKey(value)
+  const k = normalizeKey(key)
+  if (v === k) return AUTH_FALLBACKS[key] ?? key
+  if (typeof value === 'string' && (value.includes('.') || /^[A-Z_\.]+$/.test(value)) && value.length < 80) return AUTH_FALLBACKS[key] ?? value
   return value
 }
 
@@ -56,6 +66,8 @@ const LoginForm = ({
   isTelegramApp = false,
 }) => {
   const { t } = useTranslation()
+  const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768
+  const forceFallbackLabels = isTelegramApp || isMobileView
   const [consentChecked, setConsentChecked] = useState(false)
   const [consentError, setConsentError] = useState('')
   const [consentExpanded, setConsentExpanded] = useState(false)
@@ -81,7 +93,7 @@ const LoginForm = ({
       <div className="flex-1 flex items-center justify-center p-3 sm:p-4 lg:p-6">
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 lg:p-10 shadow-2xl backdrop-blur-xl mx-auto">
       <div className="text-center mb-6 sm:mb-10">
-        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? labelT(t, 'auth.login') : labelT(t, 'auth.register')}</h2>
+        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? labelT(t, 'auth.login', forceFallbackLabels) : labelT(t, 'auth.register', forceFallbackLabels)}</h2>
         <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYFLOW System</p>
         </div>
 
@@ -116,7 +128,7 @@ const LoginForm = ({
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
-            {labelT(t, 'auth.register')}
+            {labelT(t, 'auth.register', forceFallbackLabels)}
           </button>
         </div>
 
@@ -124,7 +136,7 @@ const LoginForm = ({
         <div className="space-y-5">
           {authMode === 'login' ? (
             <div className="space-y-2">
-              <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginOrEmail')}</label>
+              <label htmlFor="login-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginOrEmail', forceFallbackLabels)}</label>
               <input
                 id="login-email"
                 type="text"
@@ -133,14 +145,14 @@ const LoginForm = ({
                 value={loginData.email}
                 onChange={onEmailChange}
                 className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                placeholder={labelT(t, 'auth.loginOrEmailPlaceholder')}
+                placeholder={labelT(t, 'auth.loginOrEmailPlaceholder', forceFallbackLabels)}
                 required
               />
             </div>
           ) : (
             <>
               <div className="space-y-2">
-                <label htmlFor="register-login" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginLabel')}</label>
+                <label htmlFor="register-login" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.loginLabel', forceFallbackLabels)}</label>
                 <input
                   id="register-login"
                   type="text"
@@ -149,12 +161,12 @@ const LoginForm = ({
                   value={loginData.login || ''}
                   onChange={onLoginChange}
                   className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                  placeholder={labelT(t, 'auth.loginPlaceholder')}
+                  placeholder={labelT(t, 'auth.loginPlaceholder', forceFallbackLabels)}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="register-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.emailOptional')}</label>
+                <label htmlFor="register-email" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.emailOptional', forceFallbackLabels)}</label>
                 <input
                   id="register-email"
                   type="email"
@@ -163,11 +175,11 @@ const LoginForm = ({
                   value={loginData.email}
                   onChange={onEmailChange}
                   className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                  placeholder={labelT(t, 'auth.emailPlaceholder')}
+                  placeholder={labelT(t, 'auth.emailPlaceholder', forceFallbackLabels)}
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.name')}</label>
+                <label htmlFor="register-name" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.name', forceFallbackLabels)}</label>
               <input
                 key="register-name-input"
                 id="register-name"
@@ -177,7 +189,7 @@ const LoginForm = ({
                 value={loginData.name || ''}
                 onChange={onNameChange}
                 className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation"
-                placeholder={labelT(t, 'auth.namePlaceholder')}
+                placeholder={labelT(t, 'auth.namePlaceholder', forceFallbackLabels)}
                 required
               />
               </div>
@@ -185,7 +197,7 @@ const LoginForm = ({
           )}
 
           <div className="space-y-2">
-            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.password')}</label>
+            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.password', forceFallbackLabels)}</label>
             <input
               id={`${authMode}-password`}
               type="password"
@@ -284,7 +296,7 @@ const LoginForm = ({
             type="submit"
             className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-500 py-4 sm:py-5 rounded-2xl sm:rounded-3xl font-black text-white text-lg sm:text-xl transition-all shadow-2xl shadow-blue-600/30 active:scale-[0.98] touch-manipulation"
           >
-            {authMode === 'login' ? labelT(t, 'auth.submitLogin') : labelT(t, 'auth.submitRegister')}
+            {authMode === 'login' ? labelT(t, 'auth.submitLogin', forceFallbackLabels) : labelT(t, 'auth.submitRegister', forceFallbackLabels)}
           </button>
           </div>
         </form>
@@ -295,7 +307,7 @@ const LoginForm = ({
             <div className="w-full border-t border-slate-700"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-4 bg-slate-900/80 text-slate-500 font-bold uppercase text-xs tracking-widest">{labelT(t, 'common.or')}</span>
+            <span className="px-4 bg-slate-900/80 text-slate-500 font-bold uppercase text-xs tracking-widest">{labelT(t, 'common.or', forceFallbackLabels)}</span>
           </div>
         </div>
 
