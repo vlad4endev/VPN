@@ -44,6 +44,7 @@ import { validateEmail } from '../features/auth/utils/validateEmail.js'
 import { validatePassword } from '../features/auth/utils/validatePassword.js'
 import { isAdminEmail, canAccessAdmin, canAccessFinances } from '../shared/constants/admin.js'
 import { APP_ID } from '../shared/constants/app.js'
+import { queryClient } from '../lib/react-query/config.js'
 import ConfigErrorScreen from '../shared/components/ConfigErrorScreen.jsx'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
@@ -108,6 +109,20 @@ const validateName = (name) => {
 }
 
 // Компонент LoginForm вынесен в отдельный файл src/components/LoginForm.jsx
+
+/**
+ * Возвращает view, допустимый для данной роли (многопользовательский режим: один браузер — один пользователь,
+ * но при смене пользователя не показываем админку не-админу из сохранённого vpn_current_view).
+ */
+function getAllowedView(preferredView, role) {
+  if (!role) return 'welcome'
+  const defaultView = canAccessAdmin(role) ? 'admin' : 'dashboard'
+  if (!preferredView || preferredView === 'welcome' || preferredView === 'login' || preferredView === 'register') return defaultView
+  if (preferredView === 'admin' || preferredView === 'analytics') return canAccessAdmin(role) ? preferredView : 'dashboard'
+  if (preferredView === 'finances') return canAccessFinances(role) ? preferredView : 'dashboard'
+  if (preferredView === 'dashboard') return 'dashboard'
+  return defaultView
+}
 
 /** Бот по умолчанию для ссылки «Открыть в Telegram», если VITE_TELEGRAM_BOT_USERNAME не задан */
 const DEFAULT_TELEGRAM_BOT_USERNAME = 'skypathvpn_bot'
@@ -369,7 +384,7 @@ export default function VPNServiceApp() {
       }
       const savedUser = savedUserStr ? (() => { try { return JSON.parse(savedUserStr) } catch { return null } })() : null
       if (savedView && savedUser && savedView !== 'welcome' && savedView !== 'review') {
-        return savedView
+        return getAllowedView(savedView, savedUser.role)
       }
     } catch (err) {
       logger.debug('App', 'Ошибка чтения view из localStorage', null, err)
@@ -440,11 +455,15 @@ export default function VPNServiceApp() {
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
   const telegramAuthTriedRef = useRef(false)
+  const tmaAttemptStartRef = useRef(0)
   /** User из ответа POST /api/telegram/auth — используется в onAuthStateChanged чтобы не блокировать рендер на loadUserData. */
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
-  const isTelegramApp = typeof window !== 'undefined' && !!window.__TELEGRAM_INIT_DATA
+  /** Контекст Telegram Mini App: либо есть WebApp (открыто в боте), либо уже подставлен initData */
+  const isTelegramApp = typeof window !== 'undefined' && !!(window.Telegram?.WebApp || window.__TELEGRAM_INIT_DATA)
+  /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
+  const [tmaWaitingAuth, setTmaWaitingAuth] = useState(false)
 
   // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
   useEffect(() => {
@@ -472,6 +491,17 @@ export default function VPNServiceApp() {
       const had = !!localStorage.getItem('vpn_current_user')
       localStorage.removeItem('vpn_current_user')
       localStorage.removeItem('vpn_current_view')
+      try {
+        queryClient.clear()
+      } catch (e) {
+        logger.warn('App', 'Очистка кеша React Query при выходе', null, e)
+      }
+      import('../lib/store/uiStore.js').then(({ useUIStore }) => {
+        try {
+          useUIStore.getState().setAdminTab('dashboard')
+          useUIStore.getState().setDashboardTab('subscription')
+        } catch (_) {}
+      }).catch(() => {})
       if (had) console.log('🗑️ Пользователь удален из localStorage')
     }
   }, [])
@@ -759,11 +789,7 @@ export default function VPNServiceApp() {
           setLoading(false)
           setAuthChecking(false)
           const savedView = localStorage.getItem('vpn_current_view')
-          if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome') {
-            setView(savedView)
-          } else {
-            setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-          }
+          setView(getAllowedView(savedView, effectiveRole))
           logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole })
           return
         }
@@ -870,14 +896,9 @@ export default function VPNServiceApp() {
               return
             }
             
-            // Устанавливаем правильный view после загрузки пользователя
+            // Устанавливаем view с учётом роли (многопользовательский режим: не показывать админку не-админу)
             const savedView = localStorage.getItem('vpn_current_view')
-            if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome') {
-              setView(savedView)
-            } else {
-              // Если нет сохраненного view, устанавливаем по роли
-              setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-            }
+            setView(getAllowedView(savedView, effectiveRole))
           } else {
             // Данные не найдены — для Google создаём документ (fallback на случай гонки с popup)
             if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
@@ -941,7 +962,7 @@ export default function VPNServiceApp() {
                 const savedUserStr = localStorage.getItem('vpn_current_user')
                 if (savedUserStr) {
                   const savedUser = JSON.parse(savedUserStr)
-                  if (savedUser.id === firebaseUser.uid) {
+                    if (savedUser.id === firebaseUser.uid) {
                     logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
                     setCurrentUser(savedUser)
                     applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
@@ -958,11 +979,7 @@ export default function VPNServiceApp() {
                       }
                     }, 2000)
                     const savedView = localStorage.getItem('vpn_current_view')
-                    if (savedView && savedView !== 'login' && savedView !== 'register' && savedView !== 'welcome') {
-                      setView(savedView)
-                    } else {
-                      setView(savedUser.role === 'admin' ? 'admin' : 'dashboard')
-                    }
+                    setView(getAllowedView(savedView, savedUser.role))
                   } else {
                     logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
                     setCurrentUser(null)
@@ -996,6 +1013,8 @@ export default function VPNServiceApp() {
                     logger.info('Firebase', 'Данные загружены из кеша (офлайн-режим)', { uid: firebaseUser.uid, email: savedUser.email })
                     setCurrentUser(savedUser)
                     applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
+                    const savedView = localStorage.getItem('vpn_current_view')
+                    setView(getAllowedView(savedView, savedUser.role))
                   } else {
                     setCurrentUser(null)
                   }
@@ -1052,18 +1071,31 @@ export default function VPNServiceApp() {
   // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData (initData может появиться с задержкой)
   const TMA_LOG = 'TelegramAuth'
   const [tmaAuthRetryTick, setTmaAuthRetryTick] = useState(0)
+  /** initData из WebApp или из скрипта index.html (на случай разного порядка загрузки) */
+  const getTmaInitData = useCallback(() => {
+    if (typeof window === 'undefined') return ''
+    const fromWebApp = window.Telegram?.WebApp?.initData
+    const fromGlobal = window.__TELEGRAM_INIT_DATA
+    const raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
+    return String(raw || '').trim()
+  }, [])
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
     if (typeof window === 'undefined') return
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
-    const hasInitData = !!(typeof window !== 'undefined' && window.__TELEGRAM_INIT_DATA && String(window.__TELEGRAM_INIT_DATA).trim())
+    const hasInitData = !!getTmaInitData()
+    const inTmaContext = !!(window.Telegram?.WebApp || window.__TELEGRAM_INIT_DATA)
+    if (inTmaContext && tmaAttemptStartRef.current === 0) {
+      tmaAttemptStartRef.current = Date.now()
+      setTmaWaitingAuth(true)
+    }
     logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
 
     const tryInitData = () => {
-      const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : ''
-      if (!initData || typeof initData !== 'string' || !initData.trim() || telegramAuthTriedRef.current) {
-        if (!initData || !String(initData).trim()) logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
+      const initData = getTmaInitData()
+      if (!initData || telegramAuthTriedRef.current) {
+        if (!initData) logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
         return
       }
       telegramAuthTriedRef.current = true
@@ -1080,10 +1112,12 @@ export default function VPNServiceApp() {
         .then((data) => {
           if (data.success && data.customToken) {
             logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
+            setTmaWaitingAuth(false)
             if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
+          setTmaWaitingAuth(false)
           if (!data.success) {
             logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка от сервера', { error: data.error, reason: data.reason })
             setError(data.error || i18n.t('app.telegramSignInFailed'))
@@ -1091,10 +1125,13 @@ export default function VPNServiceApp() {
         })
         .then(() => {})
         .catch((err) => {
+          setTmaWaitingAuth(false)
           logger.error(TMA_LOG, 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
           setError(err?.message || i18n.t('app.telegramSignInError'))
         })
     }
+
+    const tmaGiveUpTimer = inTmaContext ? setTimeout(() => setTmaWaitingAuth(false), 6000) : null
 
     if (storedToken) {
       logger.info(TMA_LOG, 'Авто-вход TMA: запрос по сессии', {})
@@ -1110,15 +1147,18 @@ export default function VPNServiceApp() {
         .then((data) => {
           if (data.success && data.customToken) {
             logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user })
+            setTmaWaitingAuth(false)
             if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
+          setTmaWaitingAuth(false)
           logger.warn(TMA_LOG, 'Авто-вход TMA: сессия не принята, пробуем initData', { reason: data.reason })
           clearTmaSession()
           tryInitData()
         })
         .catch((err) => {
+          setTmaWaitingAuth(false)
           logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка запроса по сессии', { message: err?.message })
           clearTmaSession()
           tryInitData()
@@ -1126,18 +1166,22 @@ export default function VPNServiceApp() {
     } else {
       tryInitData()
       if (!hasInitData) {
-        logger.info(TMA_LOG, 'Авто-вход TMA: initData ещё нет, запланированы повторы 400ms, 1.2s, 3s', {})
+        logger.info(TMA_LOG, 'Авто-вход TMA: initData ещё нет, запланированы повторы 400ms, 1.2s, 3s, 5s', {})
         const t1 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 400)
         const t2 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 1200)
         const t3 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 3000)
+        const t4 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 5000)
         return () => {
           clearTimeout(t1)
           clearTimeout(t2)
           clearTimeout(t3)
+          clearTimeout(t4)
+          if (tmaGiveUpTimer) clearTimeout(tmaGiveUpTimer)
         }
       }
     }
-  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession, tmaAuthRetryTick])
+    return () => { if (tmaGiveUpTimer) clearTimeout(tmaGiveUpTimer) }
+  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession, tmaAuthRetryTick, getTmaInitData])
 
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
@@ -4247,6 +4291,16 @@ export default function VPNServiceApp() {
 
   // Если view === login или register
   if (view === 'login' || view === 'register') {
+    // В Telegram Mini App: пока ждём авто-вход (до 6 с), показываем загрузку вместо формы
+    if (isTelegramApp && tmaWaitingAuth && !error) {
+      return (
+        <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950">
+          <div className="inline-block w-10 h-10 border-2 border-blue-500/50 border-t-blue-400 rounded-full animate-spin mb-4" />
+          <p className="text-slate-300 font-medium text-center">{t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
+          <p className="text-slate-500 text-sm mt-2 text-center max-w-xs">Открыто из бота — входим автоматически</p>
+        </div>
+      )
+    }
     return (
       <>
         <LoginForm

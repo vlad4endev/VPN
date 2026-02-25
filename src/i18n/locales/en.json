@@ -205,6 +205,7 @@
   },
   "app": {
     "telegramTitle": "Sign in with Telegram",
+    "telegramSigningIn": "Signing in with Telegram…",
     "telegramBodyWithLink": "To sign in with Telegram, tap the button below — the app will open in Telegram. You will be signed in automatically.",
     "telegramBodyNoLink": "Open the app in Telegram using the button below or find the bot in Telegram and launch the app from the bot menu.",
     "openInTelegram": "Open in Telegram",

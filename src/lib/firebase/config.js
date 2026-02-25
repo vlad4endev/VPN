@@ -1,6 +1,7 @@
 import { initializeApp, getApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+import { getDatabase } from 'firebase/database'
 
 /**
  * Возвращает актуальный экземпляр Firestore (из текущего app).
@@ -14,6 +15,13 @@ function getDb() {
   } catch {
     return db
   }
+}
+
+/**
+ * Возвращает экземпляр Realtime Database (если настроен VITE_FIREBASE_DATABASE_URL).
+ */
+function getRealtimeDb() {
+  return realtimeDb
 }
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { validateEnvVars, getEnvErrorMessage } from '../../shared/utils/envValidation.js'
@@ -86,6 +94,7 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 let app = null
 let auth = null
 let db = null
+let realtimeDb = null
 let googleProvider = null
 let appCheck = null
 let firebaseInitError = null
@@ -160,9 +169,24 @@ try {
     googleProvider.setCustomParameters({
       prompt: 'select_account'
     })
+
+    // Realtime Database (опционально: задайте VITE_FIREBASE_DATABASE_URL в .env)
+    const databaseURL = import.meta.env.VITE_FIREBASE_DATABASE_URL
+    if (databaseURL && typeof databaseURL === 'string' && databaseURL.trim()) {
+      try {
+        realtimeDb = getDatabase(app, databaseURL.trim())
+        logger.info('Firebase', 'Realtime Database подключён', { databaseURL: `${databaseURL.slice(0, 30)}...` })
+      } catch (rtdbErr) {
+        logger.warn('Firebase', 'Не удалось инициализировать Realtime Database', null, rtdbErr)
+      }
+    } else {
+      logger.debug('Firebase', 'Realtime Database не настроен (VITE_FIREBASE_DATABASE_URL не задан)', null)
+    }
+
     logger.info('Firebase', 'Firebase инициализирован', {
       projectId: firebaseConfig.projectId,
       authDomain: firebaseConfig.authDomain,
+      hasRealtimeDb: !!realtimeDb,
     })
 
     // Не вызываем deleteApp(app) на beforeunload: после уничтожения приложения
@@ -198,4 +222,4 @@ try {
 }
 
 // Экспортируем инициализированные объекты
-export { app, auth, db, getDb, googleProvider, appCheck, firebaseInitError, envValidation }
+export { app, auth, db, getDb, realtimeDb, getRealtimeDb, googleProvider, appCheck, firebaseInitError, envValidation }

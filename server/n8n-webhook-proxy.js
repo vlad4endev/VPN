@@ -4690,6 +4690,96 @@ async function getPlategaTransactionStatus(transactionId, merchantId, secretKey)
 }
 
 /**
+ * Синхронизирует статус платежа с Platega: запрашивает статус, при необходимости обновляет Firestore и запускает активацию подписки.
+ * Используется и в GET /api/payment/status, и в фоновой проверке pending-платежей.
+ * @param {FirebaseFirestore.DocumentReference} paymentDocRef - ссылка на документ платежа
+ * @param {Object} paymentData - данные платежа (id, orderId, userId, tariffId, status, transactionId, ...)
+ * @param {string} merchantId - X-MerchantId для Platega
+ * @param {string} secretKey - X-Secret для Platega
+ * @returns {Promise<{ updated: boolean, newStatus?: string, plategaResult?: object }>}
+ */
+async function syncPaymentStatusFromPlatega(paymentDocRef, paymentData, merchantId, secretKey) {
+  const transactionId = paymentData.transactionId || paymentData.transaction_id
+  const orderId = paymentData.orderId
+  // Для подтверждённых (completed/cancelled/chargebacked) фоновая проверка не выполняется
+  if (!transactionId || !merchantId || !secretKey || paymentData.status !== 'pending') {
+    return { updated: false }
+  }
+  const plategaResult = await getPlategaTransactionStatus(transactionId, merchantId, secretKey)
+  if (!plategaResult) return { updated: false }
+  const mappedStatus = PLATEGA_STATUS_MAP[plategaResult.status] || paymentData.status
+  if (mappedStatus === paymentData.status) return { updated: false, newStatus: mappedStatus, plategaResult }
+
+  if (mappedStatus === 'completed') {
+    await paymentDocRef.update({
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      plategaStatus: plategaResult.status,
+    })
+    const updatedData = { ...paymentData, status: 'completed', completedAt: new Date().toISOString() }
+    if (updatedData.userId && updatedData.tariffId) {
+      try {
+        await activateSubscriptionAfterPayment(updatedData)
+        console.log('✅ Фоновая проверка: подписка активирована после оплаты', { orderId, userId: updatedData.userId })
+      } catch (activationErr) {
+        console.error('❌ Фоновая проверка: ошибка активации подписки', { orderId, userId: updatedData.userId, error: activationErr.message })
+      }
+    }
+    return { updated: true, newStatus: 'completed', plategaResult }
+  }
+  if (mappedStatus === 'cancelled' || mappedStatus === 'chargebacked') {
+    await paymentDocRef.update({
+      status: mappedStatus,
+      plategaStatus: plategaResult.status,
+    })
+    return { updated: true, newStatus: mappedStatus, plategaResult }
+  }
+  return { updated: false, newStatus: mappedStatus, plategaResult }
+}
+
+/**
+ * Фоновая проверка pending-платежей Platega. Запускается по таймеру; работает даже если пользователь закрыл страницу.
+ * Опрашивает только платежи со статусом 'pending'. Когда статус становится confirmed (completed/cancelled/chargebacked),
+ * платёж больше не попадает в выборку — фоновая проверка для него прекращается.
+ */
+async function runBackgroundPendingPaymentsCheck() {
+  if (!db) return
+  const APP_ID = process.env.APP_ID || 'skyputh'
+  const paymentSettings = await loadPaymentSettings()
+  const merchantId = process.env.PLATEGA_MERCHANT_ID || paymentSettings.plategaMerchantId || null
+  const secretKey = process.env.PLATEGA_SECRET_KEY || paymentSettings.plategaSecretKey || null
+  if (!merchantId || !secretKey) return
+
+  const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
+  const cutoffMs = Date.now() - 48 * 60 * 60 * 1000 // 48 часов
+  // Только pending — после подтверждения платёж больше не выбирается, проверка для него прекращается
+  const q = paymentsRef.where('status', '==', 'pending').limit(50)
+  const snapshot = await q.get().catch((err) => {
+    console.warn('⚠️ Фоновая проверка платежей: ошибка запроса', err.message)
+    return null
+  })
+  if (!snapshot || snapshot.empty) return
+
+  let checked = 0
+  let updated = 0
+  for (const docSnap of snapshot.docs) {
+    const data = docSnap.data()
+    if (data.status !== 'pending') continue // уже подтверждён — пропускаем, проверка для него прекращена
+    const createdAtMs = data.createdAt ? new Date(data.createdAt).getTime() : 0
+    if (createdAtMs < cutoffMs) continue
+    const transactionId = data.transactionId || data.transaction_id
+    if (!transactionId || (data.paymentProvider && data.paymentProvider !== 'platega')) continue
+    checked++
+    const paymentData = { id: docSnap.id, ...data }
+    const result = await syncPaymentStatusFromPlatega(docSnap.ref, paymentData, merchantId, secretKey)
+    if (result.updated) updated++
+  }
+  if (checked > 0) {
+    console.log('📋 Фоновая проверка платежей: проверено', checked, 'обновлено', updated)
+  }
+}
+
+/**
  * Создание платежа через Platega.io
  * @param {Object} params - merchantId, secretKey, amount (рубли), orderId, userId, tariffId, userData, baseUrl
  * @param {number} [paymentMethodOverride] - код метода (2=СБП, 13=крипто). Если не передан — из env или 2.
@@ -5457,7 +5547,7 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
       let statusToReturn = paymentData.status
       let plategaTransaction = null
 
-      // Для платежей Platega всегда отправляем проверку статуса в API (при наличии transactionId)
+      // Для платежей Platega запрашиваем статус в API и при необходимости синхронизируем Firestore и активируем подписку
       const transactionId = paymentData.transactionId || paymentData.transaction_id
       if (transactionId && (paymentData.paymentProvider === 'platega' || !paymentData.paymentProvider)) {
         const paymentSettings = await loadPaymentSettings()
@@ -5465,50 +5555,19 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
         const secretKey = process.env.PLATEGA_SECRET_KEY || paymentSettings.plategaSecretKey || null
         if (merchantId && secretKey) {
           console.log('📤 Отправка проверки статуса платежа в Platega', { orderId, transactionId })
-          const plategaResult = await getPlategaTransactionStatus(transactionId, merchantId, secretKey)
-          if (plategaResult) {
+          const syncResult = await syncPaymentStatusFromPlatega(paymentDocRef, paymentData, merchantId, secretKey)
+          if (syncResult.plategaResult) {
             plategaTransaction = {
-              id: plategaResult.id,
-              status: plategaResult.status,
-              paymentDetails: plategaResult.paymentDetails,
+              id: syncResult.plategaResult.id,
+              status: syncResult.plategaResult.status,
+              paymentDetails: syncResult.plategaResult.paymentDetails,
             }
-            const mappedStatus = PLATEGA_STATUS_MAP[plategaResult.status] || paymentData.status
-            statusToReturn = mappedStatus
-            // Синхронизируем Firestore при смене статуса на завершённый
-            if (paymentData.status === 'pending' && mappedStatus === 'completed') {
-              try {
-                await paymentDocRef.update({
-                  status: 'completed',
-                  completedAt: new Date().toISOString(),
-                  plategaStatus: plategaResult.status,
-                })
-                paymentData = { ...paymentData, status: 'completed', completedAt: new Date().toISOString() }
-                console.log('✅ Статус платежа обновлён по Platega', { orderId, transactionId, status: 'completed' })
-                // После успешной оплаты — активация подписки и обновление клиента в 3x-ui
-                if (paymentData.userId && paymentData.tariffId) {
-                  try {
-                    await activateSubscriptionAfterPayment(paymentData)
-                    console.log('✅ Обновление клиента 3x-ui после успешной оплаты выполнено', { orderId, userId: paymentData.userId })
-                  } catch (activationErr) {
-                    console.error('❌ Ошибка активации подписки / обновления 3x-ui после оплаты', {
-                      orderId,
-                      userId: paymentData.userId,
-                      error: activationErr.message,
-                    })
-                  }
-                }
-              } catch (updateErr) {
-                console.warn('⚠️ Не удалось обновить статус платежа в Firestore', { orderId, message: updateErr.message })
-              }
-            } else if (paymentData.status === 'pending' && (mappedStatus === 'cancelled' || mappedStatus === 'chargebacked')) {
-              try {
-                await paymentDocRef.update({
-                  status: mappedStatus,
-                  plategaStatus: plategaResult.status,
-                })
-                paymentData = { ...paymentData, status: mappedStatus }
-              } catch (updateErr) {
-                console.warn('⚠️ Не удалось обновить статус платежа в Firestore', { orderId, message: updateErr.message })
+            statusToReturn = syncResult.newStatus || statusToReturn
+            if (syncResult.updated) {
+              paymentData = {
+                ...paymentData,
+                status: statusToReturn,
+                ...(statusToReturn === 'completed' && { completedAt: new Date().toISOString() }),
               }
             }
           }
@@ -7140,6 +7199,18 @@ app.listen(PORT, HOST, () => {
     }
   }, 10 * 60 * 1000) // 10 минут
   
+  // Фоновая проверка статуса pending-платежей Platega (работает даже если пользователь закрыл страницу)
+  const PAYMENT_CHECK_INTERVAL_MS = Math.max(30 * 1000, Number(process.env.PAYMENT_BACKGROUND_CHECK_INTERVAL_MS) || 45 * 1000)
+  setInterval(() => {
+    runBackgroundPendingPaymentsCheck().catch((err) => {
+      console.warn('⚠️ Фоновая проверка платежей:', err.message)
+    })
+  }, PAYMENT_CHECK_INTERVAL_MS)
+  setTimeout(() => {
+    runBackgroundPendingPaymentsCheck().catch(() => {})
+  }, 15 * 1000)
+  console.log(`📋 Фоновая проверка pending-платежей: каждые ${PAYMENT_CHECK_INTERVAL_MS / 1000} с`)
+
   // Первая очистка через 1 минуту после старта
   setTimeout(async () => {
     try {

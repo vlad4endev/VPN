@@ -26,13 +26,16 @@ const resources = {
 
 const STORAGE_KEY = 'vpn-ui-lang'
 
-i18n
+/** Промис готовности i18n — использовать в точке входа, чтобы не рендерить приложение до загрузки переводов */
+export const i18nReady = i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources,
     fallbackLng: 'ru',
     supportedLngs: ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh'],
+    load: 'currentOnly',
+    nonExplicitSupportedLngs: true,
     interpolation: { escapeValue: false },
     detection: {
       order: ['localStorage', 'navigator'],

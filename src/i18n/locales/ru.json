@@ -205,6 +205,7 @@
   },
   "app": {
     "telegramTitle": "Вход через Telegram",
+    "telegramSigningIn": "Вход через Telegram…",
     "telegramBodyWithLink": "Чтобы войти через Telegram, нажмите кнопку ниже — откроется приложение в Telegram. После открытия вы будете авторизованы автоматически.",
     "telegramBodyNoLink": "Откройте приложение в Telegram по кнопке ниже или найдите бота в Telegram и запустите приложение из меню бота.",
     "openInTelegram": "Открыть в Telegram",
