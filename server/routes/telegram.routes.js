@@ -146,7 +146,8 @@ export function createTelegramRouter(deps) {
     if (!result.ok) {
       logTelegramAuth('initData_fail', { reason: result.reason || 'unknown', message: result.message })
       const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-      return res.status(400).json({ success: false, error: message, reason: result.reason || 'unknown' })
+      const status = (result.reason === 'invalid_hash' || result.reason === 'no_hash') ? 403 : 400
+      return res.status(status).json({ success: false, error: message, reason: result.reason || 'unknown' })
     }
     const validated = result.data
     const tgId = String(validated.user.id)
