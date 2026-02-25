@@ -339,6 +339,7 @@
     "copyCodeAria": "Kodni nusxalash"
   },
   "keyModal": {
+    "title": "Ulaning",
     "loadingLink": "Obuna havolasi yuklanmoqda...",
     "linkUnavailable": "Obuna havolasi mavjud emas. Administratorga murojaat qiling.",
     "subscriptionLink": "Obuna havolangiz",

@@ -187,7 +187,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         <div className="p-4 sm:p-6 md:p-8 border-b border-slate-800 flex justify-between items-center gap-3">
           <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.25rem)] sm:text-xl font-bold text-white flex items-center gap-2 sm:gap-3">
             <Globe size={18} className="sm:w-5 sm:h-5 sm:w-[22px] sm:h-[22px] text-blue-500 flex-shrink-0" /> 
-            <span>{t('app.netherlands')}</span>
+            <span>{t('keyModal.title')}</span>
           </h3>
           <button 
             onClick={onClose} 

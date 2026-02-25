@@ -270,11 +270,17 @@ function validateTelegramInitDataWithReason(initData, secretOverride) {
     if (!hash) {
       return { ok: false, reason: 'no_hash', message: 'В данных Telegram отсутствует подпись (hash). Откройте приложение заново из меню бота.' }
     }
-    data.delete('hash')
-    const dataCheckString = [...data.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n')
+    // data_check_string должен совпадать с тем, что подписал Telegram: пары key=value в исходном виде (без декодирования).
+    // URLSearchParams.entries() возвращает декодированные значения — из-за этого подпись не сходилась при наличии % в value.
+    const pairs = trimmed.split('&')
+      .map((s) => {
+        const idx = s.indexOf('=')
+        if (idx < 0) return [s, '']
+        return [s.slice(0, idx), s.slice(idx + 1)]
+      })
+      .filter(([k]) => k !== 'hash')
+    pairs.sort(([a], [b]) => a.localeCompare(b))
+    const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join('\n')
     const computedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex')
     if (computedHash !== hash) {
       console.warn('Telegram auth: неверная подпись initData (проверьте, что TELEGRAM_BOT_TOKEN соответствует боту Mini App)')

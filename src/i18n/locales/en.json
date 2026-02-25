@@ -344,6 +344,7 @@
     "copyCodeAria": "Copy code"
   },
   "keyModal": {
+    "title": "Connect",
     "loadingLink": "Loading subscription link...",
     "linkUnavailable": "Subscription link unavailable. Contact administrator.",
     "subscriptionLink": "Your subscription link",

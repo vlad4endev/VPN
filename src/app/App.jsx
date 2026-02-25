@@ -249,7 +249,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       >
         <div className="p-4 sm:p-6 lg:p-8 border-b border-slate-800 flex justify-between items-center">
           <h3 className="text-xl font-bold text-white flex items-center gap-3">
-            <Globe size={22} className="text-blue-500" /> {t('app.netherlands')}
+            <Globe size={22} className="text-blue-500" /> {t('keyModal.title')}
           </h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
             <X size={24} className="text-slate-400" />

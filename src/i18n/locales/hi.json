@@ -344,6 +344,7 @@
     "subscriptionFallback": "सब्सक्रिप्शन"
   },
   "keyModal": {
+    "title": "कनेक्ट करें",
     "loadingLink": "सब्सक्रिप्शन लिंक लोड हो रहा है...",
     "linkUnavailable": "सब्सक्रिप्शन लिंक अनुपलब्ध। व्यवस्थापक से संपर्क करें।",
     "subscriptionLink": "आपका सब्सक्रिप्शन लिंक",

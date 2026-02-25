@@ -339,6 +339,7 @@
     "copyCodeAria": "نسخ الكود"
   },
   "keyModal": {
+    "title": "اتصل",
     "loadingLink": "جاري تحميل رابط الاشتراك...",
     "linkUnavailable": "رابط الاشتراك غير متاح. تواصل مع المسؤول.",
     "subscriptionLink": "رابط اشتراكك",
