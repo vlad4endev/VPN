@@ -3628,8 +3628,8 @@ async function verifyTelegramRemotely(type, data) {
 async function validateTelegramInitDataWithReasonAsync(initData) {
   const token = await getTelegramToken()
   if (token) {
-  const secret = crypto.createHmac('sha256', token).update('WebAppData').digest()
-  return validateTelegramInitDataWithReason(initData, secret)
+    const secret = crypto.createHmac('sha256', token).update('WebAppData').digest()
+    return validateTelegramInitDataWithReason(initData, secret)
   }
   if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) {
     const remote = await verifyTelegramRemotely('initData', initData)
