@@ -97,6 +97,7 @@
         if (tg) {
           try { tg.ready(); } catch (e) {}
           try { if (tg.expand) tg.expand(); } catch (e) {}
+          try { if (tg.enableClosingConfirmation) tg.enableClosingConfirmation(false); } catch (e) {}
         }
 
         // 1) Обычный путь: initData от Telegram WebApp
@@ -155,6 +156,9 @@
         }
       }
       applyTmaInit('boot');
+      if (window.Telegram && window.Telegram.WebApp) {
+        try { window.Telegram.WebApp.expand(); } catch (e) {}
+      }
       // В Telegram иногда initData появляется с задержкой — перепроверяем несколько раз
       setTimeout(function() { applyTmaInit('t+300ms'); }, 300);
       setTimeout(function() { applyTmaInit('t+1200ms'); }, 1200);
@@ -191,6 +195,21 @@
       })();
     </script>
     <div id="root">
+      <!-- До загрузки React показываем загрузку для Mini App (/t) — уменьшает пустой экран -->
+      <script>
+        (function() {
+          var p = (window.location.pathname || '').replace(/\/+$/, '');
+          if (p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3)) {
+            var root = document.getElementById('root');
+            if (root) {
+              root.innerHTML = '<div style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:2px solid rgba(59,130,246,0.5);border-top-color:rgb(59,130,246);border-radius:50%;animation:spin 0.8s linear infinite"></div><p style="margin-top:1rem;font-size:0.875rem">Загрузка…</p></div>';
+              var style = document.createElement('style');
+              style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+              document.head.appendChild(style);
+            }
+          }
+        })();
+      </script>
       <noscript>
         <h1 class="text-2xl font-bold text-white p-8">SKYFLOW</h1>
         <p class="text-slate-400 p-8">Включите JavaScript для входа в личный кабинет.</p>

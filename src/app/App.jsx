@@ -361,6 +361,7 @@ function AdminViewWithContext({ children, adminTab, setAdminTab, ...adminProps }
 }
 
 export default function VPNServiceApp() {
+  const { t } = useTranslation()
   // Инициализация view: при переходе на сайт всегда welcome, затем таймер или кнопка — login
   const getInitialView = () => {
     try {
@@ -370,7 +371,7 @@ export default function VPNServiceApp() {
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
         // Отдельная ссылка для Telegram Mini App: вход только по Telegram ID, личный кабинет по пользователю
-        if (path === '/t' || path === '/telegram' || (path.startsWith('/t/') && path.length > 3)) return 'tma'
+        if (path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)) return 'tma'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -4272,7 +4273,10 @@ export default function VPNServiceApp() {
     }
     if (tmaWaitingAuth) {
       return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4">
+        <div
+          className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4"
+          style={{ minHeight: '100dvh', backgroundColor: '#020617', color: '#cbd5e1' }}
+        >
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4" />
           <p className="text-slate-300 font-medium text-center">{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
           <p className="text-slate-500 text-sm mt-2 text-center">{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
@@ -4280,20 +4284,22 @@ export default function VPNServiceApp() {
       )
     }
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4">
-        <MessageCircle className="w-16 h-16 text-slate-500 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2 text-center">{t('app.telegramMiniTitle') || 'Личный кабинет в Telegram'}</h2>
+      <div
+        className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4"
+        style={{ minHeight: '100dvh', backgroundColor: '#020617', color: '#e2e8f0' }}
+      >
+        <MessageCircle className="w-16 h-16 text-slate-500 mb-4" style={{ color: '#64748b' }} />
+        <h2 className="text-xl font-semibold text-white mb-2 text-center">
+          {(typeof t === 'function' ? t('app.telegramMiniTitle') : null) || 'Личный кабинет в Telegram'}
+        </h2>
         {error && (
           <p className="text-amber-400 text-sm text-center max-w-sm mb-4">{error}</p>
         )}
         <p className="text-slate-400 text-center max-w-sm mb-6">
-          {t('app.telegramMiniOpenInBot') || 'Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.'}
+          {typeof t === 'function' ? t('app.telegramMiniOpenInBot') : 'Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.'}
         </p>
-        <a
-          href="/"
-          className="text-blue-400 hover:text-blue-300 underline text-sm"
-        >
-          {t('app.goToMainSite') || 'Перейти на основной сайт'}
+        <a href="/" className="text-blue-400 hover:text-blue-300 underline text-sm">
+          {typeof t === 'function' ? t('app.goToMainSite') : 'Перейти на основной сайт'}
         </a>
       </div>
     )

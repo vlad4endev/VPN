@@ -17,6 +17,7 @@ import helmet from 'helmet'
 import dotenv from 'dotenv'
 import os from 'os'
 import path from 'path'
+import fs from 'fs'
 import { readFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
@@ -7273,6 +7274,18 @@ app.post('/admin/sync-payment', async (req, res) => {
     })
   }
 })
+
+// ========== SPA / Frontend (для Mini App /t и остальных путей) ==========
+// Если есть собранный frontend (dist), отдаём его; GET-запросы не к /api отдают index.html
+const distPath = path.join(__dirname, '..', 'dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath, { index: false, maxAge: process.env.NODE_ENV === 'production' ? '1y' : '0' }))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next()
+    res.sendFile(path.join(distPath, 'index.html'), (err) => { if (err) next(err) })
+  })
+  console.log('📁 SPA fallback: frontend из dist (в т.ч. /t для Telegram Mini App)')
+}
 
 // ========== Error Handling ==========
 
