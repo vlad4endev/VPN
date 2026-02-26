@@ -178,8 +178,9 @@ export function createTelegramRouter(deps) {
       }
     }
 
-    const rawInitData = req.headers['x-telegram-initdata'] || (req.body && req.body.initData) || ''
-    const initData = typeof rawInitData === 'string' ? rawInitData : (req.body && typeof req.body.initData === 'string' ? req.body.initData : '')
+    // Предпочитаем body: при явной отправке initData в body строка полная; заголовок мог быть обрезан прокси (no_hash)
+    const rawInitData = (req.body && typeof req.body.initData === 'string' ? req.body.initData : null) || req.headers['x-telegram-initdata'] || ''
+    const initData = typeof rawInitData === 'string' ? rawInitData : ''
     const result = await validateTelegramInitDataWithReasonAsync(initData)
     if (!result.ok) {
       logTelegramAuth('initData_fail', { reason: result.reason || 'unknown', message: result.message })

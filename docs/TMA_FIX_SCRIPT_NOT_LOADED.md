@@ -58,3 +58,38 @@
 - **Неправильно:** путь `/src/app/main.jsx` — значит отдаётся исходный `index.html`, нужны шаги выше.
 
 Подробнее: [TELEGRAM_MINIAPP_ANALYSIS.md](./TELEGRAM_MINIAPP_ANALYSIS.md) (раздел «Деплой и загрузка скриптов»), [TELEGRAM_MINIAPP_AUTO_AUTH.md](./TELEGRAM_MINIAPP_AUTO_AUTH.md) (nginx и SPA).
+
+---
+
+## На сервере: чеклист для Telegram Mini App
+
+Если в логах есть **main_timeout** и **auth_403 / invalid_hash**, проверьте на сервере следующее.
+
+### 1. Скрипт не загрузился (main_timeout)
+
+- **Прокси (Nginx / NPM):** должен отправлять трафик на **порт 3001** (Node), а не на 5173 (Vite). В настройках Proxy Host укажите **Forward Port = 3001**.
+- **Сборка:** на сервере должна быть папка **dist/** (после `npm run build` в корне проекта). Запуск — из корня: `npm start` или `./start-all.sh production`, чтобы Node видел `dist/` рядом с `server/`.
+
+### 2. Ошибка «Неверная подпись» (invalid_hash / auth_403)
+
+Сервер проверяет initData по токену бота. Токен должен **совпадать с ботом**, из которого открывают Mini App.
+
+- В **server/.env** (или в переменных окружения процесса) задайте:
+  ```bash
+  TELEGRAM_BOT_TOKEN=123456:ABCdef...   # токен от @BotFather для бота, в котором открывается Mini App
+  ```
+  Либо используйте **TELEGRAM_TOKEN** с тем же значением.
+
+- Если токен храните в Firestore (админка): документ `artifacts/<APP_ID>/public/settings` должен содержать поле **telegramBotToken**. Тогда env можно не задавать (если Firebase на сервере настроен).
+
+- **Важно:** токен должен быть именно того бота, в котором настроена кнопка/меню Mini App (URL вида `https://ваш-домен/t`). Другой бот → другой токен → invalid_hash.
+
+### 3. Firebase на сервере (для входа и сессий)
+
+Для выдачи customToken и работы сессий нужен Firebase Admin. В **server/.env** задайте один из вариантов:
+
+- **FIREBASE_SERVICE_ACCOUNT_KEY** — JSON ключа сервисного аккаунта (одной строкой),  
+  или  
+- **FIREBASE_CLIENT_EMAIL** и **FIREBASE_PRIVATE_KEY**.
+
+Без этого приложение будет возвращать 503 при попытке входа через Telegram.

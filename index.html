@@ -166,7 +166,8 @@
       window.fetch = function(url, options) {
         options = options || {};
         options.headers = options.headers || {};
-        if (window.__TELEGRAM_INIT_DATA) {
+        var isAuthUrl = typeof url === 'string' && url.indexOf('/api/telegram/auth') !== -1;
+        if (window.__TELEGRAM_INIT_DATA && !isAuthUrl) {
           if (options.headers instanceof Headers) {
             options.headers.append('X-Telegram-InitData', window.__TELEGRAM_INIT_DATA);
           } else if (typeof options.headers === 'object' && !Array.isArray(options.headers)) {

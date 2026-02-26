@@ -2,8 +2,8 @@
 
 # Скрипт для запуска всех служб проекта Skypath Flow
 # Использование:
-#   ./start-all.sh              — режим разработки (backend 3001 + Vite 5173)
-#   ./start-all.sh production   — продакшен: только backend, раздаёт dist/ с порта 3001
+#   ./start-all.sh              — по умолчанию production (только backend 3001, фронт из dist/)
+#   ./start-all.sh development  — режим разработки (backend 3001 + Vite 5173)
 
 # Цвета для вывода
 GREEN='\033[0;32m'
@@ -35,10 +35,11 @@ cleanup() {
     exit 0
 }
 
-# Режим: development (backend + Vite) или production (только backend, раздаёт dist/)
-MODE="development"
-if [ "$1" = "production" ] || [ "$1" = "--production" ] || [ "$1" = "prod" ]; then
-    MODE="production"
+# Режим по умолчанию: production (только backend, dist/). Явно development — backend + Vite
+MODE="production"
+if [ "$1" = "development" ] || [ "$1" = "--development" ] || [ "$1" = "dev" ]; then
+    MODE="development"
+else
     export NODE_ENV=production
 fi
 

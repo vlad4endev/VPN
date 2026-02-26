@@ -231,8 +231,9 @@ app.use(metricsMiddleware({ isWebhookPath }))
 
 // ========== Telegram Mini App: валидация initData (опционально, не ломает старых клиентов) ==========
 const TELEGRAM_BOT_TOKEN_ENV = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.trim()
+// Telegram: secret_key = HMAC_SHA256 with key "WebAppData", message = bot_token (see core.telegram.org/bots/webapps)
 const TELEGRAM_WEBAPP_SECRET = TELEGRAM_BOT_TOKEN_ENV
-  ? crypto.createHmac('sha256', TELEGRAM_BOT_TOKEN_ENV).update('WebAppData').digest()
+  ? crypto.createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN_ENV).digest()
   : null
 
 /** Максимальный возраст initData (мс). Telegram рекомендует проверять; по умолчанию 24 часа. */
@@ -3659,7 +3660,7 @@ async function verifyTelegramRemotely(type, data) {
 async function validateTelegramInitDataWithReasonAsync(initData) {
   const token = await getTelegramToken()
   if (token) {
-    const secret = crypto.createHmac('sha256', token).update('WebAppData').digest()
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
     return validateTelegramInitDataWithReason(initData, secret)
   }
   if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) {
