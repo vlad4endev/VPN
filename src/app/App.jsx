@@ -1156,7 +1156,10 @@ export default function VPNServiceApp() {
           const severity = reason === 'invalid_hash' || reason === 'no_hash' ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
           const reasonCode = reason === 'invalid_hash' || reason === 'no_hash' ? 'auth_403' : (reason === 'expired' ? 'auth_date_expired' : 'auth_fail')
           tmaLog(severity, 'auth_fail_initData', 'Ошибка от сервера', { reason: reasonCode, serverReason: data.reason })
-          setError(data.error || i18n.t('app.telegramSignInFailed'))
+          const errorMsg = (reason === 'invalid_hash' || reason === 'no_hash')
+            ? t('app.invalidSignature')
+            : (data.error || t('app.telegramSignInFailed'))
+          setError(errorMsg)
         })
         .catch((err) => {
           clearTimeout(tid)
@@ -4331,6 +4334,30 @@ export default function VPNServiceApp() {
         </>
       )
     }
+    // Не показывать экраны с переводами до готовности i18n — иначе отображаются ключи (app.telegramMiniTitle и т.д.)
+    if (!i18n.isInitialized) {
+      return (
+        <>
+        <div
+          style={{
+            minHeight: 'var(--vh-fill, 100dvh)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#020617',
+            color: '#cbd5e1',
+            padding: '1rem',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          <div style={{ width: 48, height: 48, border: '2px solid rgba(59,130,246,0.5)', borderTopColor: 'rgb(59,130,246)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '1rem' }} />
+          <p style={{ margin: 0, fontSize: '1rem', textAlign: 'center' }}>Загрузка...</p>
+        </div>
+        <TmaLogPanel />
+        </>
+      )
+    }
     if (tmaWaitingAuth) {
       return (
         <>
@@ -4348,8 +4375,8 @@ export default function VPNServiceApp() {
           }}
         >
           <div style={{ width: 48, height: 48, border: '2px solid rgba(59,130,246,0.5)', borderTopColor: 'rgb(59,130,246)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '1rem' }} />
-          <p style={{ margin: 0, fontSize: '1rem', textAlign: 'center' }}>{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
-          <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
+          <p style={{ margin: 0, fontSize: '1rem', textAlign: 'center' }}>{t('app.telegramSigningIn')}</p>
+          <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>{t('app.telegramMiniHint')}</p>
         </div>
         <TmaLogPanel />
         </>
@@ -4371,13 +4398,13 @@ export default function VPNServiceApp() {
         }}
       >
         <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', fontWeight: 600, color: '#fff', textAlign: 'center' }}>
-          {(typeof t === 'function' ? t('app.telegramMiniTitle') : null) || 'Личный кабинет в Telegram'}
+          {t('app.telegramMiniTitle')}
         </h2>
         {error && <p style={{ margin: '0 0 1rem', fontSize: '0.875rem', color: '#fbbf24', textAlign: 'center', maxWidth: '20rem' }}>{error}</p>}
         <p style={{ margin: '0 0 1.5rem', fontSize: '0.875rem', color: '#94a3b8', textAlign: 'center', maxWidth: '20rem' }}>
-          {typeof t === 'function' ? t('app.telegramMiniOpenInBot') : 'Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.'}
+          {t('app.telegramMiniOpenInBot')}
         </p>
-        <a href="/" style={{ fontSize: '0.875rem', color: '#60a5fa' }}>{(typeof t === 'function' ? t('app.goToMainSite') : null) || 'Перейти на основной сайт'}</a>
+        <a href="/" style={{ fontSize: '0.875rem', color: '#60a5fa' }}>{t('app.goToMainSite')}</a>
       </div>
       <TmaLogPanel />
       </>

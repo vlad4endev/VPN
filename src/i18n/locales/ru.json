@@ -250,7 +250,13 @@
     "emailExists": "Пользователь с таким email уже существует.",
     "telegramSignInFailed": "Не удалось войти через Telegram.",
     "telegramSignInError": "Ошибка входа через Telegram",
-    "telegramSignInTimeout": "Превышено время ожидания. Откройте снова из бота."
+    "telegramSignInTimeout": "Превышено время ожидания. Откройте снова из бота.",
+    "telegramMiniTitle": "Личный кабинет в Telegram",
+    "telegramMiniOpenInBot": "Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.",
+    "goToMainSite": "Перейти на основной сайт",
+    "telegramMiniHint": "Идентификация по вашему Telegram ID",
+    "telegramInvalidSignature": "Неверная подпись данных. Убедитесь, что открываете приложение из того же бота, для которого настроен сервер.",
+    "invalidSignature": "Неверная подпись данных. Убедитесь, что открываете приложение из того же бота, для которого настроен сервер."
   },
   "dashboard": {
     "statusAccountant": "Бухгалтер создает платежку",

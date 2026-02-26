@@ -250,7 +250,13 @@
     "emailExists": "User with this email already exists.",
     "telegramSignInFailed": "Telegram sign-in failed.",
     "telegramSignInError": "Telegram sign-in error",
-    "telegramSignInTimeout": "Request timed out. Open again from the bot."
+    "telegramSignInTimeout": "Request timed out. Open again from the bot.",
+    "telegramMiniTitle": "Personal cabinet in Telegram",
+    "telegramMiniOpenInBot": "Open this link from the bot menu in Telegram to sign in automatically with your Telegram ID.",
+    "goToMainSite": "Go to main site",
+    "telegramMiniHint": "Identification by your Telegram ID",
+    "telegramInvalidSignature": "Invalid data signature. Make sure you open the app from the same bot that is configured on the server.",
+    "invalidSignature": "Invalid data signature. Make sure you open the app from the same bot that is configured on the server."
   },
   "dashboard": {
     "statusAccountant": "Payment is being prepared",

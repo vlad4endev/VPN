@@ -45,6 +45,8 @@ function runInit() {
     .init({
       resources,
       fallbackLng: ['ru', 'en'],
+      defaultNS: 'translation',
+      ns: ['translation'],
       supportedLngs: ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh'],
       load: 'currentOnly',
       nonExplicitSupportedLngs: true,

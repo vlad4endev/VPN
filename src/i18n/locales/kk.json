@@ -246,7 +246,14 @@
     "registerError": "Тіркелу қатесі",
     "emailExists": "Осы email-ді пайдаланушы бар.",
     "telegramSignInFailed": "Telegram арқылы кіру сәтсіз.",
-    "telegramSignInError": "Telegram кіру қатесі"
+    "telegramSignInError": "Telegram кіру қатесі",
+    "telegramSignInTimeout": "Күту уақыты асып кетті. Боттан қайта ашыңыз.",
+    "telegramMiniTitle": "Telegram жеке кабинет",
+    "telegramMiniOpenInBot": "Бұл сілтемені Telegram бот мәзірінен ашыңыз — сонда Telegram ID бойынша кабинетке автоматты түрде кіресіз.",
+    "goToMainSite": "Негізгі сайтқа өту",
+    "telegramMiniHint": "Telegram ID бойынша сәйкестендіру",
+    "telegramInvalidSignature": "Деректер қолтаңбасы жарамсыз. Серверде құрылған боттан қолданбаны ашып жатқаныңызға көз жеткізіңіз.",
+    "invalidSignature": "Деректер қолтаңбасы жарамсыз. Серверде құрылған боттан қолданбаны ашып жатқаныңызға көз жеткізіңіз."
   },
   "dashboard": {
     "statusAccountant": "Төлем дайындалуда",
