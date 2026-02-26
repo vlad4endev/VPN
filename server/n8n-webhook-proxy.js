@@ -34,7 +34,6 @@ import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
-import { validateTelegramInitData } from './lib/telegramInitDataValidation.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -3667,13 +3666,32 @@ async function verifyTelegramRemotely(type, data) {
   }
 }
 
+/** Кэш загруженного модуля валидации initData (при отсутствии файла на сервере используется встроенная валидация). */
+let telegramInitDataValidationModule = null
+
 /**
- * Валидация initData: локально через telegramInitDataValidation (если есть токен) или через TELEGRAM_VERIFY_URL.
+ * Валидация initData: локально через telegramInitDataValidation (если есть токен и модуль) или встроенная / TELEGRAM_VERIFY_URL.
  */
 async function validateTelegramInitDataWithReasonAsync(initData) {
   const token = await getTelegramToken()
   if (token) {
-    return validateTelegramInitData(initData, token, { maxAgeMs: TELEGRAM_INIT_DATA_MAX_AGE_MS })
+    try {
+      if (!telegramInitDataValidationModule) {
+        telegramInitDataValidationModule = await import('./lib/telegramInitDataValidation.js')
+      }
+      const result = telegramInitDataValidationModule.validateTelegramInitData(initData, token, { maxAgeMs: TELEGRAM_INIT_DATA_MAX_AGE_MS })
+      return result
+    } catch (err) {
+      if (telegramInitDataValidationModule === null) {
+        console.warn('Telegram initData: модуль telegramInitDataValidation не найден, используется встроенная валидация:', err.message)
+        telegramInitDataValidationModule = false
+      }
+      const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
+      const result = validateTelegramInitDataWithReason(initData, secret)
+      if (!result.ok && result.reason === 'invalid_hash') return { ...result, reason: 'invalid_signature' }
+      if (!result.ok && result.reason === 'expired') return { ...result, reason: 'expired_initData' }
+      return result
+    }
   }
   if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) {
     const remote = await verifyTelegramRemotely('initData', initData)
