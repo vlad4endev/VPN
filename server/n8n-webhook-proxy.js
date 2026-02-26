@@ -34,6 +34,7 @@ import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
+import { validateTelegramInitData } from './lib/telegramInitDataValidation.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -352,16 +353,18 @@ const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const TMA_LOG_BUFFER_MAX = 200
 const tmaLogBuffer = []
 
-/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). Причины: initData_timeout, auth_403, auth_date_expired, network_error, firebase_error. */
+/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). События: auth_success, auth_fail, invalid_signature, expired_initData, initData_fail, session_fail, error. */
 function logTelegramAuth(event, data = {}) {
   let severity = data.severity
   if (severity === undefined) {
     if (event === 'error') severity = 'error'
+    else if (event === 'invalid_signature') severity = 'error'
+    else if (event === 'expired_initData' || event === 'session_fail') severity = 'warn'
+    else if (event === 'auth_fail') severity = 'warn'
     else if (event === 'initData_fail') {
       const reason = data.reason || ''
-      severity = (reason === 'invalid_hash' || reason === 'no_hash') ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
-    } else if (event === 'session_fail') severity = 'warn'
-    else severity = 'info'
+      severity = (reason === 'invalid_signature' || reason === 'no_hash') ? 'error' : (reason === 'expired_initData' ? 'warn' : 'warn')
+    } else severity = 'info'
   }
   const payload = { ts: new Date().toISOString(), event, severity, ...data }
   const line = `[TMA] ${JSON.stringify(payload)}`
@@ -3665,13 +3668,12 @@ async function verifyTelegramRemotely(type, data) {
 }
 
 /**
- * Валидация initData: локально (если есть токен) или через удалённый сервер (TELEGRAM_VERIFY_URL).
+ * Валидация initData: локально через telegramInitDataValidation (если есть токен) или через TELEGRAM_VERIFY_URL.
  */
 async function validateTelegramInitDataWithReasonAsync(initData) {
   const token = await getTelegramToken()
   if (token) {
-    const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest()
-    return validateTelegramInitDataWithReason(initData, secret)
+    return validateTelegramInitData(initData, token, { maxAgeMs: TELEGRAM_INIT_DATA_MAX_AGE_MS })
   }
   if (TELEGRAM_VERIFY_URL && TELEGRAM_VERIFY_SECRET) {
     const remote = await verifyTelegramRemotely('initData', initData)

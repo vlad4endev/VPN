@@ -184,12 +184,15 @@ export function createTelegramRouter(deps) {
     const result = await validateTelegramInitDataWithReasonAsync(initData)
     if (!result.ok) {
       const reason = result.reason || 'unknown'
-      const severity = (reason === 'invalid_hash' || reason === 'no_hash') ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
-      const reasonCode = (reason === 'invalid_hash' || reason === 'no_hash') ? 'auth_403' : (reason === 'expired' ? 'auth_date_expired' : 'auth_fail')
-      logTelegramAuth('initData_fail', { reason: reasonCode, severity, message: result.message, initDataLength: initData.length, appId })
+      const isSignatureFailure = reason === 'invalid_signature' || reason === 'no_hash'
+      const isExpired = reason === 'expired_initData'
+      const severity = isSignatureFailure ? 'error' : (isExpired ? 'warn' : 'warn')
+      const logEvent = isSignatureFailure ? 'invalid_signature' : (isExpired ? 'expired_initData' : 'auth_fail')
+      const responseReason = reason === 'invalid_signature' ? 'invalid_hash' : (reason === 'expired_initData' ? 'expired' : (reason === 'no_hash' ? 'no_hash' : 'auth_fail'))
+      const status = isSignatureFailure ? 403 : (isExpired ? 400 : 503)
+      logTelegramAuth(logEvent, { reason, severity, message: result.message, initDataLength: initData.length, appId })
       const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-      const status = (reason === 'invalid_hash' || reason === 'no_hash') ? 403 : 503
-      return res.status(status).json({ success: false, error: message, reason: reasonCode })
+      return res.status(status).json({ success: false, error: message, reason: responseReason })
     }
     const validated = result.data
     const tgId = String(validated.user.id)
@@ -212,7 +215,7 @@ export function createTelegramRouter(deps) {
         })
         const customToken = await admin.auth().createCustomToken(uid)
         const userPayload = { id: uid, ...doc.data() }
-        logTelegramAuth('initData_ok', { uid, tgId, created: false })
+        logTelegramAuth('auth_success', { uid, tgId, created: false })
         setTmaSessionCookie(res, sessionTokenNew)
         return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
@@ -227,7 +230,7 @@ export function createTelegramRouter(deps) {
         })
         const customToken = await admin.auth().createCustomToken(uid)
         const userPayload = { id: uid, ...existing.data() }
-        logTelegramAuth('initData_ok', { uid, tgId, created: false })
+        logTelegramAuth('auth_success', { uid, tgId, created: false })
         setTmaSessionCookie(res, sessionTokenNew)
         return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
@@ -259,7 +262,7 @@ export function createTelegramRouter(deps) {
       await userRef.set(newUserData)
       const customToken = await admin.auth().createCustomToken(uid)
       const userPayload = { id: uid, ...newUserData }
-      logTelegramAuth('initData_ok', { uid, tgId, created: true, name })
+      logTelegramAuth('auth_success', { uid, tgId, created: true, name })
       setTmaSessionCookie(res, sessionTokenNew)
       return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
