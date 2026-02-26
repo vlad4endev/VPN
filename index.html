@@ -228,7 +228,7 @@
             });
             var root = document.getElementById('root');
             if (root) {
-              root.innerHTML = '<div style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:2px solid rgba(59,130,246,0.5);border-top-color:rgb(59,130,246);border-radius:50%;animation:spin 0.8s linear infinite"></div><p style="margin-top:1rem;font-size:0.875rem">Загрузка…</p><details style="margin-top:1.5rem;font-size:0.75rem;color:#64748b"><summary style="cursor:pointer">Логи (отладка)</summary><pre id="tma-boot-log" style="margin-top:0.5rem;text-align:left;max-height:120px;overflow:auto;background:#0f172a;padding:0.5rem;border-radius:4px"></pre></details></div>';
+              root.innerHTML = '<div id="tma-boot-wrap" style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:2px solid rgba(59,130,246,0.5);border-top-color:rgb(59,130,246);border-radius:50%;animation:spin 0.8s linear infinite"></div><p style="margin-top:1rem;font-size:0.875rem">Загрузка…</p><details style="margin-top:1.5rem;font-size:0.75rem;color:#64748b"><summary style="cursor:pointer">Логи (отладка)</summary><pre id="tma-boot-log" style="margin-top:0.5rem;text-align:left;max-height:120px;overflow:auto;background:#0f172a;padding:0.5rem;border-radius:4px"></pre></details></div>';
               var style = document.createElement('style');
               style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
               document.head.appendChild(style);
@@ -288,10 +288,16 @@
           setTimeout(function() {
             if (!window.__TMA_MAIN_LOADED) {
               window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
-              window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: 'Скрипт приложения не загрузился за 3 с. Деплой: используйте папку dist после npm run build (не исходный index.html). Откройте из меню бота в Telegram.', data: {} });
+              window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: 'Скрипт приложения не загрузился за 3 с. Причина: отдаётся исходный index.html (в нём путь /src/app/main.jsx — его нет на сервере). Решение: npm run build и деплой папки dist/.', data: {} });
               var pre = document.getElementById('tma-boot-log');
               if (pre && window.__TMA_BOOT_LOGS.length) {
                 pre.textContent = window.__TMA_BOOT_LOGS.slice().reverse().map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');
+              }
+              var wrap = document.getElementById('tma-boot-wrap');
+              if (wrap) {
+                wrap.innerHTML = '<p style="margin:0;font-size:1rem;color:#f87171">Скрипт приложения не загрузился</p><p style="margin:0.75rem 0 0;font-size:0.8125rem;color:#94a3b8;max-width:320px;text-align:center">Сейчас отдаётся <strong>исходный</strong> index.html (в нём ссылка на /src/app/main.jsx — такого файла на сервере нет).</p><p style="margin:0.75rem 0 0;font-size:0.8125rem;color:#cbd5e1">Что сделать: на сервере выполните <code style="background:#1e293b;padding:0.2em 0.4em;border-radius:4px">npm run build</code>, затем отдавайте содержимое папки <strong>dist/</strong> (в nginx укажите root на dist/ или проксируйте весь трафик на Node, который раздаёт dist/).</p><details style="margin-top:1.5rem;font-size:0.75rem;color:#64748b"><summary style="cursor:pointer">Логи (отладка)</summary><pre id="tma-boot-log" style="margin-top:0.5rem;text-align:left;max-height:120px;overflow:auto;background:#0f172a;padding:0.5rem;border-radius:4px"></pre></details>';
+                var pre2 = document.getElementById('tma-boot-log');
+                if (pre2 && window.__TMA_BOOT_LOGS.length) pre2.textContent = window.__TMA_BOOT_LOGS.slice().reverse().map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');
               }
             }
           }, 3000);
