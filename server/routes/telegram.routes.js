@@ -96,9 +96,39 @@ export function createTelegramRouter(deps) {
     return res.status(400).json({ ok: false, reason: 'invalid_type', message: 'Body must have type "initData" or "widget" and corresponding data' })
   })
 
-  // ——— POST /auth (Mini App: session token или initData) ———
+  const setTmaSessionCookie = (res, token) => {
+    const isSecure = process.env.NODE_ENV === 'production'
+    res.cookie('tma_session_token', token, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: Math.floor(TELEGRAM_SESSION_TTL_MS / 1000),
+    })
+  }
+
+  const clearTmaSessionCookie = (res) => {
+    res.cookie('tma_session_token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    })
+  }
+
+  // ——— POST /logout (TMA: очистка httpOnly cookie сессии) ———
+  router.post('/logout', (_req, res) => {
+    clearTmaSessionCookie(res)
+    logTelegramAuth('logout', {})
+    return res.json({ success: true })
+  })
+
+  // ——— POST /auth (Mini App: session token из cookie/header/body или initData) ———
   router.post('/auth', express.json(), async (req, res) => {
-    const hasSessionToken = !!(req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken))
+    const fromCookie = (req.cookies && req.cookies.tma_session_token) || ''
+    const sessionToken = (fromCookie || req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken) || '').toString().trim()
+    const hasSessionToken = !!sessionToken
     const hasInitData = !!(req.headers['x-telegram-initdata'] || (req.body && req.body.initData))
     logTelegramAuth('request', { hasSessionToken, hasInitData })
 
@@ -113,10 +143,10 @@ export function createTelegramRouter(deps) {
         return res.status(503).json({ success: false, error: 'Сервис недоступен' })
       }
     }
-    const appId = process.env.APP_ID || 'skyputh'
+    /** APP_ID из deps или env; единственный допустимый fallback — 'skypath' (см. n8n-webhook-proxy). */
+    const appId = APP_ID || process.env.APP_ID || 'skypath'
     const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
 
-    const sessionToken = (req.headers['x-telegram-session-token'] || (req.body && req.body.sessionToken) || '').toString().trim()
     if (sessionToken) {
       try {
         const bySession = await usersRef.where('telegramSessionToken', '==', sessionToken).limit(1).get()
@@ -130,12 +160,14 @@ export function createTelegramRouter(deps) {
             const customToken = await admin.auth().createCustomToken(uid)
             const userPayload = { id: uid, ...data }
             logTelegramAuth('session_ok', { uid })
+            setTmaSessionCookie(res, sessionToken)
             return res.json({ success: true, customToken, uid, user: userPayload })
           }
           logTelegramAuth('session_fail', { reason: 'expired', uid: doc.id })
         } else {
           logTelegramAuth('session_fail', { reason: 'token_not_found' })
         }
+        clearTmaSessionCookie(res)
       } catch (err) {
         logTelegramAuth('error', { step: 'session', message: err.message })
       }
@@ -172,6 +204,7 @@ export function createTelegramRouter(deps) {
         const customToken = await admin.auth().createCustomToken(uid)
         const userPayload = { id: uid, ...doc.data() }
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
+        setTmaSessionCookie(res, sessionTokenNew)
         return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       uid = `tg_${tgId}`
@@ -186,6 +219,7 @@ export function createTelegramRouter(deps) {
         const customToken = await admin.auth().createCustomToken(uid)
         const userPayload = { id: uid, ...existing.data() }
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
+        setTmaSessionCookie(res, sessionTokenNew)
         return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       const firstName = validated.user.first_name || ''
@@ -217,6 +251,7 @@ export function createTelegramRouter(deps) {
       const customToken = await admin.auth().createCustomToken(uid)
       const userPayload = { id: uid, ...newUserData }
       logTelegramAuth('initData_ok', { uid, tgId, created: true, name })
+      setTmaSessionCookie(res, sessionTokenNew)
       return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
       logTelegramAuth('error', { step: 'create_or_update', message: err.message })
@@ -247,7 +282,7 @@ export function createTelegramRouter(deps) {
       return res.status(400).json({ success: false, error: result.message, reason: result.reason })
     }
     const tgId = result.tgId
-    const appId = process.env.APP_ID || 'skyputh'
+    const appId = APP_ID || process.env.APP_ID || 'skypath'
     const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
     const nowIso = new Date().toISOString()
     const sessionTokenNew = crypto.randomBytes(32).toString('hex')

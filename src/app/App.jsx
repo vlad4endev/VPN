@@ -55,6 +55,7 @@ import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 import { isTmaPath } from '../features/telegram/utils/tmaPath.js'
+import { waitTelegramInitData } from '../features/telegram/utils/waitTelegramInitData.js'
 import TmaLogPanel from '../features/telegram/components/TmaLogPanel.jsx'
 
 // Константа appId для пути Firestore (для обратной совместимости)
@@ -460,9 +461,9 @@ export default function VPNServiceApp() {
   const [welcomeReviews, setWelcomeReviews] = useState([])
   const firebaseInitLoggedRef = useRef(false)
   const welcomeReviewsLoadedRef = useRef(false)
-  const telegramAuthTriedRef = useRef(false)
   const tmaAttemptStartRef = useRef(0)
-  const tmaGiveUpTimerRef = useRef(null)
+  const authInProgressRef = useRef(false)
+  const signInInProgressRef = useRef(false)
   /** User из ответа POST /api/telegram/auth — используется в onAuthStateChanged чтобы не блокировать рендер на loadUserData. */
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
@@ -473,19 +474,7 @@ export default function VPNServiceApp() {
   /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
   const [tmaWaitingAuth, setTmaWaitingAuth] = useState(false)
 
-  // Таймаут для TMA: если на /t дольше 8 с показывается «Загрузка…» — сбрасываем и показываем экран «Откройте из бота»
-  useEffect(() => {
-    if (!tmaWaitingAuth || typeof window === 'undefined') return
-    const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
-    const isTma = isTmaPath(path)
-    if (!isTma) return
-    const t = setTimeout(() => {
-      setTmaWaitingAuth(false)
-      tmaLog('info', 'timeout_8s', 'Таймаут 8 с — показываем экран «Откройте из бота»')
-      logger.info('TelegramAuth', 'TMA: таймаут 8 с — показываем экран «Откройте из бота»')
-    }, 8000)
-    return () => clearTimeout(t)
-  }, [tmaWaitingAuth])
+  // TMA: таймаут ожидания initData (7 с) обрабатывается в эффекте авто-входа; при таймауте показывается экран «Откройте из бота»
 
   // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
   useEffect(() => {
@@ -1101,214 +1090,142 @@ export default function VPNServiceApp() {
     } catch (_) {}
   }, [])
 
-  // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData (initData может появиться с задержкой)
+  // Telegram Mini App: детерминированный авто-вход — waitTelegramInitData(timeout) → затем session или initData (один поток)
   const TMA_LOG = 'TelegramAuth'
-  const [tmaAuthRetryTick, setTmaAuthRetryTick] = useState(0)
-  /** initData из WebApp, из скрипта index.html или из sessionStorage (в TMA вебвью порядок загрузки может отличаться) */
-  const getTmaInitData = useCallback(() => {
-    if (typeof window === 'undefined') return ''
-    const fromWebApp = window.Telegram?.WebApp?.initData
-    const fromGlobal = window.__TELEGRAM_INIT_DATA
-    let raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
-    if (!raw && typeof sessionStorage !== 'undefined') {
-      try {
-        const stored = sessionStorage.getItem('tg_init_data')
-        if (typeof stored === 'string' && stored.trim()) raw = stored
-      } catch (_) {}
-    }
-    return String(raw || '').trim()
-  }, [])
-
-  // Обновляем hasTmaInitData при появлении initData (загрузка SDK с задержкой, событие telegram-initdata-ready, повторы)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (getTmaInitData()) setHasTmaInitData(true)
-    const onReady = () => { if (getTmaInitData()) setHasTmaInitData(true) }
-    window.addEventListener('telegram-initdata-ready', onReady)
-    return () => window.removeEventListener('telegram-initdata-ready', onReady)
-  }, [getTmaInitData, tmaAuthRetryTick])
+  const TMA_INIT_DATA_TIMEOUT_MS = 7000
+  const TMA_FETCH_TIMEOUT_MS = 12000
 
   useEffect(() => {
     if (typeof window === 'undefined') return
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
     const onTmaPath = isTmaPath(pathname)
-    if (!auth || firebaseUser || authChecking) {
-      if (onTmaPath) tmaLog('info', 'auth_skip', 'TMA авто-вход не запущен', { reason: !auth ? 'no_auth' : firebaseUser ? 'already_signed_in' : 'auth_checking' })
+    if (!onTmaPath || !auth || firebaseUser || authChecking) {
+      if (onTmaPath && !auth) tmaLog('info', 'auth_skip', 'TMA авто-вход не запущен', { reason: 'no_auth' })
       return
     }
-    // В TMA вебвью всегда явный origin — избегаем проблем с разрешением относительного URL
+    if (authInProgressRef.current) {
+      tmaLog('info', 'auth_skip', 'TMA авто-вход уже выполняется', { reason: 'auth_in_progress' })
+      return
+    }
+    authInProgressRef.current = true
+
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
       ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
-      : (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '')
-    const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
-    const hasInitData = !!getTmaInitData()
-    // На пути /t показываем «Загрузка…» сразу, пока ждём initData или таймаут — не ждём hasInitData
-    if (onTmaPath && tmaAttemptStartRef.current === 0) {
+      : (window.location?.origin || '')
+    const authUrl = `${base.replace(/\/+$/, '')}/api/telegram/auth`
+
+    if (tmaAttemptStartRef.current === 0) {
       tmaAttemptStartRef.current = Date.now()
-      setTmaWaitingAuth(true)
     }
-    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, isTmaPath: onTmaPath, retryTick: tmaAuthRetryTick })
-    logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
+    setTmaWaitingAuth(true)
+    tmaLog('info', 'auth_start', 'Старт авто-входа TMA: ожидание initData', { isTmaPath: true })
 
-    const TMA_FETCH_TIMEOUT_MS = 12000
-    const TMA_GIVE_UP_MS = 10000
+    let cancelled = false
 
-    const tryInitData = () => {
-      const initData = getTmaInitData()
-      if (!initData || telegramAuthTriedRef.current) {
-        if (!initData) {
-          tmaLog('info', 'initData_empty', 'initData пустой, пропуск')
-          logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
-        }
-        return
-      }
-      telegramAuthTriedRef.current = true
-      tmaLog('info', 'auth_initdata_request', 'Запрос по initData', { initDataLength: initData.length })
-      logger.info(TMA_LOG, 'Авто-вход TMA: запрос по initData', { initDataLength: initData.length })
+    const doSignIn = (data) => {
+      if (signInInProgressRef.current) return Promise.resolve()
+      signInInProgressRef.current = true
+      if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
+      const signInPromise = signInWithCustomToken(auth, data.customToken)
+      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Firebase signIn timeout')), 8000))
+      return Promise.race([signInPromise, timeoutPromise]).finally(() => { signInInProgressRef.current = false })
+    }
+
+    const tryInitDataAuth = (initData) => {
       const ac = new AbortController()
-      const timeoutId = setTimeout(() => ac.abort(), TMA_FETCH_TIMEOUT_MS)
-      const authUrl = `${base.replace(/\/+$/, '')}/api/telegram/auth`
-      fetch(authUrl, {
+      const tid = setTimeout(() => ac.abort(), TMA_FETCH_TIMEOUT_MS)
+      return fetch(authUrl, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
         body: JSON.stringify({ initData }),
         signal: ac.signal,
       })
-        .then((r) => {
-          clearTimeout(timeoutId)
-          tmaLog('info', 'auth_initdata_response', 'Ответ по initData', { status: r.status, ok: r.ok })
-          logger.info(TMA_LOG, 'Авто-вход TMA: ответ по initData', { status: r.status, ok: r.ok })
-          return r.json()
-        })
+        .then((r) => { clearTimeout(tid); return r.json(); })
         .then((data) => {
+          if (cancelled) return
           if (data.success && data.customToken) {
-            tmaLog('info', 'auth_initdata_ok', 'Успех по initData', { hasUser: !!data.user, uid: data.uid })
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user, uid: data.uid })
+            tmaLog('info', 'auth_initdata_ok', 'Успех по initData', { uid: data.uid })
             setTmaWaitingAuth(false)
-            if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
-            if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
-            const signInPromise = signInWithCustomToken(auth, data.customToken)
-            const timeoutMs = 8000
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase signIn timeout')), timeoutMs))
-            return Promise.race([signInPromise, timeoutPromise])
+            authInProgressRef.current = false
+            return doSignIn(data)
           }
           setTmaWaitingAuth(false)
-          if (!data.success) {
-            tmaLog('warn', 'auth_fail_initData', 'Ошибка от сервера', { reason: data.reason, error: data.error })
-            logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка от сервера', { error: data.error, reason: data.reason })
-            setError(data.error || i18n.t('app.telegramSignInFailed'))
-          }
+          authInProgressRef.current = false
+          const reason = data.reason || 'auth_fail'
+          const severity = reason === 'invalid_hash' || reason === 'no_hash' ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
+          const reasonCode = reason === 'invalid_hash' || reason === 'no_hash' ? 'auth_403' : (reason === 'expired' ? 'auth_date_expired' : 'auth_fail')
+          tmaLog(severity, 'auth_fail_initData', 'Ошибка от сервера', { reason: reasonCode, serverReason: data.reason })
+          setError(data.error || i18n.t('app.telegramSignInFailed'))
         })
-        .then(() => {})
         .catch((err) => {
-          clearTimeout(timeoutId)
+          clearTimeout(tid)
+          if (cancelled) return
           setTmaWaitingAuth(false)
+          authInProgressRef.current = false
           const isAbort = err?.name === 'AbortError'
           const isFirebaseTimeout = err?.message === 'Firebase signIn timeout'
-          tmaLog('error', 'auth_error_initData', isFirebaseTimeout ? 'Таймаут входа Firebase' : (isAbort ? 'Таймаут запроса по initData' : 'Сетевая/другая ошибка'), { message: err?.message })
-          logger.error(TMA_LOG, isFirebaseTimeout ? 'Авто-вход TMA: таймаут signInWithCustomToken' : (isAbort ? 'Авто-вход TMA: таймаут запроса по initData' : 'Авто-вход TMA: сетевая/другая ошибка'), { message: err?.message }, err)
-          setError(isFirebaseTimeout ? (i18n.t('app.telegramSignInTimeout') || 'Вход занял слишком много времени. Закройте и откройте приложение из бота снова.') : (isAbort ? (i18n.t('app.telegramSignInTimeout') || 'Превышено время ожидания. Откройте снова из бота.') : (err?.message || i18n.t('app.telegramSignInError'))))
+          const reasonCode = isFirebaseTimeout ? 'firebase_error' : 'network_error'
+          tmaLog('error', 'auth_error_initData', isFirebaseTimeout ? 'Таймаут Firebase' : (isAbort ? 'Таймаут запроса' : 'Сетевая ошибка'), { reason: reasonCode, severity: 'error', message: err?.message })
+          setError(isFirebaseTimeout ? (i18n.t('app.telegramSignInTimeout') || 'Вход занял слишком много времени. Откройте приложение из бота снова.') : (isAbort ? (i18n.t('app.telegramSignInTimeout') || 'Превышено время ожидания. Откройте снова из бота.') : (err?.message || i18n.t('app.telegramSignInError'))))
         })
     }
 
-    // Таймер «сдаться»: один на сессию, ретраи его не сбрасывают (очистка только при размонтировании)
-    if (onTmaPath && !tmaGiveUpTimerRef.current) {
-      tmaGiveUpTimerRef.current = setTimeout(() => {
-        tmaGiveUpTimerRef.current = null
-        tmaLog('info', 'give_up', 'TMA: таймаут ожидания входа, показываем экран подсказки')
-        setTmaWaitingAuth(false)
-      }, TMA_GIVE_UP_MS)
-    }
-
-    if (storedToken) {
-      tmaLog('info', 'auth_session_request', 'Запрос по сессии')
-      logger.info(TMA_LOG, 'Авто-вход TMA: запрос по сессии', {})
-      const acSession = new AbortController()
-      const sessionTimeoutId = setTimeout(() => acSession.abort(), TMA_FETCH_TIMEOUT_MS)
-      const authUrl = `${base.replace(/\/+$/, '')}/api/telegram/auth`
-      fetch(authUrl, {
+    const trySessionAuth = () => {
+      tmaLog('info', 'auth_session_request', 'Запрос по сессии (cookie)')
+      const ac = new AbortController()
+      const tid = setTimeout(() => ac.abort(), TMA_FETCH_TIMEOUT_MS)
+      return fetch(authUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
-        body: JSON.stringify({ sessionToken: storedToken }),
-        signal: acSession.signal,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        signal: ac.signal,
       })
-        .then((r) => {
-          clearTimeout(sessionTimeoutId)
-          tmaLog('info', 'auth_session_response', 'Ответ по сессии', { status: r.status, ok: r.ok })
-          logger.info(TMA_LOG, 'Авто-вход TMA: ответ по сессии', { status: r.status, ok: r.ok })
-          return r.json()
-        })
+        .then((r) => { clearTimeout(tid); return r.json(); })
         .then((data) => {
+          if (cancelled) return true
           if (data.success && data.customToken) {
             tmaLog('info', 'auth_session_ok', 'Успех по сессии', { uid: data.uid })
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user, uid: data.uid })
             setTmaWaitingAuth(false)
-            if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
-            if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
-            const signInPromise = signInWithCustomToken(auth, data.customToken)
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase signIn timeout')), 8000))
-            return Promise.race([signInPromise, timeoutPromise])
+            authInProgressRef.current = false
+            return doSignIn(data).then(() => true)
           }
-          setTmaWaitingAuth(false)
-          tmaLog('warn', 'auth_session_rejected', 'Сессия не принята, пробуем initData', { reason: data.reason })
-          logger.warn(TMA_LOG, 'Авто-вход TMA: сессия не принята, пробуем initData', { reason: data.reason })
-          clearTmaSession()
-          tryInitData()
+          tmaLog('warn', 'auth_session_rejected', 'Сессия не принята', { reason: data.reason })
+          return false
         })
         .catch((err) => {
-          clearTimeout(sessionTimeoutId)
-          setTmaWaitingAuth(false)
-          const isFirebaseTimeout = err?.message === 'Firebase signIn timeout'
-          if (isFirebaseTimeout) {
-            tmaLog('error', 'auth_error_session', 'Таймаут входа Firebase по сессии', { message: err?.message })
-            setError(i18n.t('app.telegramSignInTimeout') || 'Вход занял слишком много времени. Откройте приложение из бота снова.')
-          } else {
-            tmaLog('warn', 'auth_error_session', err?.name === 'AbortError' ? 'Таймаут запроса по сессии' : 'Ошибка запроса по сессии', { message: err?.message })
-            logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка запроса по сессии', { message: err?.message })
-          }
-          clearTmaSession()
-          tryInitData()
+          clearTimeout(tid)
+          if (cancelled) return true
+          tmaLog('warn', 'auth_error_session', err?.name === 'AbortError' ? 'Таймаут запроса по сессии' : 'Ошибка по сессии', { message: err?.message })
+          return false
         })
-    } else {
-      tryInitData()
-      if (!hasInitData) {
-        tmaLog('info', 'initData_retry', 'initData ещё нет, запланированы повторы 400ms, 1.2s, 3s, 5s')
-        logger.info(TMA_LOG, 'Авто-вход TMA: initData ещё нет, запланированы повторы 400ms, 1.2s, 3s, 5s', {})
-        const t1 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 400)
-        const t2 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 1200)
-        const t3 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 3000)
-        const t4 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 5000)
-        return () => {
-          clearTimeout(t1)
-          clearTimeout(t2)
-          clearTimeout(t3)
-          clearTimeout(t4)
-        }
-      }
     }
-    return () => { /* таймер «сдаться» очищается при размонтировании компонента */ }
-  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession, tmaAuthRetryTick, getTmaInitData])
 
-  useEffect(() => {
+    waitTelegramInitData(TMA_INIT_DATA_TIMEOUT_MS)
+      .then((initData) => {
+        if (cancelled) return
+        setHasTmaInitData(true)
+        tmaLog('info', 'initData_ready', 'initData получен, запуск авторизации', { initDataLength: initData.length })
+        return trySessionAuth().then((sessionOk) => {
+          if (cancelled) return
+          if (!sessionOk) return tryInitDataAuth(initData)
+        })
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setTmaWaitingAuth(false)
+        authInProgressRef.current = false
+        const reason = err?.message === 'initData_timeout' ? 'initData_timeout' : 'network_error'
+        tmaLog('warn', 'initData_timeout', 'Таймаут ожидания initData — откройте приложение из меню бота', { reason, severity: 'warn' })
+        logger.warn(TMA_LOG, 'TMA: таймаут ожидания initData', { reason })
+      })
+
     return () => {
-      if (tmaGiveUpTimerRef.current) {
-        clearTimeout(tmaGiveUpTimerRef.current)
-        tmaGiveUpTimerRef.current = null
-      }
+      cancelled = true
+      authInProgressRef.current = false
     }
-  }, [])
-
-  useEffect(() => {
-    if (!auth || firebaseUser || authChecking) return
-    const onReady = () => {
-      telegramAuthTriedRef.current = false
-      tmaLog('info', 'initdata_ready_event', 'Событие telegram-initdata-ready: повтор попытки входа')
-      logger.info(TMA_LOG, 'Событие telegram-initdata-ready: повтор попытки входа', {})
-      setTmaAuthRetryTick((n) => n + 1)
-    }
-    window.addEventListener('telegram-initdata-ready', onReady)
-    return () => window.removeEventListener('telegram-initdata-ready', onReady)
-  }, [auth, firebaseUser, authChecking])
+  }, [auth, firebaseUser, authChecking, storeTmaSession, clearTmaSession])
 
   // Лог смены экрана TMA (loading / open_in_bot / dashboard) для отладки
   const tmaScreenRef = useRef(null)
@@ -2166,6 +2083,12 @@ export default function VPNServiceApp() {
     const userEmail = currentUser?.email
     tmaLog('info', 'logout', 'Выход из аккаунта (очистка TMA сессии)', { hasEmail: !!userEmail })
     logger.info('Auth', 'Выход пользователя', { email: userEmail })
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
+      ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
+      : (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '')
+    try {
+      await fetch(`${base}/api/telegram/logout`, { method: 'POST', credentials: 'include' })
+    } catch (_) {}
     clearTmaSession()
     try {
       if (auth) {

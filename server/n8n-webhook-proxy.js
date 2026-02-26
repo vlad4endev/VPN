@@ -10,6 +10,7 @@
  */
 
 import express from 'express'
+import cookieParser from 'cookie-parser'
 import compression from 'compression'
 import axios from 'axios'
 import cors from 'cors'
@@ -220,9 +221,10 @@ app.use(cors(corsOptions))
 // Gzip compression для JSON и текстовых ответов
 app.use(compression())
 
-// Парсинг JSON
+// Парсинг JSON и cookie (для TMA sessionToken — httpOnly)
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use(cookieParser())
 
 // Метрики запросов (latency, 4xx/5xx, activeRequests)
 app.use(metricsMiddleware({ isWebhookPath }))
@@ -339,11 +341,20 @@ const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const TMA_LOG_BUFFER_MAX = 200
 const tmaLogBuffer = []
 
-/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). */
+/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). Причины: initData_timeout, auth_403, auth_date_expired, network_error, firebase_error. */
 function logTelegramAuth(event, data = {}) {
-  const payload = { ts: new Date().toISOString(), event, ...data }
+  let severity = data.severity
+  if (severity === undefined) {
+    if (event === 'error') severity = 'error'
+    else if (event === 'initData_fail') {
+      const reason = data.reason || ''
+      severity = (reason === 'invalid_hash' || reason === 'no_hash') ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
+    } else if (event === 'session_fail') severity = 'warn'
+    else severity = 'info'
+  }
+  const payload = { ts: new Date().toISOString(), event, severity, ...data }
   const line = `[TMA] ${JSON.stringify(payload)}`
-  if (event === 'error' || event === 'initData_fail' || event === 'session_fail') {
+  if (severity === 'error' || severity === 'warn') {
     console.warn(line)
   } else {
     console.log(line)
@@ -651,7 +662,8 @@ function substituteTemplate(template, user, extra = {}) {
   return out
 }
 
-const APP_ID = process.env.APP_ID || 'skyputh'
+/** Единый APP_ID для Telegram router и артефактов; задаётся через process.env.APP_ID или один допустимый fallback. */
+const APP_ID = process.env.APP_ID || 'skypath'
 
 // Web Push (VAPID) — для уведомлений в фоне (тикеты поддержки)
 const VAPID_PUBLIC = (process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC || '').trim()

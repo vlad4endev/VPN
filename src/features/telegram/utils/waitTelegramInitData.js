@@ -1,0 +1,42 @@
+/**
+ * Ожидание появления initData от Telegram WebApp с таймаутом.
+ * Один детерминированный поток: резолвим при наличии данных, реджектим по таймауту.
+ * @param {number} timeoutMs - таймаут в миллисекундах (например 7000)
+ * @returns {Promise<string>} - initData строка при успехе
+ * @throws {Error} - при таймауте с message 'initData_timeout'
+ */
+export function waitTelegramInitData(timeoutMs = 7000) {
+  const intervalMs = 80
+  const getData = () => {
+    if (typeof window === 'undefined') return ''
+    const fromWebApp = window.Telegram?.WebApp?.initData
+    const fromGlobal = window.__TELEGRAM_INIT_DATA
+    let raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
+    if (!raw && typeof sessionStorage !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('tg_init_data')
+        if (typeof stored === 'string' && stored.trim()) raw = stored
+      } catch (_) {}
+    }
+    return String(raw || '').trim()
+  }
+
+  return new Promise((resolve, reject) => {
+    const start = Date.now()
+    const check = () => {
+      const data = getData()
+      if (data) {
+        resolve(data)
+        return
+      }
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error('initData_timeout'))
+        return
+      }
+      setTimeout(check, intervalMs)
+    }
+    check()
+  })
+}
+
+export default waitTelegramInitData
