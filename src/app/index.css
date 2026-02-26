@@ -37,6 +37,7 @@ html, body {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  background-color: #020617; /* slate-950 — до монтирования React в Mini App/мобильных не чёрный без контента */
 }
 
 body {

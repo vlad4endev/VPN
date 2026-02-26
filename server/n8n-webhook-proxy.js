@@ -6207,6 +6207,129 @@ async function getActiveSubscription(userId) {
   }
 }
 
+/** Базовый URL приложения для ссылки «Оплатить» в напоминаниях */
+function getPaymentPageUrl() {
+  const base = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '')
+  return base ? `${base}/dashboard` : ''
+}
+
+/**
+ * Напоминания о конце подписки (за 2 дня, за 1 день, в день истечения) и отключение при неоплате.
+ * Отправка в Telegram с инлайн-кнопкой на страницу оплаты.
+ */
+async function runSubscriptionRemindersAndExpiry() {
+  if (!db) return
+  const APP_ID = process.env.APP_ID || 'skyputh'
+  const usersRef = db.collection(`artifacts/${APP_ID}/public/data/users_v4`)
+  const subscriptionsRef = db.collection(`artifacts/${APP_ID}/public/data/subscriptions`)
+  const remindersRef = db.collection(`artifacts/${APP_ID}/public/data/subscription_reminders`)
+  const botToken = await getTelegramToken()
+  const paymentPageUrl = getPaymentPageUrl()
+  const now = Date.now()
+  const oneDayMs = 24 * 60 * 60 * 1000
+  const in2DaysEnd = now + 2 * oneDayMs
+
+  const replyMarkupPayment = paymentPageUrl
+    ? { inline_keyboard: [[{ text: 'Оплатить / Продлить', url: paymentPageUrl }]] }
+    : null
+
+  try {
+    const usersSnap = await usersRef.get()
+    let remindersSent = 0
+    let expiredProcessed = 0
+
+    for (const docSnap of usersSnap.docs) {
+      const user = { id: docSnap.id, ...docSnap.data() }
+      const expiresAt = user.expiresAt != null ? (typeof user.expiresAt === 'number' ? user.expiresAt : new Date(user.expiresAt).getTime()) : null
+      if (expiresAt == null || !user.tgId) continue
+
+      if (expiresAt > now) {
+        if (expiresAt > in2DaysEnd) continue
+        const sub = await getActiveSubscription(user.id)
+        if (!sub || sub.status !== 'active') continue
+        const reminderDocRef = remindersRef.doc(user.id)
+        const reminderSnap = await reminderDocRef.get()
+        const reminderData = reminderSnap.exists ? reminderSnap.data() : {}
+        const lastExp = reminderData.lastExpiresAt != null ? (typeof reminderData.lastExpiresAt === 'number' ? reminderData.lastExpiresAt : new Date(reminderData.lastExpiresAt).getTime()) : null
+        if (lastExp !== null && lastExp !== expiresAt) {
+          await reminderDocRef.set({
+            lastExpiresAt: expiresAt,
+            reminder2dSentAt: null,
+            reminder1dSentAt: null,
+            reminder0dSentAt: null,
+          }, { merge: true })
+          Object.assign(reminderData, { reminder2dSentAt: null, reminder1dSentAt: null, reminder0dSentAt: null })
+        }
+        const daysLeft = Math.floor((expiresAt - now) / oneDayMs)
+        const expDateStr = new Date(expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+        let text = ''
+        let key = null
+        if (daysLeft === 2 && !reminderData.reminder2dSentAt) {
+          text = `⏰ Подписка заканчивается через 2 дня (${expDateStr}). Продлите вовремя, чтобы не потерять доступ.`
+          key = 'reminder2dSentAt'
+        } else if (daysLeft === 1 && !reminderData.reminder1dSentAt) {
+          text = `⏰ Подписка заканчивается завтра (${expDateStr}). Продлите подписку для непрерывного доступа.`
+          key = 'reminder1dSentAt'
+        } else if (daysLeft === 0 && !reminderData.reminder0dSentAt) {
+          text = `⏰ Подписка заканчивается сегодня (${expDateStr}). Продлите подписку, чтобы продолжить пользоваться VPN.`
+          key = 'reminder0dSentAt'
+        }
+        if (text && key && botToken) {
+          const opts = replyMarkupPayment ? { reply_markup: replyMarkupPayment } : {}
+          const sendRes = await sendTelegramMessage(botToken, String(user.tgId).trim(), text, opts)
+          if (sendRes && sendRes.ok) {
+            await reminderDocRef.set({ [key]: new Date().toISOString(), lastExpiresAt: expiresAt }, { merge: true })
+            remindersSent++
+          }
+        }
+        continue
+      }
+
+      if (expiresAt >= now - 7 * oneDayMs) {
+        const sub = await getActiveSubscription(user.id)
+        if (!sub || sub.status !== 'active') continue
+        try {
+          await subscriptionsRef.doc(sub.id).update({
+            status: 'expired',
+            updatedAt: new Date().toISOString(),
+          })
+        } catch (e) {
+          console.warn('⚠️ Напоминания: не удалось обновить статус подписки', { userId: user.id, error: e.message })
+        }
+        const userRef = usersRef.doc(user.id)
+        await userRef.update({
+          paymentStatus: 'unpaid',
+          unpaidStartDate: user.unpaidStartDate || new Date(expiresAt).toISOString(),
+          updatedAt: new Date().toISOString(),
+        }).catch((e) => console.warn('⚠️ Напоминания: не удалось обновить user', { userId: user.id, error: e.message }))
+        const uuid = user.uuid || ''
+        const email = (user.email || user.name || '').toString().trim().replace(/\s+/g, '_')
+        try {
+          const { xui, inboundId } = await getXuiAndInboundForRequest({ tariffId: user.tariffId })
+          if (xui && xui.configured && (uuid || email)) {
+            if (uuid) await xui.delClient(inboundId, uuid)
+            else if (email) await xui.delClientByEmail(inboundId, email)
+            console.log('✅ Напоминания: клиент удалён из 3x-ui после истечения подписки', { userId: user.id })
+          }
+        } catch (e) {
+          console.warn('⚠️ Напоминания: не удалось удалить клиента 3x-ui', { userId: user.id, error: e.message })
+        }
+        if (botToken && user.tgId) {
+          const msg = `Подписка истекла. Доступ отключён. Продлите подписку, чтобы снова пользоваться VPN.`
+          await sendTelegramMessage(botToken, String(user.tgId).trim(), msg, replyMarkupPayment ? { reply_markup: replyMarkupPayment } : {}).catch(() => {})
+        }
+        expiredProcessed++
+      }
+    }
+
+    if (remindersSent > 0 || expiredProcessed > 0) {
+      console.log('📋 Напоминания подписок: отправлено', remindersSent, 'отключено за неоплату', expiredProcessed)
+    }
+  } catch (err) {
+    console.warn('⚠️ Напоминания подписок:', err.message)
+  }
+}
+
 /**
  * Отправка создания/обновления клиента 3x-ui через webhook n8n (как раньше).
  * n8n workflow создаёт или обновляет клиента в 3x-ui по переданным данным.
@@ -7210,6 +7333,16 @@ app.listen(PORT, HOST, () => {
     runBackgroundPendingPaymentsCheck().catch(() => {})
   }, 15 * 1000)
   console.log(`📋 Фоновая проверка pending-платежей: каждые ${PAYMENT_CHECK_INTERVAL_MS / 1000} с`)
+
+  // Напоминания о конце подписки (за 2 дня, 1 день, в день истечения) и отключение при неоплате + удаление из 3x-ui
+  const SUBSCRIPTION_REMINDERS_INTERVAL_MS = Number(process.env.SUBSCRIPTION_REMINDERS_INTERVAL_MS) || 6 * 60 * 60 * 1000
+  setInterval(() => {
+    runSubscriptionRemindersAndExpiry().catch((err) => console.warn('⚠️ Напоминания подписок:', err.message))
+  }, SUBSCRIPTION_REMINDERS_INTERVAL_MS)
+  setTimeout(() => {
+    runSubscriptionRemindersAndExpiry().catch(() => {})
+  }, 60 * 1000)
+  console.log(`📋 Напоминания подписок: каждые ${SUBSCRIPTION_REMINDERS_INTERVAL_MS / (60 * 60 * 1000)} ч`)
 
   // Первая очистка через 1 минуту после старта
   setTimeout(async () => {
