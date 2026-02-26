@@ -86,10 +86,15 @@
 
 ### 3. Firebase на сервере (для входа и сессий)
 
-Для выдачи customToken и работы сессий нужен Firebase Admin. В **server/.env** задайте один из вариантов:
+Для выдачи customToken и работы сессий нужен Firebase Admin. Сервер читает переменные из **корневого .env** и из **server/.env** (server/.env дополняет/переопределяет).
 
-- **FIREBASE_SERVICE_ACCOUNT_KEY** — JSON ключа сервисного аккаунта (одной строкой),  
-  или  
-- **FIREBASE_CLIENT_EMAIL** и **FIREBASE_PRIVATE_KEY**.
+Задайте один из вариантов в **server/.env** (или в корневом .env):
 
-Без этого приложение будет возвращать 503 при попытке входа через Telegram.
+- **FIREBASE_SERVICE_ACCOUNT_PATH** — путь к JSON-файлу ключа (удобно, если не хотите ужимать JSON в одну строку).  
+  Пример: положите ключ в `server/firebase-service-account.json` и задайте  
+  `FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json`  
+  (файл уже в .gitignore).
+- **FIREBASE_SERVICE_ACCOUNT_KEY** — JSON ключа **одной строкой** в кавычках (без переносов между полями; внутри `private_key` оставьте `\n`).
+- **FIREBASE_CLIENT_EMAIL** и **FIREBASE_PRIVATE_KEY** — по отдельности.
+
+Без корректной настройки приложение возвращает 503 при попытке входа через Telegram. В логах при старте будет: «Firebase Admin SDK не настроен» или «Ошибка парсинга FIREBASE_SERVICE_ACCOUNT_KEY» (если JSON разбит на несколько строк).

@@ -36,6 +36,11 @@ import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 
 dotenv.config()
+// Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
+const serverEnvPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '.env')
+if (fs.existsSync(serverEnvPath)) {
+  dotenv.config({ path: serverEnvPath, override: false })
+}
 
 /** Для операций с 3x-ui используем только xuiClient (n8n для 3x-ui не используется). */
 function getXuiForVpn() {
