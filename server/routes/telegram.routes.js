@@ -128,8 +128,9 @@ export function createTelegramRouter(deps) {
           if (expiresMs > Date.now()) {
             const uid = doc.id
             const customToken = await admin.auth().createCustomToken(uid)
+            const userPayload = { id: uid, ...data }
             logTelegramAuth('session_ok', { uid })
-            return res.json({ success: true, customToken })
+            return res.json({ success: true, customToken, uid, user: userPayload })
           }
           logTelegramAuth('session_fail', { reason: 'expired', uid: doc.id })
         } else {
@@ -169,8 +170,9 @@ export function createTelegramRouter(deps) {
           updatedAt: nowIso,
         })
         const customToken = await admin.auth().createCustomToken(uid)
+        const userPayload = { id: uid, ...doc.data() }
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
-        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
+        return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       uid = `tg_${tgId}`
       userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${uid}`)
@@ -182,8 +184,9 @@ export function createTelegramRouter(deps) {
           updatedAt: nowIso,
         })
         const customToken = await admin.auth().createCustomToken(uid)
+        const userPayload = { id: uid, ...existing.data() }
         logTelegramAuth('initData_ok', { uid, tgId, created: false })
-        return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
+        return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
       const firstName = validated.user.first_name || ''
       const lastName = validated.user.last_name || ''
@@ -191,7 +194,7 @@ export function createTelegramRouter(deps) {
       const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
       let subId = ''
       for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
-      await userRef.set({
+      const newUserData = {
         email: `tg_${tgId}@telegram.placeholder`,
         login: `tg_${tgId}`,
         name,
@@ -209,10 +212,12 @@ export function createTelegramRouter(deps) {
         photoURL: validated.user.photo_url || null,
         createdAt: nowIso,
         updatedAt: nowIso,
-      })
+      }
+      await userRef.set(newUserData)
       const customToken = await admin.auth().createCustomToken(uid)
+      const userPayload = { id: uid, ...newUserData }
       logTelegramAuth('initData_ok', { uid, tgId, created: true, name })
-      return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
+      return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
       logTelegramAuth('error', { step: 'create_or_update', message: err.message })
       return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })

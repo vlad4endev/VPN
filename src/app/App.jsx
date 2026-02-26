@@ -469,6 +469,19 @@ export default function VPNServiceApp() {
   /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
   const [tmaWaitingAuth, setTmaWaitingAuth] = useState(false)
 
+  // Таймаут для TMA: если на /t дольше 8 с показывается «Загрузка…» — сбрасываем и показываем экран «Откройте из бота»
+  useEffect(() => {
+    if (!tmaWaitingAuth || typeof window === 'undefined') return
+    const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
+    const isTma = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+    if (!isTma) return
+    const t = setTimeout(() => {
+      setTmaWaitingAuth(false)
+      logger.info('TelegramAuth', 'TMA: таймаут 8 с — показываем экран «Откройте из бота»')
+    }, 8000)
+    return () => clearTimeout(t)
+  }, [tmaWaitingAuth])
+
   // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -793,9 +806,10 @@ export default function VPNServiceApp() {
           setCurrentUser(currentUserData)
           setLoading(false)
           setAuthChecking(false)
-          const savedView = localStorage.getItem('vpn_current_view')
-          setView(getAllowedView(savedView, effectiveRole))
-          logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole })
+          const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
+          const onTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+          setView(onTmaPath ? 'tma' : getAllowedView(localStorage.getItem('vpn_current_view'), effectiveRole))
+          logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole, onTmaPath })
           return
         }
         // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
@@ -1126,9 +1140,9 @@ export default function VPNServiceApp() {
         })
         .then((data) => {
           if (data.success && data.customToken) {
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user, uid: data.uid })
             setTmaWaitingAuth(false)
-            if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
+            if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
@@ -1161,9 +1175,9 @@ export default function VPNServiceApp() {
         })
         .then((data) => {
           if (data.success && data.customToken) {
-            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user })
+            logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user, uid: data.uid })
             setTmaWaitingAuth(false)
-            if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
+            if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
             if (data.sessionToken) storeTmaSession(data.sessionToken, data.sessionTokenExpiresAt)
             return signInWithCustomToken(auth, data.customToken)
           }
@@ -4226,8 +4240,9 @@ export default function VPNServiceApp() {
     return <PaymentResultPage success={false} onGoToDashboard={goToDashboard} />
   }
 
-  // Мини-интерфейс для Telegram: отдельная ссылка /t или /telegram — вход только по Telegram ID, личный кабинет по пользователю
-  if (view === 'tma') {
+  // Мини-интерфейс для Telegram: отдельная ссылка /t или /telegram — показываем по pathname и по view (на случай если view ещё не синхронизирован)
+  const isTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+  if (view === 'tma' || isTmaPath) {
     if (currentUser) {
       // Авторизован по Telegram — показываем личный кабинет (компактный режим для Mini App)
       return (
@@ -4274,33 +4289,46 @@ export default function VPNServiceApp() {
     if (tmaWaitingAuth) {
       return (
         <div
-          className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4"
-          style={{ minHeight: '100dvh', backgroundColor: '#020617', color: '#cbd5e1' }}
+          style={{
+            minHeight: 'var(--vh-fill, 100dvh)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#020617',
+            color: '#cbd5e1',
+            padding: '1rem',
+            fontFamily: 'system-ui, sans-serif',
+          }}
         >
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4" />
-          <p className="text-slate-300 font-medium text-center">{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
-          <p className="text-slate-500 text-sm mt-2 text-center">{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
+          <div style={{ width: 48, height: 48, border: '2px solid rgba(59,130,246,0.5)', borderTopColor: 'rgb(59,130,246)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '1rem' }} />
+          <p style={{ margin: 0, fontSize: '1rem', textAlign: 'center' }}>{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
+          <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
         </div>
       )
     }
     return (
       <div
-        className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4"
-        style={{ minHeight: '100dvh', backgroundColor: '#020617', color: '#e2e8f0' }}
+        style={{
+          minHeight: 'var(--vh-fill, 100dvh)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#020617',
+          color: '#e2e8f0',
+          padding: '1rem',
+          fontFamily: 'system-ui, sans-serif',
+        }}
       >
-        <MessageCircle className="w-16 h-16 text-slate-500 mb-4" style={{ color: '#64748b' }} />
-        <h2 className="text-xl font-semibold text-white mb-2 text-center">
+        <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', fontWeight: 600, color: '#fff', textAlign: 'center' }}>
           {(typeof t === 'function' ? t('app.telegramMiniTitle') : null) || 'Личный кабинет в Telegram'}
         </h2>
-        {error && (
-          <p className="text-amber-400 text-sm text-center max-w-sm mb-4">{error}</p>
-        )}
-        <p className="text-slate-400 text-center max-w-sm mb-6">
+        {error && <p style={{ margin: '0 0 1rem', fontSize: '0.875rem', color: '#fbbf24', textAlign: 'center', maxWidth: '20rem' }}>{error}</p>}
+        <p style={{ margin: '0 0 1.5rem', fontSize: '0.875rem', color: '#94a3b8', textAlign: 'center', maxWidth: '20rem' }}>
           {typeof t === 'function' ? t('app.telegramMiniOpenInBot') : 'Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.'}
         </p>
-        <a href="/" className="text-blue-400 hover:text-blue-300 underline text-sm">
-          {typeof t === 'function' ? t('app.goToMainSite') : 'Перейти на основной сайт'}
-        </a>
+        <a href="/" style={{ fontSize: '0.875rem', color: '#60a5fa' }}>{(typeof t === 'function' ? t('app.goToMainSite') : null) || 'Перейти на основной сайт'}</a>
       </div>
     )
   }
