@@ -53,6 +53,8 @@ import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation 
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
+import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
+import TmaLogPanel from '../features/telegram/components/TmaLogPanel.jsx'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -477,6 +479,7 @@ export default function VPNServiceApp() {
     if (!isTma) return
     const t = setTimeout(() => {
       setTmaWaitingAuth(false)
+      tmaLog('info', 'timeout_8s', 'Таймаут 8 с — показываем экран «Откройте из бота»')
       logger.info('TelegramAuth', 'TMA: таймаут 8 с — показываем экран «Откройте из бота»')
     }, 8000)
     return () => clearTimeout(t)
@@ -793,6 +796,7 @@ export default function VPNServiceApp() {
         // Telegram Mini App: если только что вошли по TMA и в ответе auth был user — используем его без loadUserData
         const pendingTma = tmaUserFromAuthRef.current
         if (pendingTma && pendingTma.uid === firebaseUser.uid && pendingTma.user) {
+          tmaLog('info', 'user_from_auth', 'Пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid })
           tmaUserFromAuthRef.current = null
           const userData = pendingTma.user
           const effectiveRole = userData.role || 'user'
@@ -1119,15 +1123,20 @@ export default function VPNServiceApp() {
       tmaAttemptStartRef.current = Date.now()
       setTmaWaitingAuth(true)
     }
+    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
     logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
 
     const tryInitData = () => {
       const initData = getTmaInitData()
       if (!initData || telegramAuthTriedRef.current) {
-        if (!initData) logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
+        if (!initData) {
+          tmaLog('info', 'initData_empty', 'initData пустой, пропуск')
+          logger.info(TMA_LOG, 'Авто-вход TMA: initData пустой, пропуск', {})
+        }
         return
       }
       telegramAuthTriedRef.current = true
+      tmaLog('info', 'auth_initdata_request', 'Запрос по initData', { initDataLength: initData.length })
       logger.info(TMA_LOG, 'Авто-вход TMA: запрос по initData', { initDataLength: initData.length })
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
@@ -1135,11 +1144,13 @@ export default function VPNServiceApp() {
         body: JSON.stringify({ initData }),
       })
         .then((r) => {
+          tmaLog('info', 'auth_initdata_response', 'Ответ по initData', { status: r.status, ok: r.ok })
           logger.info(TMA_LOG, 'Авто-вход TMA: ответ по initData', { status: r.status, ok: r.ok })
           return r.json()
         })
         .then((data) => {
           if (data.success && data.customToken) {
+            tmaLog('info', 'auth_initdata_ok', 'Успех по initData', { hasUser: !!data.user, uid: data.uid })
             logger.info(TMA_LOG, 'Авто-вход TMA: успех по initData', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user, uid: data.uid })
             setTmaWaitingAuth(false)
             if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
@@ -1148,6 +1159,7 @@ export default function VPNServiceApp() {
           }
           setTmaWaitingAuth(false)
           if (!data.success) {
+            tmaLog('warn', 'auth_fail_initData', 'Ошибка от сервера', { reason: data.reason, error: data.error })
             logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка от сервера', { error: data.error, reason: data.reason })
             setError(data.error || i18n.t('app.telegramSignInFailed'))
           }
@@ -1155,6 +1167,7 @@ export default function VPNServiceApp() {
         .then(() => {})
         .catch((err) => {
           setTmaWaitingAuth(false)
+          tmaLog('error', 'auth_error_initData', 'Сетевая/другая ошибка', { message: err?.message })
           logger.error(TMA_LOG, 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
           setError(err?.message || i18n.t('app.telegramSignInError'))
         })
@@ -1163,6 +1176,7 @@ export default function VPNServiceApp() {
     const tmaGiveUpTimer = inTmaContext ? setTimeout(() => setTmaWaitingAuth(false), 6000) : null
 
     if (storedToken) {
+      tmaLog('info', 'auth_session_request', 'Запрос по сессии')
       logger.info(TMA_LOG, 'Авто-вход TMA: запрос по сессии', {})
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
@@ -1170,11 +1184,13 @@ export default function VPNServiceApp() {
         body: JSON.stringify({ sessionToken: storedToken }),
       })
         .then((r) => {
+          tmaLog('info', 'auth_session_response', 'Ответ по сессии', { status: r.status, ok: r.ok })
           logger.info(TMA_LOG, 'Авто-вход TMA: ответ по сессии', { status: r.status, ok: r.ok })
           return r.json()
         })
         .then((data) => {
           if (data.success && data.customToken) {
+            tmaLog('info', 'auth_session_ok', 'Успех по сессии', { uid: data.uid })
             logger.info(TMA_LOG, 'Авто-вход TMA: успех по сессии', { hasUser: !!data.user, uid: data.uid })
             setTmaWaitingAuth(false)
             if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
@@ -1182,12 +1198,14 @@ export default function VPNServiceApp() {
             return signInWithCustomToken(auth, data.customToken)
           }
           setTmaWaitingAuth(false)
+          tmaLog('warn', 'auth_session_rejected', 'Сессия не принята, пробуем initData', { reason: data.reason })
           logger.warn(TMA_LOG, 'Авто-вход TMA: сессия не принята, пробуем initData', { reason: data.reason })
           clearTmaSession()
           tryInitData()
         })
         .catch((err) => {
           setTmaWaitingAuth(false)
+          tmaLog('warn', 'auth_error_session', 'Ошибка запроса по сессии', { message: err?.message })
           logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка запроса по сессии', { message: err?.message })
           clearTmaSession()
           tryInitData()
@@ -1195,6 +1213,7 @@ export default function VPNServiceApp() {
     } else {
       tryInitData()
       if (!hasInitData) {
+        tmaLog('info', 'initData_retry', 'initData ещё нет, запланированы повторы 400ms, 1.2s, 3s, 5s')
         logger.info(TMA_LOG, 'Авто-вход TMA: initData ещё нет, запланированы повторы 400ms, 1.2s, 3s, 5s', {})
         const t1 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 400)
         const t2 = setTimeout(() => setTmaAuthRetryTick((n) => n + 1), 1200)
@@ -1215,6 +1234,7 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
     const onReady = () => {
+      tmaLog('info', 'initdata_ready_event', 'Событие telegram-initdata-ready: повтор попытки входа')
       logger.info(TMA_LOG, 'Событие telegram-initdata-ready: повтор попытки входа', {})
       setTmaAuthRetryTick((n) => n + 1)
     }
@@ -4246,6 +4266,7 @@ export default function VPNServiceApp() {
     if (currentUser) {
       // Авторизован по Telegram — показываем личный кабинет (компактный режим для Mini App)
       return (
+        <>
         <Dashboard
           currentUser={currentUser}
           view="dashboard"
@@ -4284,10 +4305,13 @@ export default function VPNServiceApp() {
           servers={servers}
           isTelegramMini
         />
+        <TmaLogPanel />
+        </>
       )
     }
     if (tmaWaitingAuth) {
       return (
+        <>
         <div
           style={{
             minHeight: 'var(--vh-fill, 100dvh)',
@@ -4305,9 +4329,12 @@ export default function VPNServiceApp() {
           <p style={{ margin: 0, fontSize: '1rem', textAlign: 'center' }}>{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
           <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
         </div>
+        <TmaLogPanel />
+        </>
       )
     }
     return (
+      <>
       <div
         style={{
           minHeight: 'var(--vh-fill, 100dvh)',
@@ -4330,6 +4357,8 @@ export default function VPNServiceApp() {
         </p>
         <a href="/" style={{ fontSize: '0.875rem', color: '#60a5fa' }}>{(typeof t === 'function' ? t('app.goToMainSite') : null) || 'Перейти на основной сайт'}</a>
       </div>
+      <TmaLogPanel />
+      </>
     )
   }
 
