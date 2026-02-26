@@ -53,6 +53,7 @@ root.render(<BootstrapScreen />)
 const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
 const isTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
 if (isTmaPath) {
+  if (typeof window !== 'undefined') window.__TMA_MAIN_LOADED = true
   tmaLog('info', 'bootstrap_tma', 'Путь /t: запуск приложения без ожидания i18n', { path })
   setTimeout(renderApp, 0)
 } else {

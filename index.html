@@ -274,6 +274,26 @@
       </div>
     </noscript>
     <!-- /Yandex.Metrika counter -->
+    <script>
+      (function() {
+        var p = (window.location.pathname || '').replace(/\/+$/, '');
+        if (p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3)) {
+          window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
+          window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'info', event: 'main_loading', message: 'Загрузка main.jsx (React)', data: {} });
+          window.__TMA_MAIN_LOADED = false;
+          setTimeout(function() {
+            if (!window.__TMA_MAIN_LOADED) {
+              window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
+              window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: 'Через 3 с React не запустился — проверьте сеть или откройте из бота', data: {} });
+              var pre = document.getElementById('tma-boot-log');
+              if (pre && window.__TMA_BOOT_LOGS.length) {
+                pre.textContent = window.__TMA_BOOT_LOGS.slice().reverse().map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');
+              }
+            }
+          }, 3000);
+        }
+      })();
+    </script>
     <script type="module" src="/src/app/main.jsx"></script>
   </body>
 </html>
