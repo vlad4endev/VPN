@@ -55,7 +55,7 @@ export default function SetPasswordPage({ onSetView }) {
   }
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
       <div className="flex-1 flex items-center justify-center p-3 sm:p-4 lg:p-6">
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 lg:p-10 shadow-2xl backdrop-blur-xl mx-auto">
           <div className="text-center mb-6 sm:mb-10">

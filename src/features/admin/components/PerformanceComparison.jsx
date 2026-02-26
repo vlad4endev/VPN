@@ -124,7 +124,7 @@ const PerformanceComparison = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col bg-slate-950 p-4 overflow-x-hidden">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Заголовок */}
         <div className="bg-slate-900 rounded-lg shadow-xl p-6 border border-slate-800">

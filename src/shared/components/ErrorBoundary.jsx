@@ -61,7 +61,7 @@ class ErrorBoundary extends Component {
 
       // Стандартный UI ошибки
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+        <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950 p-4 overflow-x-hidden">
           <div className="text-center max-w-md">
             <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-red-400 mb-2">

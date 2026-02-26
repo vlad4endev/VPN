@@ -12,7 +12,7 @@ export default function LoadingSpinner({ message = 'Загрузка...', size =
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950 overflow-x-hidden">
       <div className="text-center">
         <div 
           className={`inline-block animate-spin rounded-full border-t-2 border-b-2 border-blue-600 mb-4 ${sizeClasses[size]}`}

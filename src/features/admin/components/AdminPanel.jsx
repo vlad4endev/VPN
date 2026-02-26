@@ -183,7 +183,7 @@ const AdminPanel = ({
   const sectionInfo = getAdminSectionByTabId(adminTab)
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:flex-row lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
       <Sidebar
         currentUser={currentUser}
         view={sidebarView || 'admin'}

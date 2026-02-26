@@ -45,7 +45,7 @@ export default function PublicReviewPage({ onSetView }) {
   }
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-950 text-slate-200 flex flex-col items-center justify-center p-3 sm:p-4 lg:p-6 overflow-x-hidden selection:bg-blue-500/30">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col items-center justify-center p-3 sm:p-4 lg:p-6 bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
       <div className="w-full max-w-md">
         <a
           href="#welcome"

@@ -23,7 +23,7 @@ export default function Footer() {
 
   return (
     <>
-      <div className="max-sm:hidden border-t border-slate-800/50 bg-slate-950/30">
+      <div className="max-sm:hidden flex-shrink-0 border-t border-slate-800/50 bg-slate-950/30">
         {!isExpanded ? (
           <button
             type="button"

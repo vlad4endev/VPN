@@ -1353,7 +1353,7 @@ const Dashboard = ({
   }, [currentUser?.uid])
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:flex-row lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
       <Sidebar
         currentUser={currentUser}
         view={view}
@@ -1362,7 +1362,7 @@ const Dashboard = ({
         dashboardTab={dashboardTab}
         onSetDashboardTab={onSetDashboardTab}
       />
-      <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:p-8 pt-14 sm:pt-16 lg:pt-6 lg:pt-8 pb-20 sm:pb-24 lg:pb-8 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-8 pt-14 sm:pt-16 lg:pt-6 lg:pt-8 pb-20 sm:pb-24 lg:pb-8 overflow-y-auto overflow-x-hidden">
         <div className="mb-4 sm:mb-5 md:mb-6">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-white mb-1.5 sm:mb-2">{t('sidebar.cabinet')}</h1>
           <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">{t('dashboard.subtitle')}</p>

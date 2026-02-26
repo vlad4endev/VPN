@@ -3,7 +3,7 @@
  * Используется при первой загрузке (когда пользователь ещё не выбрал язык вручную).
  */
 
-const SUPPORTED_LANGS = ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh']
+export const SUPPORTED_LANGS = ['ru', 'en', 'hi', 'ar', 'tg', 'uz', 'kk', 'ky', 'zh']
 
 /** Соответствие кодов браузера/ОС нашим кодам (если отличаются) */
 const LANGUAGE_MAP = {
@@ -70,6 +70,26 @@ export function applySystemLanguageIfNeeded(storageKey = 'vpn-ui-lang') {
   }
   const systemLang = getSystemLanguage('ru')
   return systemLang
+}
+
+/**
+ * Язык интерфейса Telegram (Mini App).
+ * Используется для автоматического выбора языка при первом заходе в TMA.
+ * @returns {string|null} Код из SUPPORTED_LANGS или null
+ */
+export function getTelegramLanguageCode() {
+  if (typeof window === 'undefined') return null
+  try {
+    const code = window.Telegram?.WebApp?.initDataUnsafe?.language_code
+    if (!code || typeof code !== 'string') return null
+    const normalized = String(code).toLowerCase().trim().split(/[-_]/)[0]
+    if (SUPPORTED_LANGS.includes(normalized)) return normalized
+    const withDash = String(code).toLowerCase().trim().replace('_', '-')
+    if (LANGUAGE_MAP[withDash]) return LANGUAGE_MAP[withDash]
+    return null
+  } catch {
+    return null
+  }
 }
 
 export default getSystemLanguage

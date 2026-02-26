@@ -4284,7 +4284,7 @@ export default function VPNServiceApp() {
   // Если loading и пользователь авторизован - показываем загрузку
   if (loading && currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+      <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4"></div>
           <p className="text-slate-400">Загрузка...</p>
@@ -4305,7 +4305,7 @@ export default function VPNServiceApp() {
     // В Telegram Mini App: пока ждём авто-вход (до 6 с), показываем загрузку вместо формы
     if (isTelegramApp && tmaWaitingAuth && !error) {
       return (
-        <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950">
+        <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col items-center justify-center p-6 bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
           <div className="inline-block w-10 h-10 border-2 border-blue-500/50 border-t-blue-400 rounded-full animate-spin mb-4" />
           <p className="text-slate-300 font-medium text-center">{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
           <p className="text-slate-500 text-sm mt-2 text-center max-w-xs">Открыто из бота — входим автоматически</p>
@@ -4353,14 +4353,14 @@ export default function VPNServiceApp() {
       return null
     }
     return (
-      <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden overflow-x-hidden">
+      <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:flex-row lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
         <SidebarNav
           currentUser={currentUser}
           view="finances"
           onSetView={setView}
           onLogout={handleLogout}
         />
-        <div className="flex-1 w-full min-w-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
           <div className="w-full max-w-content mx-auto">
             <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
               <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
@@ -4381,7 +4381,7 @@ export default function VPNServiceApp() {
       return null
     }
     return (
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+      <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <SupportView
         currentUser={currentUser}
         onSetView={setView}
@@ -4399,7 +4399,7 @@ export default function VPNServiceApp() {
   if (view === 'analytics') {
     if (authChecking) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4" />
             <p className="text-slate-400">Загрузка...</p>
@@ -4417,7 +4417,7 @@ export default function VPNServiceApp() {
       if (tab !== 'analytics-funnel') setView('admin')
     }
     return (
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+      <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <AdminViewWithContext
         currentUser={currentUser}
         users={users}
@@ -4501,7 +4501,7 @@ export default function VPNServiceApp() {
     // Не монтируем админку до завершения проверки auth (после redirect и т.п.) — иначе useAdmin/контекст могут получить неготовые зависимости
     if (authChecking) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4" />
             <p className="text-slate-400">Загрузка...</p>
@@ -4521,7 +4521,7 @@ export default function VPNServiceApp() {
     }
     
     return (
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+      <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <AdminViewWithContext
         currentUser={currentUser}
         users={users}
@@ -4605,7 +4605,7 @@ export default function VPNServiceApp() {
     // Если пользователь админ, но view не 'admin' - показываем личный кабинет
     // Админы тоже имеют личный кабинет со своими данными
     return (
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+      <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <Dashboard
         currentUser={currentUser}
         view={view}
@@ -4650,7 +4650,7 @@ export default function VPNServiceApp() {
   // Показываем loading экран, пока проверяется авторизация
   if (authChecking || loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
           <p className="text-slate-400 text-sm">Загрузка...</p>

@@ -11,7 +11,7 @@ import { AlertCircle } from 'lucide-react'
 export default function ConfigErrorScreen({ configError }) {
   const { t } = useTranslation()
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950 p-4 overflow-x-hidden">
       <div className="max-w-2xl w-full bg-slate-900 rounded-lg shadow-xl p-8 border border-red-800">
         <div className="flex items-center gap-3 mb-4">
           <AlertCircle className="w-8 h-8 text-red-400" />

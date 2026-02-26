@@ -66,7 +66,7 @@ export default function PaymentResultPage({ success, onGoToDashboard }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col items-center justify-center p-4 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950">
+      <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col items-center justify-center p-4 bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
         <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
         <p className="text-slate-400">{t('paymentResult.loading')}</p>
       </div>
@@ -80,7 +80,7 @@ export default function PaymentResultPage({ success, onGoToDashboard }) {
   const bgClass = success ? 'bg-emerald-900/20' : 'bg-red-900/20'
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-950 flex flex-col bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
       <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
         <div className={`w-full max-w-md bg-slate-900/90 border ${cardBorderClass} rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl`}>
           <div className="flex flex-col items-center text-center mb-6">
