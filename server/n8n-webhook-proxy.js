@@ -99,16 +99,28 @@ async function initFirebaseAdmin() {
       }
     }
 
-    // Вариант 1: Service Account JSON из env
+    // Вариант 1: Service Account JSON из env (одной строкой или с переносами — пробуем оба варианта)
     const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
     if (serviceAccountKey && !credential) {
+      let serviceAccount = null
       try {
-        const serviceAccount = JSON.parse(serviceAccountKey)
-        if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
-        credential = firebaseAdmin.credential.cert(serviceAccount)
-        console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
-      } catch (err) {
-        console.log('⚠️ Ошибка парсинга FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
+        serviceAccount = JSON.parse(serviceAccountKey)
+      } catch {
+        try {
+          serviceAccount = JSON.parse(serviceAccountKey.replace(/\r?\n/g, ''))
+        } catch (err) {
+          console.log('⚠️ Ошибка парсинга FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
+          console.log('   Подсказка: сохраните ключ в server/firebase-service-account.json и задайте FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json')
+        }
+      }
+      if (serviceAccount) {
+        try {
+          if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+          credential = firebaseAdmin.credential.cert(serviceAccount)
+          console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
+        } catch (err) {
+          console.log('⚠️ Ошибка инициализации credential из FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
+        }
       }
     }
 

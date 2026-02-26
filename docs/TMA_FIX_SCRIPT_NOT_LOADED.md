@@ -88,9 +88,11 @@
 
 Для выдачи customToken и работы сессий нужен Firebase Admin. Сервер читает переменные из **корневого .env** и из **server/.env** (server/.env дополняет/переопределяет).
 
-Задайте один из вариантов в **server/.env** (или в корневом .env):
+Задайте в **server/.env** (или в корневом .env):
 
-- **FIREBASE_SERVICE_ACCOUNT_PATH** — путь к JSON-файлу ключа (удобно, если не хотите ужимать JSON в одну строку).  
+- **FIREBASE_PROJECT_ID** — идентификатор проекта Firebase (как в Firebase Console), например `skypathvpn`. Должен совпадать с `project_id` в ключе сервисного аккаунта.
+- Один из вариантов ключа:
+  - **FIREBASE_SERVICE_ACCOUNT_PATH** — путь к JSON-файлу ключа (удобно, если не хотите ужимать JSON в одну строку).  
   Пример: положите ключ в `server/firebase-service-account.json` и задайте  
   `FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json`  
   (файл уже в .gitignore).
