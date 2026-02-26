@@ -54,6 +54,7 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
+import { isTmaPath } from '../features/telegram/utils/tmaPath.js'
 import TmaLogPanel from '../features/telegram/components/TmaLogPanel.jsx'
 
 // Константа appId для пути Firestore (для обратной совместимости)
@@ -373,7 +374,7 @@ export default function VPNServiceApp() {
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
         // Отдельная ссылка для Telegram Mini App: вход только по Telegram ID, личный кабинет по пользователю
-        if (path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)) return 'tma'
+        if (isTmaPath(path)) return 'tma'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -476,7 +477,7 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (!tmaWaitingAuth || typeof window === 'undefined') return
     const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
-    const isTma = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+    const isTma = isTmaPath(path)
     if (!isTma) return
     const t = setTimeout(() => {
       setTmaWaitingAuth(false)
@@ -583,7 +584,7 @@ export default function VPNServiceApp() {
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
-      if (path === '/t' || path === '/telegram' || (path.startsWith('/t/') && path.length > 3)) setViewState('tma')
+      if (isTmaPath(path)) setViewState('tma')
     }
     syncViewFromUrl()
     window.addEventListener('hashchange', syncViewFromUrl)
@@ -598,7 +599,7 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const path = (window.location.pathname || '').replace(/\/+$/, '')
-    const isTma = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+    const isTma = isTmaPath(path)
     if (isTma && authChecking && !currentUser) setTmaWaitingAuth(true)
   }, [authChecking, currentUser])
 
@@ -820,7 +821,7 @@ export default function VPNServiceApp() {
           setLoading(false)
           setAuthChecking(false)
           const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
-          const onTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
+          const onTmaPath = isTmaPath(path)
           setView(onTmaPath ? 'tma' : getAllowedView(localStorage.getItem('vpn_current_view'), effectiveRole))
           logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole, onTmaPath })
           return
@@ -1130,9 +1131,9 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
-    const isTmaPath = pathname === '/t' || pathname === '/telegram' || pathname === 't' || (pathname.startsWith('/t/') && pathname.length > 3)
+    const onTmaPath = isTmaPath(pathname)
     if (!auth || firebaseUser || authChecking) {
-      if (isTmaPath) tmaLog('info', 'auth_skip', 'TMA авто-вход не запущен', { reason: !auth ? 'no_auth' : firebaseUser ? 'already_signed_in' : 'auth_checking' })
+      if (onTmaPath) tmaLog('info', 'auth_skip', 'TMA авто-вход не запущен', { reason: !auth ? 'no_auth' : firebaseUser ? 'already_signed_in' : 'auth_checking' })
       return
     }
     // В TMA вебвью всегда явный origin — избегаем проблем с разрешением относительного URL
@@ -1142,11 +1143,11 @@ export default function VPNServiceApp() {
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
     const hasInitData = !!getTmaInitData()
     // На пути /t показываем «Загрузка…» сразу, пока ждём initData или таймаут — не ждём hasInitData
-    if (isTmaPath && tmaAttemptStartRef.current === 0) {
+    if (onTmaPath && tmaAttemptStartRef.current === 0) {
       tmaAttemptStartRef.current = Date.now()
       setTmaWaitingAuth(true)
     }
-    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, isTmaPath, retryTick: tmaAuthRetryTick })
+    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, isTmaPath: onTmaPath, retryTick: tmaAuthRetryTick })
     logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
 
     const TMA_FETCH_TIMEOUT_MS = 12000
@@ -1211,7 +1212,7 @@ export default function VPNServiceApp() {
     }
 
     // Таймер «сдаться»: один на сессию, ретраи его не сбрасывают (очистка только при размонтировании)
-    if (isTmaPath && !tmaGiveUpTimerRef.current) {
+    if (onTmaPath && !tmaGiveUpTimerRef.current) {
       tmaGiveUpTimerRef.current = setTimeout(() => {
         tmaGiveUpTimerRef.current = null
         tmaLog('info', 'give_up', 'TMA: таймаут ожидания входа, показываем экран подсказки')
@@ -1314,8 +1315,7 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
-    const isTma = pathname === '/t' || pathname === '/telegram' || pathname === 't' || (pathname.startsWith('/t/') && pathname.length > 3)
-    if (!isTma) {
+    if (!isTmaPath(pathname)) {
       tmaScreenRef.current = null
       return
     }
@@ -4360,8 +4360,8 @@ export default function VPNServiceApp() {
   }
 
   // Мини-интерфейс для Telegram: отдельная ссылка /t или /telegram — показываем по pathname и по view (на случай если view ещё не синхронизирован)
-  const isTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
-  if (view === 'tma' || isTmaPath) {
+  const onTmaPath = isTmaPath(path)
+  if (view === 'tma' || onTmaPath) {
     if (currentUser) {
       // Авторизован по Telegram — показываем личный кабинет (компактный режим для Mini App)
       return (

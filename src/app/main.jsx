@@ -10,6 +10,7 @@ import { i18nReady } from '../i18n'
 import logger from '../shared/utils/logger.js'
 import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
+import { isTmaPath } from '../features/telegram/utils/tmaPath.js'
 
 logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
@@ -50,11 +51,10 @@ const renderApp = () => {
 root.render(<BootstrapScreen />)
 
 // На /t (Telegram Mini App) монтируем приложение сразу, не ждём i18n — иначе «Загрузка…» висит до 8 с
-const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
-const isTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
-if (isTmaPath) {
+const path = typeof window !== 'undefined' ? (window.location.pathname || '') : ''
+if (isTmaPath(path)) {
   if (typeof window !== 'undefined') window.__TMA_MAIN_LOADED = true
-  tmaLog('info', 'bootstrap_tma', 'Путь /t: запуск приложения без ожидания i18n', { path })
+  tmaLog('info', 'bootstrap_tma', 'Путь /t: запуск приложения без ожидания i18n', { path: path.replace(/\/+$/, '') })
   setTimeout(renderApp, 0)
 } else {
   const I18N_TIMEOUT_MS = 8000

@@ -181,6 +181,7 @@
         return originalFetch.call(this, url, options);
       };
       // На /t откладываем загрузку SDK, чтобы сначала сработало внедрение Telegram (иначе наш скрипт может перезаписать объект без initData)
+      // Условие пути должно совпадать с isTmaPath() в src/features/telegram/utils/tmaPath.js
       var isTmaPath = (function() {
         var p = (window.location.pathname || '').replace(/\/+$/, '');
         return p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3);
@@ -209,7 +210,7 @@
       })();
     </script>
     <div id="root">
-      <!-- До загрузки React показываем загрузку для Mini App (/t) — уменьшает пустой экран. Ранний лог для отладки. -->
+      <!-- До загрузки React показываем загрузку для Mini App (/t). Условие пути = isTmaPath в tmaPath.js -->
       <script>
         (function() {
           var p = (window.location.pathname || '').replace(/\/+$/, '');
@@ -284,7 +285,7 @@
           setTimeout(function() {
             if (!window.__TMA_MAIN_LOADED) {
               window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
-              window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: 'Через 3 с React не запустился — проверьте сеть или откройте из бота', data: {} });
+              window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: 'Скрипт приложения не загрузился за 3 с. Деплой: используйте папку dist после npm run build (не исходный index.html). Откройте из меню бота в Telegram.', data: {} });
               var pre = document.getElementById('tma-boot-log');
               if (pre && window.__TMA_BOOT_LOGS.length) {
                 pre.textContent = window.__TMA_BOOT_LOGS.slice().reverse().map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');

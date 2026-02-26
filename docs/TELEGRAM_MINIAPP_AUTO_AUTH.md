@@ -18,10 +18,11 @@
 1. **Сервер должен отдавать `index.html` для пути `/t` (SPA fallback).**
    - При использовании **n8n-webhook-proxy**: собранный frontend (`npm run build`) должен лежать в `dist/` рядом с сервером; тогда сервер сам отдаёт статику и для GET `/t` возвращает `index.html`.
    - При использовании **nginx** перед приложением добавьте в `location /`: `try_files $uri $uri/ /index.html;`, чтобы запросы к `/t` (и другим путям SPA) получали `index.html`.
-2. **HTTPS.** Mini App в Telegram открывается только по HTTPS (для production).
-3. **Токен бота.** В настройках бота (Интеграции → Telegram) должен быть сохранён тот же токен, что и у бота, из которого открывается Mini App — иначе проверка подписи `initData` вернёт 403.
+2. **Деплой только из папки `dist/`.** В логах отладки на экране `/t» если видите только `[html_boot]`, `[main_loading]` и через 3 с `[main_timeout]` — значит скрипт приложения не загрузился. **Причина:** в production должен отдаваться **собранный** frontend: выполните `npm run build` и задеплойте содержимое папки `dist/` (в т.ч. `index.html` и папку `assets/`). Не отдавайте исходный `index.html` из корня репозитория — в нём указан путь `/src/app/main.jsx`, которого нет на статическом сервере (будет 404).
+3. **HTTPS.** Mini App в Telegram открывается только по HTTPS (для production).
+4. **Токен бота.** В настройках бота (Интеграции → Telegram) должен быть сохранён тот же токен, что и у бота, из которого открывается Mini App — иначе проверка подписи `initData` вернёт 403.
 
-4. **«TMA WebApp present, but initData empty» (Telegram 6.0).** В некоторых клиентах (например версия 6.0) `Telegram.WebApp.initData` может быть пустым в момент загрузки страницы. Приложение повторно проверяет initData через 300 ms, 1.2 s и 3 s; также используется fallback из `sessionStorage` и из hash (`tgWebAppData=...`), если Telegram передал данные в URL. Если через ~10 с вход не произошёл, показывается экран «Откройте из бота» — пользователь может закрыть и открыть Mini App снова.
+5. **«TMA WebApp present, but initData empty» (Telegram 6.0).** В некоторых клиентах (например версия 6.0) `Telegram.WebApp.initData` может быть пустым в момент загрузки страницы. Приложение повторно проверяет initData через 300 ms, 1.2 s и 3 s; также используется fallback из `sessionStorage` и из hash (`tgWebAppData=...`), если Telegram передал данные в URL. Если через ~10 с вход не произошёл, показывается экран «Откройте из бота» — пользователь может закрыть и открыть Mini App снова.
 
 ---
 
@@ -283,3 +284,312 @@ if (initData) {
     - Разрешать запросы только с доверенных доменов Mini App; не отдавать лишние заголовки и не раскрывать внутренние ошибки в ответах 403/400.
 
 Реализация в вашем проекте уже соответствует описанной схеме; при необходимости достаточно явно возвращать **403** при невалидной подписи initData и при необходимости добавить опциональную защиту от replay по hash.
+
+---
+
+## Настройка nginx для Mini App и SPA
+
+Чтобы Mini App по адресу `https://ваш-домен/t` открывался корректно, nginx должен либо проксировать запросы на Node-сервер (который отдаёт `dist/` и API), либо сам раздавать статику из `dist/` и проксировать только `/api` на Node. Ниже — оба варианта и общие правила.
+
+### Почему не работают отдельные правила для `/t` и `/review`
+
+Если в панели (nginx, панель хостинга и т.п.) вы добавляете **отдельные «местоположения»** только для путей `/t` и `/review`:
+
+- Запросы на **`/`**, **`/assets/*`**, **`/dashboard`** и т.д. **не попадают** в эти правила и могут отдаваться другим виртуальным хостом или давать 404.
+- Для SPA нужен **один и тот же** `index.html` для всех путей: и для `/`, и для `/t`, и для `/review`. Скрипты приложения лежат в `/assets/`. Если проксируются только `/t` и `/review`, то запросы к `/assets/index-xxxxx.js` не доходят до вашего приложения — скрипт не грузится, в логах будет `[main_timeout]`.
+
+**Что сделать в панели:**
+
+1. **Удалите** отдельные правила для «Расположение: `/t`» и «Расположение: `/review`».
+2. Настройте **одно** правило проксирования для **всего** сайта:
+   - **Расположение (Location):** `/` (или оставьте пустым/«по умолчанию», если панель так трактует «весь сайт»).
+   - **Схема (Scheme):** **`http`** (бэкенд почти всегда слушает HTTP; HTTPS терминация — на прокси).
+   - **Переадресация хоста / IP:** `127.0.0.1` или `localhost` (или IP вашего Node-сервера).
+   - **Прямой порт (Direct port):** порт, на котором слушает ваше приложение — например **`3001`** (для n8n-webhook-proxy), а не 80, если Node не висит именно на 80.
+
+3. Убедитесь, что запросы к **любому** пути (`/`, `/t`, `/review`, `/api/...`) идут на этот бэкенд. Тогда и `/t`, и `/assets/*` будет отдавать одно приложение (Node с папкой `dist/` и SPA fallback).
+
+### Что должно быть в итоге
+
+- **HTTPS** — Mini App в Telegram открывается только по HTTPS.
+- **Путь `/t`** — по запросу `GET /t` клиент должен получить **тот же** `index.html`, что и для `/` (SPA fallback), а не 404.
+- **Файлы из сборки** — по путям вида `/assets/index-xxxxx.js`, `/assets/vendor-xxxxx.js`, `/favicon.svg` и т.д. должны отдаваться реальные файлы из папки `dist/` (после `npm run build`).
+- **API** — запросы к `/api/*` должны уходить на ваш Node-сервер (например, n8n-webhook-proxy на порту 3001).
+
+Подставьте свои значения:
+- `skypath.fun` или `www.skypath.fun` — ваш домен;
+- `/var/www/skypath/dist` — каталог, куда положена сборка (содержимое папки `dist/` проекта);
+- `http://127.0.0.1:3001` — адрес вашего Node-приложения.
+
+**Локальный запуск (start/start-all) vs продакшен:**
+
+- **Backend (n8n Webhook Proxy)** на `http://localhost:3001` — это тот сервис, на который nginx должен проксировать (в панели укажите порт **3001**).
+- **Frontend на порту 5173** — это Vite dev-сервер, только для разработки. В продакшене nginx **не** обращается к 5173: весь трафик идёт на **3001**. Приложение на 3001 отдаёт статику из папки **`dist/`** (после `npm run build`). Поэтому перед деплоем обязательно выполните `npm run build` и убедитесь, что папка `dist/` есть рядом с сервером (n8n-webhook-proxy ищет её относительно своей рабочей директории).
+
+---
+
+### Вариант 1: nginx только как reverse proxy (всё через Node)
+
+Node-сервер сам отдаёт статику из `dist/` и обрабатывает `/api`. nginx только принимает HTTPS и проксирует весь трафик на Node.
+
+**1. Файл конфигурации сайта** (например `/etc/nginx/sites-available/skypath.fun` или внутри `http { }` в `nginx.conf`):
+
+```nginx
+# Редирект с HTTP на HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name skypath.fun www.skypath.fun;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS — всё проксируем на Node
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name skypath.fun www.skypath.fun;
+
+    # Сертификаты (Let's Encrypt через certbot)
+    ssl_certificate     /etc/letsencrypt/live/skypath.fun/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/skypath.fun/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # Увеличенный размер тела для API (загрузки, webhook и т.д.)
+    client_max_body_size 10M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+**Что важно:** для путей `/`, `/t`, `/dashboard` и т.д. запрос уходит на Node; ваш сервер (n8n-webhook-proxy) отдаёт из `dist/` статику и для неизвестных путей — `index.html`. Отдельный SPA fallback в nginx не нужен.
+
+**2. Включить конфиг и перезагрузить nginx:**
+
+```bash
+sudo ln -sf /etc/nginx/sites-available/skypath.fun /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**3. Сертификат Let's Encrypt (если ещё нет):**
+
+```bash
+sudo certbot --nginx -d skypath.fun -d www.skypath.fun
+```
+
+После этого Mini App по `https://ваш-домен/t` будет получать от Node тот же `index.html` и скрипты из `dist/`.
+
+---
+
+### Вариант 2: nginx раздаёт статику из dist, API — на Node
+
+Статика отдаётся напрямую из nginx (меньше нагрузка на Node), запросы к `/api` проксируются на Node.
+
+**1. Положить сборку на сервер**, например:
+
+```bash
+# На сервере после npm run build
+/var/www/skypath/dist/
+├── index.html
+├── assets/
+│   ├── index-xxxxx.js
+│   ├── vendor-xxxxx.js
+│   ├── firebase-xxxxx.js
+│   └── index-xxxxx.css
+├── favicon.svg
+└── ...
+```
+
+**2. Конфигурация nginx:**
+
+```nginx
+# Редирект HTTP → HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name skypath.fun www.skypath.fun;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name skypath.fun www.skypath.fun;
+
+    ssl_certificate     /etc/letsencrypt/live/skypath.fun/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/skypath.fun/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    client_max_body_size 10M;
+
+    # Корень сайта — каталог со сборкой
+    root /var/www/skypath/dist;
+    index index.html;
+
+    # API — проксируем на Node (порт 3001 или ваш)
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Статика: файлы из dist (в т.ч. /assets/*, /favicon.svg и т.д.)
+    location /assets/ {
+        alias /var/www/skypath/dist/assets/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location = /favicon.svg {
+        alias /var/www/skypath/dist/favicon.svg;
+        expires 7d;
+    }
+
+    # SPA fallback: все остальные GET-запросы (/, /t, /dashboard, /payment/...) отдаём index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+**Почему это нужно для Mini App:** при открытии `https://ваш-домен/t` nginx не находит файл `/t`, срабатывает `try_files` и отдаётся `/index.html`. Браузер затем запрашивает `/assets/index-xxxxx.js` и остальные файлы — они отдаются из `dist/assets/`. Так скрипт приложения загружается и в логах появляется `[bootstrap_tma]` вместо `[main_timeout]`.
+
+**3. Права и перезагрузка:**
+
+```bash
+sudo chown -R www-data:www-data /var/www/skypath/dist
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+---
+
+### Кратко по директивам
+
+| Директива | Назначение |
+|-----------|------------|
+| `root /var/www/skypath/dist` | Корень файлов сайта — папка со сборкой. |
+| `try_files $uri $uri/ /index.html` | Сначала ищем файл/каталог по URI; если нет — отдаём `index.html` (SPA и путь `/t`). |
+| `location /api/` | Все запросы к API уходят на Node. |
+| `location /assets/` | Раздаём JS/CSS из сборки с долгим кэшем. |
+| `proxy_pass http://127.0.0.1:3001` | Адрес вашего Node-сервера. |
+| `proxy_set_header X-Forwarded-Proto $scheme` | Чтобы приложение видело запрос как HTTPS. |
+
+### Проверка
+
+- В браузере: `https://ваш-домен/t` — открывается интерфейс Mini App (загрузка, затем кабинет или подсказка «Откройте из бота»).
+- В логах отладки на экране `/t`: есть `[html_boot]`, `[main_loading]`, затем `[bootstrap_tma]` (без `[main_timeout]`).
+- Прямая проверка: `curl -I https://ваш-домен/assets/index-xxxxx.js` — ответ 200 (подставьте реальное имя файла из `dist/assets/`).
+
+---
+
+### 502 Bad Gateway — что проверить
+
+502 значит: прокси (nginx или панель) доходит до бэкенда, но **бэкенд не отвечает** или недоступен.
+
+**1. Запущен ли Node-сервер**
+
+Приложение (n8n-webhook-proxy или proxy-server) должно быть запущено и слушать порт, на который идёт прокси.
+
+На сервере выполните:
+
+```bash
+# Проверить, слушает ли что-то на порту 3001
+ss -tlnp | grep 3001
+# или
+netstat -tlnp | grep 3001
+```
+
+Если пусто — бэкенд не запущен. Запустите его, например:
+
+```bash
+cd /путь/к/проекту
+PORT=3001 node server/n8n-webhook-proxy.js
+```
+
+Или через pm2:
+
+```bash
+pm2 start server/n8n-webhook-proxy.js --name app -- --port 3001
+# или если порт задаётся через env:
+PORT=3001 pm2 start server/n8n-webhook-proxy.js --name app
+```
+
+**2. Правильный ли порт в настройках прокси**
+
+- n8n-webhook-proxy по умолчанию слушает **3001** (`process.env.PORT || 3001`).
+- proxy-server по умолчанию тоже **3001** (`PROXY_PORT || 3001`).
+
+В панели в поле «Прямой порт» должно быть указано **то же число**, на котором реально слушает процесс (чаще всего **3001**), а не 80.
+
+**3. Проверка с сервера напрямую**
+
+На той же машине, где крутится nginx:
+
+```bash
+curl -I http://127.0.0.1:3001/
+```
+
+Ожидается ответ `200` или `304`. Если `Connection refused` — сервис на 3001 не запущен или слушает другой интерфейс.
+
+**4. Лог nginx**
+
+В логах обычно видна причина 502:
+
+```bash
+sudo tail -50 /var/log/nginx/error.log
+```
+
+Типичные сообщения: `connect() failed (111: Connection refused)` — бэкенд не запущен или не тот порт; `upstream timed out` — бэкенд не успевает ответить.
+
+**5. Схема к бэкенду**
+
+В настройках прокси к бэкенду должна быть схема **http** (не https), если приложение слушает обычный HTTP. Хост: **127.0.0.1** или **localhost**, порт: **3001**.
+
+---
+
+### Let's Encrypt: «rateLimited» / «temporarily prevented from requesting certificates»
+
+Ошибка вида:
+
+```text
+urn:ietf:params:acme:error:rateLimited :: There were too many requests of a given type ::
+Your account is temporarily prevented from requesting certificates for sol.skypath.fun and possibly others.
+```
+
+означает, что Let's Encrypt **временно ограничил** ваш аккаунт из‑за слишком частых запросов сертификатов (в т.ч. продлений).
+
+**Что сделать:**
+
+1. **Разблокировать аккаунт (unpause)**  
+   В тексте ошибки есть ссылка вида:
+   ```text
+   https://portal.letsencrypt.org/sfe/v1/unpause?jwt=...
+   ```
+   Откройте её в браузере (лучше последнюю из логов). Подтвердите разблокировку. После этого новые запросы сертификатов снова станут возможны (часто — после окончания окна блокировки).
+
+2. **Убрать лишние продления в Nginx Proxy Manager**  
+   В логах видно, что продление запускается **каждый час** с флагом **`--force-renewal`**. Из‑за этого и срабатывает лимит.  
+   - В NPM: **SSL Certificates** → сертификат для `sol.skypath.fun` → настройки продления.  
+   - Отключите принудительное продление (force renewal), если такая опция есть.  
+   - Оставьте обычное продление «за 30 дней до истечения» и не запускайте его чаще 1–2 раз в сутки.  
+   При необходимости отключите авто-продление для этого сертификата на 1–2 дня, пока действует ограничение.
+
+3. **Подождать**  
+   Ограничения Let's Encrypt действуют ограниченное время (часы/дни). После unpause и паузы в частых запросах продление снова начнёт проходить.
+
+4. **Проверить текущий сертификат**  
+   Если сертификат ещё действителен (не истёк), сайт продолжит работать по HTTPS. Проблема только с *новым* выпуском/продлением. После снятия лимита продление пройдёт в обычном режиме.
