@@ -106,7 +106,10 @@ export default function TmaLogPanel() {
               </div>
             ))}
             {!entries.length && !getTmaLogs(1).length && (
-              <p className="text-slate-500 italic">Событий пока нет. Выполните вход или обновите страницу.</p>
+              <div className="text-slate-500 text-xs space-y-2">
+                <p className="italic">Событий пока нет.</p>
+                <p>Если экран пустой или «Загрузка…» не исчезает — откройте ссылку из меню бота в Telegram (не в браузере). Логи появятся после загрузки скриптов.</p>
+              </div>
             )}
           </div>
         </div>

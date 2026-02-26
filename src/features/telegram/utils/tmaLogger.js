@@ -33,6 +33,13 @@ function sanitize(data) {
 const buffer = []
 let enabled = true
 
+// Подмешать ранние записи из index.html (до загрузки React), чтобы логи были даже при ошибке загрузки
+if (typeof window !== 'undefined' && window.__TMA_BOOT_LOGS && Array.isArray(window.__TMA_BOOT_LOGS)) {
+  buffer.push(...window.__TMA_BOOT_LOGS)
+  if (buffer.length > MAX_ENTRIES) buffer.length = MAX_ENTRIES
+  window.__TMA_BOOT_LOGS = []
+}
+
 /**
  * Добавить запись в буфер TMA и в основной логгер.
  * @param {string} level - 'debug' | 'info' | 'warn' | 'error'

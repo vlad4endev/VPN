@@ -159,10 +159,14 @@
       if (window.Telegram && window.Telegram.WebApp) {
         try { window.Telegram.WebApp.expand(); } catch (e) {}
       }
-      // В Telegram иногда initData появляется с задержкой — перепроверяем несколько раз
-      setTimeout(function() { applyTmaInit('t+300ms'); }, 300);
+      // В Mini App Telegram часто внедряет initData с задержкой — часто перепроверяем в первой секунде
+      setTimeout(function() { applyTmaInit('t+100ms'); }, 100);
+      setTimeout(function() { applyTmaInit('t+250ms'); }, 250);
+      setTimeout(function() { applyTmaInit('t+500ms'); }, 500);
+      setTimeout(function() { applyTmaInit('t+800ms'); }, 800);
       setTimeout(function() { applyTmaInit('t+1200ms'); }, 1200);
-      setTimeout(function() { applyTmaInit('t+3000ms'); }, 3000);
+      setTimeout(function() { applyTmaInit('t+2500ms'); }, 2500);
+      setTimeout(function() { applyTmaInit('t+5000ms'); }, 5000);
       var originalFetch = window.fetch;
       window.fetch = function(url, options) {
         options = options || {};
@@ -176,13 +180,23 @@
         }
         return originalFetch.call(this, url, options);
       };
-      // Подгружаем SDK с telegram.org только если Telegram.WebApp ещё не существует (не блокируем загрузку)
-      if (!(window.Telegram && window.Telegram.WebApp)) {
+      // На /t откладываем загрузку SDK, чтобы сначала сработало внедрение Telegram (иначе наш скрипт может перезаписать объект без initData)
+      var isTmaPath = (function() {
+        var p = (window.location.pathname || '').replace(/\/+$/, '');
+        return p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3);
+      })();
+      function loadSdk() {
+        if (window.Telegram && window.Telegram.WebApp) return;
         var s = document.createElement('script');
         s.async = true;
         s.src = 'https://telegram.org/js/telegram-web-app.js';
         s.onload = function() { applyTmaInit('sdk:onload'); };
         document.head.appendChild(s);
+      }
+      if (isTmaPath) {
+        setTimeout(loadSdk, 700);
+      } else {
+        loadSdk();
       }
     })();
     </script>
@@ -195,17 +209,29 @@
       })();
     </script>
     <div id="root">
-      <!-- До загрузки React показываем загрузку для Mini App (/t) — уменьшает пустой экран -->
+      <!-- До загрузки React показываем загрузку для Mini App (/t) — уменьшает пустой экран. Ранний лог для отладки. -->
       <script>
         (function() {
           var p = (window.location.pathname || '').replace(/\/+$/, '');
           if (p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3)) {
+            window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
+            window.__TMA_BOOT_LOGS.unshift({
+              ts: new Date().toISOString(),
+              level: 'info',
+              event: 'html_boot',
+              message: 'Страница /t загружена (до React)',
+              data: { path: p }
+            });
             var root = document.getElementById('root');
             if (root) {
-              root.innerHTML = '<div style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:2px solid rgba(59,130,246,0.5);border-top-color:rgb(59,130,246);border-radius:50%;animation:spin 0.8s linear infinite"></div><p style="margin-top:1rem;font-size:0.875rem">Загрузка…</p></div>';
+              root.innerHTML = '<div style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><div style="width:48px;height:48px;border:2px solid rgba(59,130,246,0.5);border-top-color:rgb(59,130,246);border-radius:50%;animation:spin 0.8s linear infinite"></div><p style="margin-top:1rem;font-size:0.875rem">Загрузка…</p><details style="margin-top:1.5rem;font-size:0.75rem;color:#64748b"><summary style="cursor:pointer">Логи (отладка)</summary><pre id="tma-boot-log" style="margin-top:0.5rem;text-align:left;max-height:120px;overflow:auto;background:#0f172a;padding:0.5rem;border-radius:4px"></pre></details></div>';
               var style = document.createElement('style');
               style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
               document.head.appendChild(style);
+              var pre = document.getElementById('tma-boot-log');
+              if (pre && window.__TMA_BOOT_LOGS && window.__TMA_BOOT_LOGS.length) {
+                pre.textContent = window.__TMA_BOOT_LOGS.map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');
+              }
             }
           }
         })();

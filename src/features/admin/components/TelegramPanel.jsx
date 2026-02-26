@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Send, CheckCircle2, XCircle, Copy, RefreshCw, ChevronDown, ChevronUp, Bell, Link2, ScrollText } from 'lucide-react'
-import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage } from '../services/telegramAdminService.js'
+import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage, getTelegramLogs } from '../services/telegramAdminService.js'
 import logger from '../../../shared/utils/logger.js'
 
 /**
@@ -161,17 +161,15 @@ const TelegramPanel = () => {
     setLogsError(null)
     setLogsLoading(true)
     try {
-      const mod = await import('../services/telegramAdminService.js')
-      const getLogs = mod.getTelegramLogs
-      if (typeof getLogs !== 'function') {
-        setLogsError('Логи недоступны (обновите страницу или перезапустите dev-сервер)')
-        setLogs([])
-        return
-      }
-      const { logs: list } = await getLogs(150)
+      const { logs: list } = await getTelegramLogs(150)
       setLogs(Array.isArray(list) ? list : [])
     } catch (err) {
-      setLogsError(err?.message || 'Ошибка загрузки логов')
+      const msg = err?.message || 'Ошибка загрузки логов'
+      setLogsError(
+        msg.includes('404') || msg.includes('не найден')
+          ? 'API логов недоступен. Убедитесь, что backend (n8n-webhook-proxy) запущен и перезапустите фронтенд.'
+          : msg,
+      )
       setLogs([])
     } finally {
       setLogsLoading(false)
@@ -498,12 +496,23 @@ const TelegramPanel = () => {
               </div>
               <div className="flex-1 overflow-y-auto p-4 min-h-0">
                 {logsError && (
-                  <p className="text-amber-400 text-sm mb-3">{logsError}</p>
+                  <div className="mb-3 space-y-1">
+                    <p className="text-amber-400 text-sm">{logsError}</p>
+                    <p className="text-slate-500 text-xs">Убедитесь, что backend (n8n-webhook-proxy или основной сервер) запущен. Обновите страницу или перезапустите dev-сервер.</p>
+                  </div>
                 )}
                 {logsLoading && logs.length === 0 ? (
                   <p className="text-slate-500 text-sm">Загрузка…</p>
                 ) : logs.length === 0 ? (
-                  <p className="text-slate-500 text-sm">Записей пока нет. Откройте Mini App (/t) или подождите входа пользователей.</p>
+                  <div className="text-slate-500 text-sm space-y-2">
+                    <p>Записей пока нет.</p>
+                    <p className="text-slate-600 text-xs">
+                      Это <strong>серверные</strong> логи: они появляются, когда запрос доходит до сервера (<code className="bg-slate-800 px-1 rounded">POST /api/telegram/auth</code>). Откройте Mini App (/t) из бота в Telegram или нажмите «Войти через Telegram» на сайте — тогда здесь появятся записи.
+                    </p>
+                    <p className="text-slate-600 text-xs">
+                      Если в Mini App ничего не грузится — смотрите <strong>клиентские</strong> логи на самом экране /t (кнопка «Логи TMA» внизу справа). Они пишутся до отправки запроса и помогут понять, на каком шаге застревает загрузка.
+                    </p>
+                  </div>
                 ) : (
                   <div className="space-y-2 font-mono text-xs">
                     {[...logs].reverse().map((e, i) => {
