@@ -97,7 +97,10 @@
         if (tg) {
           try { tg.ready(); } catch (e) {}
           try { if (tg.expand) tg.expand(); } catch (e) {}
-          try { if (tg.enableClosingConfirmation) tg.enableClosingConfirmation(false); } catch (e) {}
+          try {
+            var v = tg.version ? parseFloat(tg.version) : NaN;
+            if (tg.enableClosingConfirmation && (isNaN(v) || v >= 6.1)) tg.enableClosingConfirmation(false);
+          } catch (e) {}
         }
 
         // 1) Обычный путь: initData от Telegram WebApp

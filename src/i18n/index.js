@@ -33,11 +33,14 @@ const telegramDetector = {
     return getTelegramLanguageCode() || undefined
   },
 }
-LanguageDetector.addDetector(telegramDetector)
+
+// В i18next-browser-languagedetector v8 addDetector — метод экземпляра, не класса
+const lngDetector = new LanguageDetector()
+lngDetector.addDetector(telegramDetector)
 
 function runInit() {
   return i18n
-    .use(LanguageDetector)
+    .use(lngDetector)
     .use(initReactI18next)
     .init({
       resources,
