@@ -128,7 +128,7 @@
           } catch (e) {}
         }
 
-        // 2) Fallback: восстановление initData из hash / sessionStorage (после редиректов)
+        // 2) Fallback: восстановление initData из hash (Telegram иногда отдаёт #tgWebAppData=<url-encoded query>)
         var hash = window.location.hash || '';
         if (hash.indexOf('tgWebAppData=') !== -1) {
           try {
@@ -136,12 +136,15 @@
             var end = hash.indexOf('&tgWebAppVersion');
             if (end === -1) end = hash.indexOf('&eventId');
             if (end === -1) end = hash.length;
-            var raw = hash.substring(start, end);
-            if (raw && raw.indexOf('hash=') !== -1) {
-              // Только если есть подпись (hash=), иначе сервер вернёт no_hash
-              window.__TELEGRAM_INIT_DATA = raw;
-              try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e2) {}
-              try { console.log('TMA initData restored from hash', { reason: reason || 'hash', length: window.__TELEGRAM_INIT_DATA.length }); } catch (e3) {}
+            var encoded = hash.substring(start, end);
+            if (encoded) {
+              var raw = encoded;
+              try { raw = decodeURIComponent(encoded); } catch (e) {}
+              if (raw && raw.indexOf('hash=') !== -1) {
+                window.__TELEGRAM_INIT_DATA = raw;
+                try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e2) {}
+                try { console.log('TMA initData restored from hash', { reason: reason || 'hash', length: window.__TELEGRAM_INIT_DATA.length }); } catch (e3) {}
+              }
             }
           } catch (e) {}
         }

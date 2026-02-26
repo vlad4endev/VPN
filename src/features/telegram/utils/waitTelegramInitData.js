@@ -6,6 +6,27 @@
  * @throws {Error} - при таймауте с message 'initData_timeout'
  */
 const HAS_HASH = /hash=/
+
+/** Извлечь initData из location.hash (#tgWebAppData=<url-encoded query>). */
+function getInitDataFromHash() {
+  if (typeof window === 'undefined' || !window.location.hash) return ''
+  const hash = window.location.hash
+  const idx = hash.indexOf('tgWebAppData=')
+  if (idx === -1) return ''
+  const start = idx + 13
+  let end = hash.indexOf('&tgWebAppVersion')
+  if (end === -1) end = hash.indexOf('&eventId')
+  if (end === -1) end = hash.length
+  const encoded = hash.substring(start, end)
+  if (!encoded) return ''
+  try {
+    const raw = decodeURIComponent(encoded)
+    return raw && HAS_HASH.test(raw) ? raw : ''
+  } catch (_) {
+    return HAS_HASH.test(encoded) ? encoded : ''
+  }
+}
+
 export function waitTelegramInitData(timeoutMs = 7000) {
   const intervalMs = 80
   const getData = () => {
@@ -19,6 +40,7 @@ export function waitTelegramInitData(timeoutMs = 7000) {
         if (typeof stored === 'string' && stored.trim()) raw = stored
       } catch (_) {}
     }
+    if (!raw) raw = getInitDataFromHash()
     raw = String(raw || '').trim()
     return raw && HAS_HASH.test(raw) ? raw : ''
   }

@@ -58,6 +58,7 @@
 
 | Проблема | Описание | Решение |
 |----------|----------|---------|
+| **service_unavailable (503)** | POST /api/telegram/auth возвращает 503 и reason: `service_unavailable`, если Firebase Admin не инициализирован (нет db/admin). | Задать в server/.env: **FIREBASE_PROJECT_ID** и один из вариантов ключа: **FIREBASE_SERVICE_ACCOUNT_KEY** (JSON строка), **FIREBASE_SERVICE_ACCOUNT_PATH** (путь к JSON), либо **FIREBASE_CLIENT_EMAIL** + **FIREBASE_PRIVATE_KEY**. Перезапустить сервер. Без этого невозможны проверка сессии и создание/обновление пользователей. |
 | **APP_ID в telegram.routes.js** | Раньше использовалось `process.env.APP_ID || 'skyputh'` (опечатка и игнорирование deps). | Исправлено: `appId = APP_ID || process.env.APP_ID || 'skypath'` (deps.APP_ID имеет приоритет). |
 | **Токен бота** | Если токен не совпадает с ботом, из которого открыт Mini App, проверка подписи initData возвращает 403. | Токен должен быть задан в .env или в админке (Telegram) и соответствовать боту. |
 | **auth_date** | initData старше TELEGRAM_INIT_DATA_MAX_AGE_MS отклоняются. | Настройка окна в env; при истечении — сообщение «Откройте приложение заново из меню бота». |
@@ -138,6 +139,7 @@
 | 5 | Медленный интернет | Таймаут waitTelegramInitData или fetch auth; экран «Откройте из бота» или сообщение о таймауте; в логах network_error / initData_timeout. |
 | 6 | Telegram 6.0 | SDK может подставить initData с задержкой; один вызов applyTmaInit после onload и ожидание в SPA до 7 s; при появлении initData в пределах таймаута — вход. |
 | 7 | Открытие не из Telegram (браузер) | Нет initData; после таймаута 7 s — экран «Откройте эту ссылку из меню бота». |
+| 8 | Firebase Admin не настроен | Сервер возвращает 503, reason `service_unavailable`; в логах auth_fail_initData / auth_session_rejected. Решение: настроить Firebase (п. 2.4) и перезапустить сервер. |
 
 ---
 
