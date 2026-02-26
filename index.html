@@ -137,8 +137,8 @@
             if (end === -1) end = hash.indexOf('&eventId');
             if (end === -1) end = hash.length;
             var raw = hash.substring(start, end);
-            if (raw) {
-              // Не декодировать: для проверки HMAC серверу нужна та же строка, что подписала Telegram
+            if (raw && raw.indexOf('hash=') !== -1) {
+              // Только если есть подпись (hash=), иначе сервер вернёт no_hash
               window.__TELEGRAM_INIT_DATA = raw;
               try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e2) {}
               try { console.log('TMA initData restored from hash', { reason: reason || 'hash', length: window.__TELEGRAM_INIT_DATA.length }); } catch (e3) {}

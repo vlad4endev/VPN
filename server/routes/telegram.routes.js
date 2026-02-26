@@ -140,7 +140,7 @@ export function createTelegramRouter(deps) {
       admin = getAdmin()
       if (!admin || !db) {
         logTelegramAuth('error', { step: 'init', message: 'Сервис недоступен (нет Firebase)' })
-        return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+        return res.status(503).json({ success: false, error: 'Сервис недоступен. Настройте Firebase Admin (FIREBASE_SERVICE_ACCOUNT_KEY) в server/.env', reason: 'service_unavailable' })
       }
     }
     /** APP_ID из deps или env; единственный допустимый fallback — 'skypath' (см. n8n-webhook-proxy). */
@@ -183,10 +183,11 @@ export function createTelegramRouter(deps) {
     const initData = typeof rawInitData === 'string' ? rawInitData : ''
     const result = await validateTelegramInitDataWithReasonAsync(initData)
     if (!result.ok) {
-      logTelegramAuth('initData_fail', { reason: result.reason || 'unknown', message: result.message })
+      const reason = result.reason || 'unknown'
+      logTelegramAuth('initData_fail', { reason, message: result.message, initDataLength: initData.length, appId })
       const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-      const status = (result.reason === 'invalid_hash' || result.reason === 'no_hash') ? 403 : 400
-      return res.status(status).json({ success: false, error: message, reason: result.reason || 'unknown' })
+      const status = (reason === 'invalid_hash' || reason === 'no_hash') ? 403 : 400
+      return res.status(status).json({ success: false, error: message, reason })
     }
     const validated = result.data
     const tgId = String(validated.user.id)
@@ -261,7 +262,7 @@ export function createTelegramRouter(deps) {
       return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
       logTelegramAuth('error', { step: 'create_or_update', message: err.message })
-      return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
+      return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации', reason: 'auth_fail' })
     }
   })
 

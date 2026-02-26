@@ -1,10 +1,11 @@
 /**
  * Ожидание появления initData от Telegram WebApp с таймаутом.
- * Один детерминированный поток: резолвим при наличии данных, реджектим по таймауту.
+ * Возвращаем только строку, в которой есть параметр hash= (иначе сервер вернёт no_hash).
  * @param {number} timeoutMs - таймаут в миллисекундах (например 7000)
  * @returns {Promise<string>} - initData строка при успехе
  * @throws {Error} - при таймауте с message 'initData_timeout'
  */
+const HAS_HASH = /hash=/
 export function waitTelegramInitData(timeoutMs = 7000) {
   const intervalMs = 80
   const getData = () => {
@@ -18,7 +19,8 @@ export function waitTelegramInitData(timeoutMs = 7000) {
         if (typeof stored === 'string' && stored.trim()) raw = stored
       } catch (_) {}
     }
-    return String(raw || '').trim()
+    raw = String(raw || '').trim()
+    return raw && HAS_HASH.test(raw) ? raw : ''
   }
 
   return new Promise((resolve, reject) => {

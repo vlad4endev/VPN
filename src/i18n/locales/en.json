@@ -256,7 +256,8 @@
     "goToMainSite": "Go to main site",
     "telegramMiniHint": "Identification by your Telegram ID",
     "telegramInvalidSignature": "Invalid data signature. Make sure you open the app from the same bot that is configured on the server.",
-    "invalidSignature": "Invalid data signature. Make sure you open the app from the same bot that is configured on the server."
+    "invalidSignature": "Invalid data signature. Make sure you open the app from the same bot that is configured on the server.",
+    "telegramServiceUnavailable": "Service temporarily unavailable. Check Firebase settings on the server and try again later."
   },
   "dashboard": {
     "statusAccountant": "Payment is being prepared",

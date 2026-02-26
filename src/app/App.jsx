@@ -1158,7 +1158,7 @@ export default function VPNServiceApp() {
           tmaLog(severity, 'auth_fail_initData', 'Ошибка от сервера', { reason: reasonCode, serverReason: data.reason })
           const errorMsg = (reason === 'invalid_hash' || reason === 'no_hash')
             ? t('app.invalidSignature')
-            : (data.error || t('app.telegramSignInFailed'))
+            : (reason === 'service_unavailable' ? t('app.telegramServiceUnavailable') : (data.error || t('app.telegramSignInFailed')))
           setError(errorMsg)
         })
         .catch((err) => {
@@ -1209,7 +1209,7 @@ export default function VPNServiceApp() {
       .then((initData) => {
         if (cancelled) return
         setHasTmaInitData(true)
-        tmaLog('info', 'initData_ready', 'initData получен, запуск авторизации', { initDataLength: initData.length })
+        tmaLog('info', 'initData_ready', 'initData получен, запуск авторизации', { len: initData.length })
         return trySessionAuth().then((sessionOk) => {
           if (cancelled) return
           if (!sessionOk) return tryInitDataAuth(initData)
@@ -1242,9 +1242,10 @@ export default function VPNServiceApp() {
     const screen = tmaWaitingAuth ? 'loading' : currentUser ? 'dashboard' : 'open_in_bot'
     if (tmaScreenRef.current !== screen) {
       tmaScreenRef.current = screen
-      tmaLog('info', 'screen_shown', 'Показан экран TMA', { screen })
+      const reason = screen === 'open_in_bot' && error ? 'auth_failed' : (screen === 'open_in_bot' ? 'no_session' : undefined)
+      tmaLog('info', 'screen_shown', 'Показан экран TMA', { screen, ...(reason && { reason }) })
     }
-  }, [tmaWaitingAuth, currentUser])
+  }, [tmaWaitingAuth, currentUser, error])
 
   // Состояния для админ-панели теперь в useUIStore (adminTab, editingUser, editingServer, editingTariff)
   // settings, tariffs, servers теперь загружаются через React Query
