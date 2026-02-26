@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Send, CheckCircle2, XCircle, Copy, RefreshCw, ChevronDown, ChevronUp, Bell, Link2 } from 'lucide-react'
-import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage } from '../services/telegramAdminService.js'
+import { Send, CheckCircle2, XCircle, Copy, RefreshCw, ChevronDown, ChevronUp, Bell, Link2, ScrollText } from 'lucide-react'
+import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage, getTelegramLogs } from '../services/telegramAdminService.js'
 import logger from '../../../shared/utils/logger.js'
 
 /**
@@ -30,6 +30,11 @@ const TelegramPanel = () => {
   const [currentAdminChatId, setCurrentAdminChatId] = useState(null)
   const [chatInfo, setChatInfo] = useState(null)
   const [chatInfoError, setChatInfoError] = useState(null)
+  const [showLogsModal, setShowLogsModal] = useState(false)
+  const [logs, setLogs] = useState([])
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsError, setLogsError] = useState(null)
+  const [logsCopied, setLogsCopied] = useState(false)
 
   const loadStatus = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -151,6 +156,40 @@ const TelegramPanel = () => {
       setTimeout(() => setMiniAppCopied(false), 2000)
     }
   }
+
+  const loadLogs = useCallback(async () => {
+    setLogsError(null)
+    setLogsLoading(true)
+    try {
+      const { logs: list } = await getTelegramLogs(150)
+      setLogs(Array.isArray(list) ? list : [])
+    } catch (err) {
+      setLogsError(err?.message || 'Ошибка загрузки логов')
+      setLogs([])
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
+
+  const openLogsModal = useCallback(() => {
+    setShowLogsModal(true)
+    loadLogs()
+  }, [loadLogs])
+
+  const copyLogsToClipboard = useCallback(() => {
+    const text = logs
+      .map((e) => {
+        const { ts, event, ...rest } = e
+        const restStr = Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : ''
+        return `${ts} [${event}]${restStr}`
+      })
+      .join('\n')
+    if (text && navigator.clipboard) {
+      navigator.clipboard.writeText(text)
+      setLogsCopied(true)
+      setTimeout(() => setLogsCopied(false), 2000)
+    }
+  }, [logs])
 
   const handleSendTest = async () => {
     setTestError(null)
@@ -372,6 +411,22 @@ const TelegramPanel = () => {
           </section>
         )}
 
+        {/* Логи Mini App — для анализа проблем авторизации в /t */}
+        <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Логи Mini App</h3>
+          <p className="text-slate-500 text-xs mb-2">
+            Последние события авторизации в Mini App (сессия, initData, ошибки). Помогает разбирать проблемы входа в /t.
+          </p>
+          <button
+            type="button"
+            onClick={openLogsModal}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium transition-colors"
+          >
+            <ScrollText className="w-4 h-4" />
+            Просмотреть логи
+          </button>
+        </section>
+
         {/* Подробнее */}
         <div className="border border-slate-700 rounded-lg overflow-hidden">
           <button
@@ -389,6 +444,84 @@ const TelegramPanel = () => {
             </div>
           )}
         </div>
+
+        {/* Модальное окно логов TMA */}
+        {showLogsModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+            onClick={() => setShowLogsModal(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logs-modal-title"
+          >
+            <div
+              className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl bg-slate-900 border border-slate-700 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+                <h2 id="logs-modal-title" className="text-lg font-semibold text-white">Логи Mini App (TMA)</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={loadLogs}
+                    disabled={logsLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${logsLoading ? 'animate-spin' : ''}`} />
+                    Обновить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyLogsToClipboard}
+                    disabled={!logs.length}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm"
+                  >
+                    <Copy className="w-4 h-4" />
+                    {logsCopied ? 'Скопировано' : 'Копировать'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowLogsModal(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-white"
+                    aria-label="Закрыть"
+                  >
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 min-h-0">
+                {logsError && (
+                  <p className="text-amber-400 text-sm mb-3">{logsError}</p>
+                )}
+                {logsLoading && logs.length === 0 ? (
+                  <p className="text-slate-500 text-sm">Загрузка…</p>
+                ) : logs.length === 0 ? (
+                  <p className="text-slate-500 text-sm">Записей пока нет. Откройте Mini App (/t) или подождите входа пользователей.</p>
+                ) : (
+                  <div className="space-y-2 font-mono text-xs">
+                    {[...logs].reverse().map((e, i) => {
+                      const { ts, event, ...rest } = e
+                      const isError = event === 'error' || event === 'initData_fail' || event === 'session_fail'
+                      return (
+                        <div
+                          key={`${ts}-${i}`}
+                          className={`break-words rounded px-2 py-1.5 ${isError ? 'bg-red-900/20 text-red-300' : 'bg-slate-800/60 text-slate-300'}`}
+                        >
+                          <span className="text-slate-500">{ts}</span>
+                          {' '}
+                          <span className="font-semibold text-sky-400">[{event}]</span>
+                          {Object.keys(rest).length > 0 && (
+                            <pre className="mt-1 text-slate-500 whitespace-pre-wrap">{JSON.stringify(rest)}</pre>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

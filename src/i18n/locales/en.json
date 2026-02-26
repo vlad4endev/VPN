@@ -249,7 +249,8 @@
     "registerError": "Registration error",
     "emailExists": "User with this email already exists.",
     "telegramSignInFailed": "Telegram sign-in failed.",
-    "telegramSignInError": "Telegram sign-in error"
+    "telegramSignInError": "Telegram sign-in error",
+    "telegramSignInTimeout": "Request timed out. Open again from the bot."
   },
   "dashboard": {
     "statusAccountant": "Payment is being prepared",

@@ -120,6 +120,25 @@ export async function getWebhookStatus() {
 }
 
 /**
+ * Последние логи TMA (авторизация Mini App) для анализа проблем. Только для админа.
+ * @param {number} [limit=100] — макс. количество записей
+ * @returns {Promise<{ logs: Array<{ ts: string, event: string, ... }> }>}
+ */
+export async function getTelegramLogs(limit = 100) {
+  const url = `${getBaseUrl()}/api/admin/telegram/logs${limit ? `?limit=${Math.min(limit, 200)}` : ''}`
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok || !json.success) {
+    if (res.status === 403) throw new Error(json.hint || json.error || 'Доступ запрещён.')
+    throw new Error(json.error || res.statusText || 'Ошибка загрузки логов')
+  }
+  return { logs: json.logs || [] }
+}
+
+/**
  * Получить данные чата/аккаунта по сохранённому Chat ID админа (getChat). Только для админа.
  * @returns {Promise<{ chat: { id, type, title?, username?, first_name?, last_name? } | null, error?: string }>}
  */

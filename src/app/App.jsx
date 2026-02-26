@@ -1094,12 +1094,18 @@ export default function VPNServiceApp() {
   // Telegram Mini App: авто-вход — сначала по сохранённой сессии, затем по initData (initData может появиться с задержкой)
   const TMA_LOG = 'TelegramAuth'
   const [tmaAuthRetryTick, setTmaAuthRetryTick] = useState(0)
-  /** initData из WebApp или из скрипта index.html (на случай разного порядка загрузки) */
+  /** initData из WebApp, из скрипта index.html или из sessionStorage (в TMA вебвью порядок загрузки может отличаться) */
   const getTmaInitData = useCallback(() => {
     if (typeof window === 'undefined') return ''
     const fromWebApp = window.Telegram?.WebApp?.initData
     const fromGlobal = window.__TELEGRAM_INIT_DATA
-    const raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
+    let raw = (typeof fromWebApp === 'string' && fromWebApp.trim()) ? fromWebApp : (typeof fromGlobal === 'string' ? fromGlobal : '')
+    if (!raw && typeof sessionStorage !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('tg_init_data')
+        if (typeof stored === 'string' && stored.trim()) raw = stored
+      } catch (_) {}
+    }
     return String(raw || '').trim()
   }, [])
 
@@ -1115,16 +1121,20 @@ export default function VPNServiceApp() {
   useEffect(() => {
     if (!auth || firebaseUser || authChecking) return
     if (typeof window === 'undefined') return
+    const pathname = (window.location.pathname || '').replace(/\/+$/, '')
+    const isTmaPath = pathname === '/t' || pathname === '/telegram' || pathname === 't' || (pathname.startsWith('/t/') && pathname.length > 3)
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
     const hasInitData = !!getTmaInitData()
-    const inTmaContext = hasInitData
     if ((storedToken || hasInitData) && tmaAttemptStartRef.current === 0) {
       tmaAttemptStartRef.current = Date.now()
       setTmaWaitingAuth(true)
     }
-    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
+    tmaLog('info', 'auth_start', 'Старт авто-входа TMA', { hasStoredToken: !!storedToken, hasInitData, isTmaPath, retryTick: tmaAuthRetryTick })
     logger.info(TMA_LOG, 'Авто-вход TMA: старт', { hasStoredToken: !!storedToken, hasInitData, retryTick: tmaAuthRetryTick })
+
+    const TMA_FETCH_TIMEOUT_MS = 12000
+    const TMA_GIVE_UP_MS = 10000
 
     const tryInitData = () => {
       const initData = getTmaInitData()
@@ -1138,12 +1148,16 @@ export default function VPNServiceApp() {
       telegramAuthTriedRef.current = true
       tmaLog('info', 'auth_initdata_request', 'Запрос по initData', { initDataLength: initData.length })
       logger.info(TMA_LOG, 'Авто-вход TMA: запрос по initData', { initDataLength: initData.length })
+      const ac = new AbortController()
+      const timeoutId = setTimeout(() => ac.abort(), TMA_FETCH_TIMEOUT_MS)
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
         body: JSON.stringify({ initData }),
+        signal: ac.signal,
       })
         .then((r) => {
+          clearTimeout(timeoutId)
           tmaLog('info', 'auth_initdata_response', 'Ответ по initData', { status: r.status, ok: r.ok })
           logger.info(TMA_LOG, 'Авто-вход TMA: ответ по initData', { status: r.status, ok: r.ok })
           return r.json()
@@ -1166,24 +1180,34 @@ export default function VPNServiceApp() {
         })
         .then(() => {})
         .catch((err) => {
+          clearTimeout(timeoutId)
           setTmaWaitingAuth(false)
-          tmaLog('error', 'auth_error_initData', 'Сетевая/другая ошибка', { message: err?.message })
-          logger.error(TMA_LOG, 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
-          setError(err?.message || i18n.t('app.telegramSignInError'))
+          const isAbort = err?.name === 'AbortError'
+          tmaLog('error', 'auth_error_initData', isAbort ? 'Таймаут запроса по initData' : 'Сетевая/другая ошибка', { message: err?.message })
+          logger.error(TMA_LOG, isAbort ? 'Авто-вход TMA: таймаут запроса по initData' : 'Авто-вход TMA: сетевая/другая ошибка', { message: err?.message }, err)
+          setError(isAbort ? (i18n.t('app.telegramSignInTimeout') || 'Превышено время ожидания. Откройте снова из бота.') : (err?.message || i18n.t('app.telegramSignInError')))
         })
     }
 
-    const tmaGiveUpTimer = inTmaContext ? setTimeout(() => setTmaWaitingAuth(false), 6000) : null
+    // Таймер «сдаться»: на пути /t всегда, иначе в Mini App вебвью загрузка может висеть вечно (initData с задержкой или fetch не завершается)
+    const tmaGiveUpTimer = isTmaPath ? setTimeout(() => {
+      tmaLog('info', 'give_up', 'TMA: таймаут ожидания входа, показываем экран подсказки')
+      setTmaWaitingAuth(false)
+    }, TMA_GIVE_UP_MS) : null
 
     if (storedToken) {
       tmaLog('info', 'auth_session_request', 'Запрос по сессии')
       logger.info(TMA_LOG, 'Авто-вход TMA: запрос по сессии', {})
+      const acSession = new AbortController()
+      const sessionTimeoutId = setTimeout(() => acSession.abort(), TMA_FETCH_TIMEOUT_MS)
       fetch(`${base}/api/telegram/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
         body: JSON.stringify({ sessionToken: storedToken }),
+        signal: acSession.signal,
       })
         .then((r) => {
+          clearTimeout(sessionTimeoutId)
           tmaLog('info', 'auth_session_response', 'Ответ по сессии', { status: r.status, ok: r.ok })
           logger.info(TMA_LOG, 'Авто-вход TMA: ответ по сессии', { status: r.status, ok: r.ok })
           return r.json()
@@ -1204,8 +1228,9 @@ export default function VPNServiceApp() {
           tryInitData()
         })
         .catch((err) => {
+          clearTimeout(sessionTimeoutId)
           setTmaWaitingAuth(false)
-          tmaLog('warn', 'auth_error_session', 'Ошибка запроса по сессии', { message: err?.message })
+          tmaLog('warn', 'auth_error_session', err?.name === 'AbortError' ? 'Таймаут запроса по сессии' : 'Ошибка запроса по сессии', { message: err?.message })
           logger.warn(TMA_LOG, 'Авто-вход TMA: ошибка запроса по сессии', { message: err?.message })
           clearTmaSession()
           tryInitData()

@@ -335,7 +335,11 @@ app.use(async (req, res, next) => {
 /** Срок действия сессии TMA (мс). По умолчанию 90 дней. */
 const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
-/** Лог действий входа и операций через Telegram (в консоль; по префиксу [TMA] удобно фильтровать). */
+/** Буфер последних логов TMA для просмотра в админке (Интеграции → Telegram → Просмотреть логи). */
+const TMA_LOG_BUFFER_MAX = 200
+const tmaLogBuffer = []
+
+/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). */
 function logTelegramAuth(event, data = {}) {
   const payload = { ts: new Date().toISOString(), event, ...data }
   const line = `[TMA] ${JSON.stringify(payload)}`
@@ -344,6 +348,14 @@ function logTelegramAuth(event, data = {}) {
   } else {
     console.log(line)
   }
+  tmaLogBuffer.push(payload)
+  if (tmaLogBuffer.length > TMA_LOG_BUFFER_MAX) tmaLogBuffer.shift()
+}
+
+/** Последние записи лога TMA (для GET /api/admin/telegram/logs). */
+function getTmaLogBuffer(limit = 100) {
+  const n = Math.min(Number(limit) || 100, TMA_LOG_BUFFER_MAX)
+  return tmaLogBuffer.slice(-n)
 }
 
 /**
@@ -4093,6 +4105,15 @@ app.get('/api/admin/telegram/webhook-status', async (req, res) => {
     console.error('❌ GET /api/admin/telegram/webhook-status:', err.message)
     res.status(500).json({ success: false, error: err.message })
   }
+})
+
+/** GET /api/admin/telegram/logs — последние логи TMA (авторизация Mini App) для анализа проблем (только админ). */
+app.get('/api/admin/telegram/logs', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, TMA_LOG_BUFFER_MAX)
+  const entries = getTmaLogBuffer(limit)
+  res.json({ success: true, logs: entries })
 })
 
 /** GET /api/admin/telegram/chat-info — данные чата/аккаунта по сохранённому Chat ID админа (только админ) */

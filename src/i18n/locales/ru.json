@@ -249,7 +249,8 @@
     "registerError": "Ошибка регистрации",
     "emailExists": "Пользователь с таким email уже существует.",
     "telegramSignInFailed": "Не удалось войти через Telegram.",
-    "telegramSignInError": "Ошибка входа через Telegram"
+    "telegramSignInError": "Ошибка входа через Telegram",
+    "telegramSignInTimeout": "Превышено время ожидания. Откройте снова из бота."
   },
   "dashboard": {
     "statusAccountant": "Бухгалтер создает платежку",
