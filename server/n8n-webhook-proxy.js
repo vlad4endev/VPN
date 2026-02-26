@@ -88,9 +88,9 @@ async function initFirebaseAdmin() {
         if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
         credential = firebaseAdmin.credential.cert(serviceAccount)
         if (serviceAccount.project_id) projectId = projectId || serviceAccount.project_id
-        console.log('📝 Используется ключ из файла:', keyPathEnv ? 'FIREBASE_SERVICE_ACCOUNT_PATH' : 'firebase-service-account.json')
+        console.log('📝 Используется ключ из файла:', keyPathEnv ? keyPathEnv : 'firebase-service-account.json', '(путь:', keyPath + ')')
       } catch (err) {
-        console.log('⚠️ Ошибка чтения ключа из файла:', err.message)
+        console.warn('⚠️ Ошибка чтения ключа из файла:', keyPath, err.message)
       }
     }
 
@@ -157,8 +157,6 @@ async function initFirebaseAdmin() {
 }
 
 // Инициализируем Firebase Admin SDK при старте
-initFirebaseAdmin()
-
 const app = express()
 
 // ========== Безопасность ==========
@@ -7383,15 +7381,20 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3001
 const HOST = process.env.HOST || '0.0.0.0'
 
-app.listen(PORT, HOST, () => {
-  console.log('🚀 n8n Webhook Proxy Server')
-  console.log(`📡 http://${HOST}:${PORT}`)
-  console.log(`🔗 n8n: ${N8N_BASE_URL}`)
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
+async function startServer() {
+  await initFirebaseAdmin()
+  if (!db) {
+    console.warn('⚠️ Telegram Mini App и админ-API будут возвращать 503 до настройки Firebase (положите server/firebase-service-account.json или задайте FIREBASE_SERVICE_ACCOUNT_PATH).')
+  }
+  app.listen(PORT, HOST, () => {
+    console.log('🚀 n8n Webhook Proxy Server')
+    console.log(`📡 http://${HOST}:${PORT}`)
+    console.log(`🔗 n8n: ${N8N_BASE_URL}`)
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
 
-  // Загрузка кэша сценариев bot-builder при старте (если Firebase уже инициализирован)
-  setTimeout(() => {
-    if (db) {
+    // Загрузка кэша сценариев bot-builder при старте (если Firebase уже инициализирован)
+    setTimeout(() => {
+      if (db) {
       loadScenariosIntoCache(db, APP_ID)
         .then(() => console.log('Bot-builder: кэш сценариев загружен'))
         .catch((e) => console.warn('Bot-builder: загрузка кэша', e.message))
@@ -7441,4 +7444,10 @@ app.listen(PORT, HOST, () => {
       })
     }
   }, 60 * 1000) // 1 минута
+  })
+}
+
+startServer().catch((err) => {
+  console.error('❌ Ошибка запуска:', err)
+  process.exit(1)
 })
