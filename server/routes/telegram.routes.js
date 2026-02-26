@@ -164,12 +164,17 @@ export function createTelegramRouter(deps) {
             return res.json({ success: true, customToken, uid, user: userPayload })
           }
           logTelegramAuth('session_fail', { reason: 'expired', uid: doc.id })
+          clearTmaSessionCookie(res)
+          return res.status(401).json({ success: false, error: 'Сессия истекла. Откройте приложение заново из меню бота.', reason: 'session_expired' })
         } else {
           logTelegramAuth('session_fail', { reason: 'token_not_found' })
+          clearTmaSessionCookie(res)
+          return res.status(401).json({ success: false, error: 'Сессия не найдена.', reason: 'token_not_found' })
         }
-        clearTmaSessionCookie(res)
       } catch (err) {
         logTelegramAuth('error', { step: 'session', message: err.message })
+        clearTmaSessionCookie(res)
+        return res.status(503).json({ success: false, error: 'Ошибка проверки сессии.' })
       }
     }
 

@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Скрипт для запуска всех служб проекта Skypath Flow
-# Использование: ./start-all.sh
+# Использование:
+#   ./start-all.sh              — режим разработки (backend 3001 + Vite 5173)
+#   ./start-all.sh production   — продакшен: только backend, раздаёт dist/ с порта 3001
 
 # Цвета для вывода
 GREEN='\033[0;32m'
@@ -33,11 +35,19 @@ cleanup() {
     exit 0
 }
 
+# Режим: development (backend + Vite) или production (только backend, раздаёт dist/)
+MODE="development"
+if [ "$1" = "production" ] || [ "$1" = "--production" ] || [ "$1" = "prod" ]; then
+    MODE="production"
+    export NODE_ENV=production
+fi
+
 # Установка обработчика сигналов только для ручной остановки (Ctrl+C)
 # НЕ используем EXIT, чтобы процессы работали в фоне после завершения скрипта
 trap cleanup SIGINT SIGTERM
 
 echo -e "${BLUE}🚀 Запуск Skypath Flow${NC}"
+[ "$MODE" = "production" ] && echo -e "${GREEN}   Режим: production (только backend, фронт из dist/)${NC}"
 echo ""
 
 # Проверка Node.js
@@ -128,10 +138,23 @@ if check_port 3001; then
     sleep 2
 fi
 
-if check_port 5173; then
-    echo -e "${YELLOW}⚠️  Порт 5173 уже занят. Останавливаю процесс...${NC}"
-    free_port 5173
-    sleep 2
+if [ "$MODE" = "development" ]; then
+    if check_port 5173; then
+        echo -e "${YELLOW}⚠️  Порт 5173 уже занят. Останавливаю процесс...${NC}"
+        free_port 5173
+        sleep 2
+    fi
+fi
+
+# В production: сборка фронта, если dist/ отсутствует
+if [ "$MODE" = "production" ] && [ ! -d "dist" ]; then
+    echo -e "${GREEN}📦 Сборка фронтенда (dist/) для production...${NC}"
+    npm run build
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Ошибка сборки. Запуск отменён.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Сборка завершена${NC}"
 fi
 
 # Запуск n8n Webhook Proxy в фоне
@@ -155,36 +178,43 @@ else
     echo -e "${BLUE}💡 Убедитесь, что n8n запущен на http://localhost:5678${NC}"
 fi
 
-# Запуск Frontend в фоне
-echo ""
-echo -e "${GREEN}🚀 Запуск Frontend приложения...${NC}"
-nohup npm run dev > frontend.log 2>&1 &
-FRONTEND_PID=$!
+# Запуск Frontend в фоне (только в режиме разработки)
+if [ "$MODE" = "development" ]; then
+    echo ""
+    echo -e "${GREEN}🚀 Запуск Frontend приложения (Vite dev)...${NC}"
+    nohup npm run dev > frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    echo "$FRONTEND_PID" > .frontend.pid
+    echo -e "${BLUE}⏳ Ожидание запуска frontend (5 секунд)...${NC}"
+    sleep 5
+fi
 
 # Сохранение PIDs в файл для удобной остановки
 echo "$BACKEND_PID" > .backend.pid
-echo "$FRONTEND_PID" > .frontend.pid
-
-# Ожидание запуска frontend
-echo -e "${BLUE}⏳ Ожидание запуска frontend (5 секунд)...${NC}"
-sleep 5
+[ "$MODE" = "production" ] && rm -f .frontend.pid
 
 echo ""
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ Все службы запущены в фоне!${NC}"
+echo -e "${GREEN}✅ Службы запущены в фоне!${NC}"
 echo ""
-echo -e "${BLUE}📍 Frontend:${NC}    http://0.0.0.0:5173 (или http://YOUR_SERVER_IP:5173)"
-echo -e "${BLUE}📍 n8n Webhook Proxy:${NC} http://localhost:3001"
-echo -e "${BLUE}📍 n8n:${NC}         http://localhost:5678"
+if [ "$MODE" = "production" ]; then
+    echo -e "${BLUE}📍 Приложение (SPA + /t):${NC} http://0.0.0.0:3001 (проксируйте на этот порт в nginx)"
+    echo -e "${BLUE}📍 n8n Webhook Proxy:${NC}     http://localhost:3001"
+    echo -e "${BLUE}📍 n8n:${NC}                  http://localhost:5678"
+else
+    echo -e "${BLUE}📍 Frontend:${NC}    http://0.0.0.0:5173 (или http://YOUR_SERVER_IP:5173)"
+    echo -e "${BLUE}📍 n8n Webhook Proxy:${NC} http://localhost:3001"
+    echo -e "${BLUE}📍 n8n:${NC}         http://localhost:5678"
+fi
 echo ""
 echo -e "${BLUE}📊 Просмотр логов:${NC}"
 echo -e "   ${GREEN}tail -f backend.log${NC}    # Логи backend"
-echo -e "   ${GREEN}tail -f frontend.log${NC}   # Логи frontend"
+[ "$MODE" = "development" ] && echo -e "   ${GREEN}tail -f frontend.log${NC}   # Логи frontend"
 echo ""
 echo -e "${BLUE}🛑 Остановка служб:${NC}"
 echo -e "   ${GREEN}./stop-all.sh${NC}          # Остановить все службы"
 echo -e "   ${GREEN}kill \$(cat .backend.pid)${NC}   # Остановить только backend"
-echo -e "   ${GREEN}kill \$(cat .frontend.pid)${NC}  # Остановить только frontend"
+[ "$MODE" = "development" ] && echo -e "   ${GREEN}kill \$(cat .frontend.pid)${NC}  # Остановить только frontend"
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "${GREEN}✅ Процессы запущены в фоне. Можно закрыть SSH сессию.${NC}"

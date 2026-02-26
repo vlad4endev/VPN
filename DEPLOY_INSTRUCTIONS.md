@@ -238,6 +238,10 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 ```
 
+### 5. Если видите «Скрипт приложения не загрузился»
+
+Это значит, что браузер получает исходный `index.html` (со ссылкой на `/src/app/main.jsx`) вместо сборки из `dist/`. При деплое через Docker образ уже содержит собранный фронтенд — убедитесь, что nginx **проксирует весь трафик** на контейнер (как в примере выше: `location / { proxy_pass http://localhost:3001; }`), а не раздаёт файлы из другой папки. Если запускаете Node без Docker — выполните `npm run build` и запускайте приложение из корня проекта; подробнее: [docs/TMA_FIX_SCRIPT_NOT_LOADED.md](docs/TMA_FIX_SCRIPT_NOT_LOADED.md).
+
 ---
 
 ## 🔄 Шаг 8: Обновление приложения
