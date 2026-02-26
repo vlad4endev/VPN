@@ -9,6 +9,7 @@ import '../i18n'
 import { i18nReady } from '../i18n'
 import logger from '../shared/utils/logger.js'
 import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
+import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 
 logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
@@ -52,6 +53,7 @@ root.render(<BootstrapScreen />)
 const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
 const isTmaPath = path === '/t' || path === '/telegram' || path === 't' || (path.startsWith('/t/') && path.length > 3)
 if (isTmaPath) {
+  tmaLog('info', 'bootstrap_tma', 'Путь /t: запуск приложения без ожидания i18n', { path })
   setTimeout(renderApp, 0)
 } else {
   const I18N_TIMEOUT_MS = 8000

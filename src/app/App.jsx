@@ -1119,10 +1119,13 @@ export default function VPNServiceApp() {
   }, [getTmaInitData, tmaAuthRetryTick])
 
   useEffect(() => {
-    if (!auth || firebaseUser || authChecking) return
     if (typeof window === 'undefined') return
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
     const isTmaPath = pathname === '/t' || pathname === '/telegram' || pathname === 't' || (pathname.startsWith('/t/') && pathname.length > 3)
+    if (!auth || firebaseUser || authChecking) {
+      if (isTmaPath) tmaLog('info', 'auth_skip', 'TMA авто-вход не запущен', { reason: !auth ? 'no_auth' : firebaseUser ? 'already_signed_in' : 'auth_checking' })
+      return
+    }
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
     const hasInitData = !!getTmaInitData()
@@ -1266,6 +1269,23 @@ export default function VPNServiceApp() {
     window.addEventListener('telegram-initdata-ready', onReady)
     return () => window.removeEventListener('telegram-initdata-ready', onReady)
   }, [auth, firebaseUser, authChecking])
+
+  // Лог смены экрана TMA (loading / open_in_bot / dashboard) для отладки
+  const tmaScreenRef = useRef(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const pathname = (window.location.pathname || '').replace(/\/+$/, '')
+    const isTma = pathname === '/t' || pathname === '/telegram' || pathname === 't' || (pathname.startsWith('/t/') && pathname.length > 3)
+    if (!isTma) {
+      tmaScreenRef.current = null
+      return
+    }
+    const screen = tmaWaitingAuth ? 'loading' : currentUser ? 'dashboard' : 'open_in_bot'
+    if (tmaScreenRef.current !== screen) {
+      tmaScreenRef.current = screen
+      tmaLog('info', 'screen_shown', 'Показан экран TMA', { screen })
+    }
+  }, [tmaWaitingAuth, currentUser])
 
   // Состояния для админ-панели теперь в useUIStore (adminTab, editingUser, editingServer, editingTariff)
   // settings, tariffs, servers теперь загружаются через React Query
@@ -1975,6 +1995,7 @@ export default function VPNServiceApp() {
   const handleTelegramSignIn = useCallback(async () => {
     if (!auth) return
     const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : null
+    tmaLog('info', 'button_click', 'Кнопка «Войти через Telegram»: нажатие', { hasInitData: !!initData })
     logger.info('TelegramAuth', 'Кнопка «Войти через Telegram»: нажатие', { hasInitData: !!initData })
     if (!initData) {
       const fromEnv = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
@@ -1982,6 +2003,7 @@ export default function VPNServiceApp() {
         : ''
       const botUsername = fromEnv || DEFAULT_TELEGRAM_BOT_USERNAME
       const url = botUsername ? `https://t.me/${botUsername}/app` : null
+      tmaLog('warn', 'button_no_initdata', 'Вход через Telegram: нет initData — показ модалки «Открыть в боте»', { hasUrl: !!url })
       logger.warn('TelegramAuth', 'Вход через Telegram: нет initData', { url })
       setTelegramOpenModal({ open: true, url })
       return
@@ -1993,6 +2015,7 @@ export default function VPNServiceApp() {
       let data = {}
       const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem('tma_session_token')) || ''
       if (storedToken) {
+        tmaLog('info', 'button_session_request', 'Вход по кнопке: запрос по сессии', {})
         logger.info('TelegramAuth', 'Вход по кнопке: запрос по сессии', {})
         const resSession = await fetch(`${base}/api/telegram/auth`, {
           method: 'POST',
@@ -2000,6 +2023,7 @@ export default function VPNServiceApp() {
           body: JSON.stringify({ sessionToken: storedToken }),
         })
         data = await resSession.json().catch(() => ({}))
+        tmaLog('info', 'button_session_response', 'Вход по кнопке: ответ по сессии', { success: data.success, status: resSession.status })
         logger.info('TelegramAuth', 'Вход по кнопке: ответ по сессии', { success: data.success, status: resSession.status })
         if (!data.success && typeof localStorage !== 'undefined') {
           localStorage.removeItem('tma_session_token')
@@ -2007,6 +2031,7 @@ export default function VPNServiceApp() {
         }
       }
       if (!data.success && initData) {
+        tmaLog('info', 'button_initdata_request', 'Вход по кнопке: запрос по initData', {})
         logger.info('TelegramAuth', 'Вход по кнопке: запрос по initData', {})
         const resInit = await fetch(`${base}/api/telegram/auth`, {
           method: 'POST',
@@ -2014,9 +2039,11 @@ export default function VPNServiceApp() {
           body: JSON.stringify({ initData }),
         })
         data = await resInit.json().catch(() => ({}))
+        tmaLog('info', 'button_initdata_response', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
         logger.info('TelegramAuth', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
       }
       if (data.success && data.customToken) {
+        tmaLog('info', 'button_success', 'Вход по кнопке: успешная загрузка', { hasUser: !!data.user, uid: data.user?.id })
         logger.info('TelegramAuth', 'Вход по кнопке: успех', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
         if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
         if (data.sessionToken && typeof localStorage !== 'undefined') {
@@ -2025,10 +2052,12 @@ export default function VPNServiceApp() {
         }
         await signInWithCustomToken(auth, data.customToken)
       } else {
+        tmaLog('warn', 'button_error', 'Вход по кнопке: ошибка от сервера', { reason: data.reason, error: data.error })
         logger.warn('TelegramAuth', 'Вход по кнопке: ошибка', { error: data.error, reason: data.reason })
         setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
       }
     } catch (err) {
+      tmaLog('error', 'button_exception', 'Вход по кнопке: исключение', { message: err?.message })
       logger.error('TelegramAuth', 'Вход по кнопке: исключение', { message: err?.message }, err)
       setError(err?.message || i18n.t('app.telegramSignInError'))
     } finally {
@@ -2043,6 +2072,7 @@ export default function VPNServiceApp() {
       setError('')
       const base = (import.meta.env?.VITE_API_BASE_URL || '').toString()
       try {
+        tmaLog('info', 'widget_request', 'Login Widget: отправка данных на сервер', { userId: user?.id })
         logger.info('TelegramAuth', 'Login Widget: отправка данных на сервер', { userId: user.id })
         const res = await fetch(`${base}/api/telegram/auth-widget`, {
           method: 'POST',
@@ -2051,6 +2081,7 @@ export default function VPNServiceApp() {
         })
         const data = await res.json().catch(() => ({}))
         if (data.success && data.customToken) {
+          tmaLog('info', 'widget_success', 'Login Widget: успешная загрузка', { status: res.status })
           logger.info('TelegramAuth', 'Login Widget: успех', {})
           if (data.sessionToken && typeof localStorage !== 'undefined') {
             localStorage.setItem('tma_session_token', data.sessionToken)
@@ -2058,10 +2089,12 @@ export default function VPNServiceApp() {
           }
           await signInWithCustomToken(auth, data.customToken)
         } else {
+          tmaLog('warn', 'widget_error', 'Login Widget: ошибка от сервера', { error: data.error })
           logger.warn('TelegramAuth', 'Login Widget: ошибка', { error: data.error })
           setError(data.error || i18n.t('app.telegramSignInFailed'))
         }
       } catch (err) {
+        tmaLog('error', 'widget_exception', 'Login Widget: исключение', { message: err?.message })
         logger.error('TelegramAuth', 'Login Widget: исключение', { message: err?.message }, err)
         setError(err?.message || i18n.t('app.telegramSignInError'))
       } finally {
@@ -2084,6 +2117,7 @@ export default function VPNServiceApp() {
     const username = params.get('username') || ''
     const photo_url = params.get('photo_url') || ''
     const widgetUser = { id, hash, auth_date, first_name, last_name, username, photo_url }
+    tmaLog('info', 'widget_redirect', 'Возврат из Telegram по URL (виджет редирект), завершаем вход', { userId: id })
     logger.info(TMA_LOG, 'Возврат из Telegram по URL (виджет редирект), завершаем вход', { userId: id })
     window.history.replaceState(null, '', window.location.pathname + (window.location.hash || ''))
     handleTelegramWidgetAuth(widgetUser)
@@ -2091,6 +2125,7 @@ export default function VPNServiceApp() {
 
   const handleLogout = useCallback(async () => {
     const userEmail = currentUser?.email
+    tmaLog('info', 'logout', 'Выход из аккаунта (очистка TMA сессии)', { hasEmail: !!userEmail })
     logger.info('Auth', 'Выход пользователя', { email: userEmail })
     clearTmaSession()
     try {
