@@ -158,6 +158,41 @@ export async function getTelegramWebhookInfo(botToken) {
 }
 
 /**
+ * Установить кнопку меню бота (Menu Button) — открывает Mini App по нажатию.
+ * @param {string} botToken
+ * @param {string} webAppUrl — полный URL Mini App, например https://yourdomain.com/t
+ * @param {string} [buttonText] — текст на кнопке (по умолчанию «Открыть приложение»)
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function setTelegramMenuButton(botToken, webAppUrl, buttonText = 'Открыть приложение') {
+  if (!botToken || !webAppUrl) {
+    return { ok: false, error: 'botToken и webAppUrl обязательны' }
+  }
+  const url = `${TELEGRAM_API_BASE}${botToken}/setChatMenuButton`
+  const body = {
+    menu_button: {
+      type: 'web_app',
+      text: String(buttonText || 'Открыть приложение').trim(),
+      web_app: { url: String(webAppUrl).trim().replace(/\/+$/, '') },
+    },
+  }
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!data.ok) {
+      return { ok: false, error: data.description || res.statusText }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+/**
  * Ответ на callback_query (answerCallbackQuery) — убрать "часики" у кнопки, опционально показать уведомление.
  * @param {string} botToken
  * @param {string} callbackQueryId

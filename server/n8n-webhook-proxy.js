@@ -23,7 +23,7 @@ import { readFile } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
 import crypto, { randomUUID } from 'crypto'
-import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, answerCallbackQuery, editMessageText } from './lib/telegram.js'
+import { sendTelegramMessage, getTelegramBotInfo, getTelegramChat, setTelegramWebhook, getTelegramWebhookInfo, setTelegramMenuButton, answerCallbackQuery, editMessageText } from './lib/telegram.js'
 import { buildMainKeyboard } from './lib/telegram.keyboard.js'
 import { createTelegramRouter } from './routes/telegram.routes.js'
 import { createBotBuilderRouter } from './bot-builder/botbuilder.routes.js'
@@ -4114,7 +4114,15 @@ app.post('/api/admin/telegram/set-webhook', async (req, res) => {
   try {
     const result = await setTelegramWebhook(botToken, webhookUrl, opts)
     if (!result.ok) return res.status(400).json({ success: false, error: result.error || 'Ошибка Telegram API' })
-    res.json({ success: true, webhookUrl, secretTokenSet: Boolean(opts.secret_token) })
+    const appBase = getBaseUrlForTelegram() || baseUrl.replace(/\/+$/, '')
+    const menuUrl = appBase ? `${appBase}/t` : ''
+    let menuButtonSet = false
+    if (menuUrl) {
+      const menuResult = await setTelegramMenuButton(botToken, menuUrl, 'Открыть приложение')
+      menuButtonSet = menuResult.ok
+      if (!menuResult.ok) console.warn('⚠️ Кнопка меню бота не установлена:', menuResult.error)
+    }
+    res.json({ success: true, webhookUrl, secretTokenSet: Boolean(opts.secret_token), menuButtonSet })
   } catch (err) {
     console.error('❌ POST /api/admin/telegram/set-webhook:', err.message)
     res.status(500).json({ success: false, error: err.message })
@@ -4133,6 +4141,25 @@ app.get('/api/admin/telegram/webhook-status', async (req, res) => {
     res.json({ success: true, webhookInfo: result.result })
   } catch (err) {
     console.error('❌ GET /api/admin/telegram/webhook-status:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** POST /api/admin/telegram/set-menu-button — установить кнопку меню бота «Открыть приложение» (Mini App /t) (только админ) */
+app.post('/api/admin/telegram/set-menu-button', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  const botToken = await getTelegramToken()
+  if (!botToken) return res.status(400).json({ success: false, error: 'Токен бота не настроен' })
+  const appBase = getBaseUrlForTelegram() || (process.env.TELEGRAM_WEBHOOK_BASE_URL || '').toString().trim().replace(/\/+$/, '')
+  if (!appBase) return res.status(400).json({ success: false, error: 'Не задан PUBLIC_URL / FRONTEND_URL / TELEGRAM_WEBHOOK_BASE_URL' })
+  const menuUrl = `${appBase}/t`
+  try {
+    const result = await setTelegramMenuButton(botToken, menuUrl, 'Открыть приложение')
+    if (!result.ok) return res.status(400).json({ success: false, error: result.error })
+    res.json({ success: true, menuUrl })
+  } catch (err) {
+    console.error('❌ POST /api/admin/telegram/set-menu-button:', err.message)
     res.status(500).json({ success: false, error: err.message })
   }
 })
