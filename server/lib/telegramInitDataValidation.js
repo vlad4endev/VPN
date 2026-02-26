@@ -1,14 +1,17 @@
 /**
- * Server-side validation of Telegram Mini App initData.
- * Follows Telegram official rules: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+ * Server-side validation of Telegram Mini App initData (HMAC-SHA256).
+ * Official spec: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
  *
- * Rules:
- * - Use only the raw initData string (do not trust initDataUnsafe on client).
- * - Parse into key=value pairs (raw, no URL-decode of values for hash verification).
- * - data_check_string = sorted keys (alphabetically), join key=value with \n.
+ * Do not trust client-side initDataUnsafe; only use the raw initData string from the request.
+ *
+ * Steps:
+ * - Parse raw initData query string into key=value pairs (no URL-decode of values for hash).
+ * - Extract "hash" parameter and remove it from params.
+ * - Sort remaining parameters alphabetically by key; build data_check_string = key=value joined by "\n".
  * - secret_key = HMAC-SHA256(key="WebAppData", message=botToken).
- * - computed_hash = HMAC-SHA256(secret_key, data_check_string), hex.
- * - Valid if computed_hash === hash from initData.
+ * - computed_hash = HMAC-SHA256(secret_key, data_check_string).toString("hex").
+ * - If computed_hash !== hash from initData → invalid_signature.
+ * - Optional: check auth_date is recent (replay prevention).
  */
 
 import crypto from 'crypto'

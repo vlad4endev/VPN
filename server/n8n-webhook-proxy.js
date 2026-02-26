@@ -352,11 +352,11 @@ const TELEGRAM_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const TMA_LOG_BUFFER_MAX = 200
 const tmaLogBuffer = []
 
-/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). События: auth_success, auth_fail, invalid_signature, expired_initData, initData_fail, session_fail, error. */
+/** Лог действий входа и операций через Telegram (в консоль + буфер для админки). События: auth_success, invalid_signature, expired_initData, firebase_error, auth_fail, initData_fail, session_fail, error. */
 function logTelegramAuth(event, data = {}) {
   let severity = data.severity
   if (severity === undefined) {
-    if (event === 'error') severity = 'error'
+    if (event === 'error' || event === 'firebase_error') severity = 'error'
     else if (event === 'invalid_signature') severity = 'error'
     else if (event === 'expired_initData' || event === 'session_fail') severity = 'warn'
     else if (event === 'auth_fail') severity = 'warn'

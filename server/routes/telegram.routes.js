@@ -172,7 +172,7 @@ export function createTelegramRouter(deps) {
           return res.status(401).json({ success: false, error: 'Сессия не найдена.', reason: 'token_not_found' })
         }
       } catch (err) {
-        logTelegramAuth('error', { step: 'session', message: err.message, reason: 'auth_fail', severity: 'error' })
+        logTelegramAuth('firebase_error', { step: 'session', message: err.message, reason: 'auth_fail', severity: 'error' })
         clearTmaSessionCookie(res)
         return res.status(503).json({ success: false, error: 'Ошибка проверки сессии.', reason: 'auth_fail' })
       }
@@ -188,11 +188,15 @@ export function createTelegramRouter(deps) {
       const isExpired = reason === 'expired_initData'
       const severity = isSignatureFailure ? 'error' : (isExpired ? 'warn' : 'warn')
       const logEvent = isSignatureFailure ? 'invalid_signature' : (isExpired ? 'expired_initData' : 'auth_fail')
-      const responseReason = reason === 'invalid_signature' ? 'invalid_hash' : (reason === 'expired_initData' ? 'expired' : (reason === 'no_hash' ? 'no_hash' : 'auth_fail'))
-      const status = isSignatureFailure ? 403 : (isExpired ? 400 : 503)
       logTelegramAuth(logEvent, { reason, severity, message: result.message, initDataLength: initData.length, appId })
       const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-      return res.status(status).json({ success: false, error: message, reason: responseReason })
+      if (isSignatureFailure) {
+        return res.status(403).json({ reason: 'auth_fail', code: 'invalid_signature', error: message })
+      }
+      if (isExpired) {
+        return res.status(400).json({ success: false, error: message, reason: 'expired' })
+      }
+      return res.status(503).json({ success: false, error: message, reason: 'auth_fail' })
     }
     const validated = result.data
     const tgId = String(validated.user.id)
@@ -266,7 +270,7 @@ export function createTelegramRouter(deps) {
       setTmaSessionCookie(res, sessionTokenNew)
       return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
-      logTelegramAuth('error', { step: 'create_or_update', message: err.message, reason: 'auth_fail', severity: 'error' })
+      logTelegramAuth('firebase_error', { step: 'create_or_update', message: err.message, reason: 'auth_fail', severity: 'error' })
       return res.status(503).json({ success: false, error: err.message || 'Ошибка авторизации', reason: 'auth_fail' })
     }
   })
