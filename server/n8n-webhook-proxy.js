@@ -62,13 +62,6 @@ let db = null
 // Инициализация Firebase Admin SDK (асинхронная)
 async function initFirebaseAdmin() {
   try {
-    const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID
-    
-    if (!projectId) {
-      console.log('⚠️ Firebase Admin SDK не настроен (FIREBASE_PROJECT_ID не указан)')
-      return
-    }
-
     // Проверяем, не инициализирован ли уже
     if (firebaseAdmin.apps.length > 0) {
       admin = firebaseAdmin
@@ -77,32 +70,33 @@ async function initFirebaseAdmin() {
       return
     }
 
-    // Приоритет инициализации:
-    // 0. FIREBASE_SERVICE_ACCOUNT_PATH (путь к JSON-файлу)
-    // 1. FIREBASE_SERVICE_ACCOUNT_KEY (JSON строка)
-    // 2. FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY (отдельные переменные)
-
+    // Приоритет: файл (PATH или server/firebase-service-account.json) → KEY → CLIENT_EMAIL+PRIVATE_KEY
     let credential = null
+    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || ''
+    let serviceAccount = null
 
-    // Вариант 0: JSON-файл (удобно для ключа с переносами строк)
-    const keyPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    // Вариант 0: JSON-файл (PATH из env или файл по умолчанию server/firebase-service-account.json)
+    const keyPathEnv = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    const defaultKeyPath = path.join(__dirname, 'firebase-service-account.json')
+    const keyPath = keyPathEnv
+      ? (path.isAbsolute(keyPathEnv) ? keyPathEnv : path.join(__dirname, keyPathEnv))
+      : (fs.existsSync(defaultKeyPath) ? defaultKeyPath : null)
     if (keyPath && !credential) {
       try {
-        const resolvedPath = path.isAbsolute(keyPath) ? keyPath : path.join(__dirname, keyPath)
-        const json = await readFile(resolvedPath, 'utf8')
-        const serviceAccount = JSON.parse(json)
+        const json = await readFile(keyPath, 'utf8')
+        serviceAccount = JSON.parse(json)
         if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
         credential = firebaseAdmin.credential.cert(serviceAccount)
-        console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_PATH')
+        if (serviceAccount.project_id) projectId = projectId || serviceAccount.project_id
+        console.log('📝 Используется ключ из файла:', keyPathEnv ? 'FIREBASE_SERVICE_ACCOUNT_PATH' : 'firebase-service-account.json')
       } catch (err) {
-        console.log('⚠️ Ошибка чтения FIREBASE_SERVICE_ACCOUNT_PATH:', err.message)
+        console.log('⚠️ Ошибка чтения ключа из файла:', err.message)
       }
     }
 
-    // Вариант 1: Service Account JSON из env (одной строкой или с переносами — пробуем оба варианта)
+    // Вариант 1: Service Account JSON из env (одной строкой или с переносами)
     const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
     if (serviceAccountKey && !credential) {
-      let serviceAccount = null
       try {
         serviceAccount = JSON.parse(serviceAccountKey)
       } catch {
@@ -110,13 +104,14 @@ async function initFirebaseAdmin() {
           serviceAccount = JSON.parse(serviceAccountKey.replace(/\r?\n/g, ''))
         } catch (err) {
           console.log('⚠️ Ошибка парсинга FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
-          console.log('   Подсказка: сохраните ключ в server/firebase-service-account.json и задайте FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json')
+          console.log('   Подсказка: сохраните ключ в server/firebase-service-account.json (будет подхвачен автоматически)')
         }
       }
       if (serviceAccount) {
         try {
           if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
           credential = firebaseAdmin.credential.cert(serviceAccount)
+          if (serviceAccount.project_id) projectId = projectId || serviceAccount.project_id
           console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
         } catch (err) {
           console.log('⚠️ Ошибка инициализации credential из FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
@@ -128,36 +123,36 @@ async function initFirebaseAdmin() {
     if (!credential) {
       const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
       const privateKey = process.env.FIREBASE_PRIVATE_KEY
-      
       if (clientEmail && privateKey) {
-        // Нормализуем private key (заменяем \n на реальные переносы строк)
         const normalizedPrivateKey = privateKey.replace(/\\n/g, '\n')
         credential = firebaseAdmin.credential.cert({
-          projectId,
+          projectId: projectId || 'skypathvpn',
           clientEmail,
           privateKey: normalizedPrivateKey,
         })
+        if (!projectId) projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'skypathvpn'
         console.log('📝 Используется FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY')
       }
     }
 
-    // Инициализация только при наличии явных учётных данных
-    if (credential) {
+    if (!projectId && serviceAccount && serviceAccount.project_id) projectId = serviceAccount.project_id
+
+    if (credential && projectId) {
       firebaseAdmin.initializeApp({
         credential,
         projectId,
       })
       admin = firebaseAdmin
       db = admin.firestore()
-      console.log('✅ Firebase Admin SDK инициализирован')
+      console.log('✅ Firebase Admin SDK инициализирован (project:', projectId, ')')
+    } else if (credential) {
+      console.log('⚠️ Firebase Admin SDK: задайте FIREBASE_PROJECT_ID в server/.env (или положите ключ в server/firebase-service-account.json с project_id)')
     } else {
-      // Нет ключа и нет ADC — не вызываем initializeApp, чтобы не было "Could not load the default credentials"
-      console.log('⚠️ Firebase Admin SDK не настроен: задайте FIREBASE_SERVICE_ACCOUNT_KEY (или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY) в server/.env')
-      console.log('   Админ-API и Telegram будут возвращать 503 до настройки ключа.')
+      console.log('⚠️ Firebase Admin SDK не настроен: положите ключ в server/firebase-service-account.json или задайте FIREBASE_SERVICE_ACCOUNT_KEY в server/.env')
+      console.log('   Админ-API и Telegram будут возвращать 503 до настройки.')
     }
   } catch (err) {
     console.log('⚠️ Firebase Admin SDK недоступен:', err.message)
-    console.log('   Задайте FIREBASE_SERVICE_ACCOUNT_KEY в server/.env (JSON ключа из Firebase Console → Project settings → Service accounts).')
   }
 }
 
