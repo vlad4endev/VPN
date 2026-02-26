@@ -770,10 +770,31 @@ export const dashboardService = {
         // Продолжаем работу без настроек, n8n может использовать свои настройки
       }
 
-      // Вычисляем финальную сумму с учетом скидки
+      // Вычисляем финальную сумму с учетом скидки (промокод)
       let finalAmount = amount
       if (discount > 0 && discount < 1) {
         finalAmount = amount * (1 - discount)
+      }
+
+      // Скидка за смену тарифа (остаток при понижении в первой половине периода) — применяется к следующей одной оплате
+      let nextPaymentDiscountAmountUsed = 0
+      try {
+        const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+        const userDocSnap = await getDoc(userDocRef)
+        if (userDocSnap.exists()) {
+          const planChangeDiscount = userDocSnap.get('nextPaymentDiscountAmount')
+          if (typeof planChangeDiscount === 'number' && planChangeDiscount > 0) {
+            nextPaymentDiscountAmountUsed = Math.min(planChangeDiscount, finalAmount)
+            finalAmount = Math.max(0, finalAmount - nextPaymentDiscountAmountUsed)
+            logger.info('Dashboard', 'Применена скидка за смену тарифа к сумме оплаты', {
+              userId: user.id,
+              nextPaymentDiscountAmountUsed,
+              finalAmount,
+            })
+          }
+        }
+      } catch (e) {
+        logger.warn('Dashboard', 'Не удалось прочитать nextPaymentDiscountAmount', { userId: user.id }, e)
       }
 
       // Получаем inboundId для тарифа (из сервера, привязанного к тарифу)
@@ -830,6 +851,7 @@ export const dashboardService = {
           periodMonths: periodMonths ?? 1,
           discount: discount ?? 0,
           originalAmount: amount,
+          ...(nextPaymentDiscountAmountUsed > 0 && { nextPaymentDiscountAmountUsed }),
           ...(options?.operationType === 'add_devices' && options?.newDevicesCount != null && {
             operationType: 'add_devices',
             newDevicesCount: options.newDevicesCount,
@@ -2712,6 +2734,220 @@ export const dashboardService = {
       }
       
       throw error
+    }
+  },
+
+  /**
+   * Смена тарифа (Super ↔ Multi): удаление клиента со старого сервера, создание на новом, скидка при понижении в первой половине периода.
+   * @param {Object} user - Текущий пользователь (с активной подпиской)
+   * @param {Object} newTariff - Новый тариф (super или multi)
+   * @returns {Promise<Object>} { success, subscriptionLink, nextPaymentDiscountAmount?, message }
+   */
+  async changePlanTariff(user, newTariff) {
+    if (!db || !user || !newTariff) {
+      throw new Error('Недостаточно данных для смены тарифа')
+    }
+    const now = Date.now()
+    if (!user.expiresAt || user.expiresAt <= now) {
+      throw new Error('У вас нет активной подписки для смены тарифа')
+    }
+    if (!user.uuid || !user.tariffId) {
+      throw new Error('Невозможно определить текущий тариф')
+    }
+
+    const xuiService = XUIService.getInstance()
+    const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
+
+    // Загружаем старый тариф
+    const oldTariffRef = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)
+    const oldTariffSnap = await getDoc(oldTariffRef)
+    if (!oldTariffSnap.exists()) {
+      throw new Error('Текущий тариф не найден')
+    }
+    const oldTariff = { id: oldTariffSnap.id, ...oldTariffSnap.data() }
+
+    const oldPlan = (oldTariff.plan || oldTariff.name || '').toLowerCase()
+    const newPlan = (newTariff.plan || newTariff.name || '').toLowerCase()
+    const allowed = ['super', 'multi']
+    if (!allowed.includes(newPlan) || !allowed.includes(oldPlan)) {
+      throw new Error('Смена тарифа возможна только между Super и MULTI')
+    }
+    if (oldPlan === newPlan) {
+      throw new Error('Вы уже на этом тарифе')
+    }
+
+    // Цены за месяц: Super — за устройство, MULTI — фикс
+    const oldPricePerMonth = oldPlan === 'super'
+      ? (oldTariff.price || 150) * (user.devices || 1)
+      : (oldTariff.price || 250)
+    const newPricePerMonth = newPlan === 'super'
+      ? (newTariff.price || 150) * (newTariff.devices || 1)
+      : (newTariff.price || 250)
+    const priceDiff = oldPricePerMonth - newPricePerMonth
+
+    // Скидка на следующую оплату только при понижении и только в первой половине периода
+    const periodMonths = user.periodMonths || 1
+    const periodMs = periodMonths * 30 * 24 * 60 * 60 * 1000
+    const periodStart = user.expiresAt - periodMs
+    const periodMid = periodStart + (user.expiresAt - periodStart) / 2
+    const isFirstHalfOfPeriod = now < periodMid
+    const nextPaymentDiscountAmount = (priceDiff > 0 && isFirstHalfOfPeriod) ? Math.round(priceDiff) : 0
+
+    const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+    const settingsSnapshot = await getDoc(settingsDoc)
+    const settingsData = settingsSnapshot.exists() ? settingsSnapshot.data() : {}
+    const serversList = settingsData.servers || []
+
+    // ——— 1. Удалить клиента со старого сервера ———
+    let oldServer = null
+    if (user.tariffId) {
+      const forOld = serversList.filter(s => {
+        if (s.tariffIds && s.tariffIds.length > 0) return s.tariffIds.includes(user.tariffId)
+        return true
+      })
+      oldServer = forOld.find(s => s.active && s.id)
+    }
+    if (!oldServer) oldServer = serversList.find(s => s.active && s.id)
+    if (!oldServer) {
+      throw new Error('Не найден сервер текущего тарифа для удаления клиента')
+    }
+
+    const oldInboundId = oldServer.xuiInboundId || defaultInboundId
+    const deleteData = {
+      operation: 'delete_client',
+      category: 'change_plan',
+      timestamp: new Date().toISOString(),
+      userId: user.id,
+      email: user.email || user.name,
+      inboundId: oldInboundId,
+      clientId: user.uuid,
+      serverId: oldServer.id,
+      sessionCookie: oldServer.sessionCookie || null,
+      serverIP: oldServer.serverIP,
+      serverPort: oldServer.serverPort,
+      randompath: oldServer.randompath || '',
+      protocol: oldServer.protocol || 'https',
+      xuiUsername: oldServer.xuiUsername,
+      xuiPassword: oldServer.xuiPassword,
+    }
+    const webhookUrl = await loadWebhookUrl()
+    if (webhookUrl) deleteData.webhookUrl = webhookUrl
+
+    try {
+      await xuiService.deleteClient(deleteData)
+      logger.info('Dashboard', 'Клиент удален со старого сервера при смене тарифа', { email: user.email, oldTariff: oldTariff.name })
+    } catch (err) {
+      logger.warn('Dashboard', 'Ошибка удаления со старого сервера при смене тарифа', { email: user.email }, err)
+      throw new Error('Не удалось отвязать подписку от старого сервера. Попробуйте позже или обратитесь в поддержку.')
+    }
+
+    // ——— 2. Найти сервер для нового тарифа ———
+    let serversToCheck = serversList.filter(s => {
+      if (s.tariffIds && s.tariffIds.length > 0) return s.tariffIds.includes(newTariff.id)
+      return true
+    })
+    if (serversToCheck.length === 0) serversToCheck = serversList
+
+    let newServer = null
+    for (const s of serversToCheck) {
+      if (s.sessionCookie && s.sessionCookieReceivedAt) {
+        const age = Date.now() - new Date(s.sessionCookieReceivedAt).getTime()
+        if (age < 60 * 60 * 1000) { newServer = s; break }
+      }
+    }
+    if (!newServer) {
+      for (const s of serversToCheck) {
+        if (s.active !== false && s.xuiUsername && s.xuiPassword && s.serverIP && s.serverPort) {
+          newServer = s
+          break
+        }
+      }
+    }
+    if (!newServer || !newServer.serverIP || !newServer.serverPort) {
+      throw new Error('Не найден активный сервер для нового тарифа')
+    }
+
+    const newInboundId = newServer.xuiInboundId || defaultInboundId || '1'
+    const finalDevices = newTariff.devices || (newPlan === 'super' ? 1 : 5)
+    const totalGB = newTariff.trafficGB > 0 ? newTariff.trafficGB * 1024 * 1024 * 1024 : 0
+
+    // Новый UUID для нового инбаунда
+    const newClientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0
+      const v = c === 'x' ? r : (r & 0x3) | 0x8
+      return v.toString(16)
+    })
+
+    const addClientData = {
+      operation: 'add_client',
+      category: 'change_plan',
+      timestamp: new Date().toISOString(),
+      userId: user.id,
+      userUuid: newClientId,
+      userName: user.name || user.email?.split('@')[0] || 'User',
+      userEmail: user.email,
+      email: user.name || user.email,
+      inboundId: parseInt(newInboundId),
+      totalGB,
+      expiryTime: user.expiresAt,
+      limitIp: finalDevices,
+      clientId: newClientId,
+      subId: user.subId || '',
+      tgId: user.tgId || '',
+      serverId: newServer.id,
+      sessionCookie: newServer.sessionCookie || null,
+      serverIP: newServer.serverIP,
+      serverPort: newServer.serverPort,
+      randompath: newServer.randompath || '',
+      protocol: newServer.protocol || (newServer.serverPort === 443 || newServer.serverPort === 40919 ? 'https' : 'http'),
+    }
+    if (newServer.xuiUsername && newServer.xuiPassword && !addClientData.sessionCookie) {
+      addClientData.xuiUsername = newServer.xuiUsername
+      addClientData.xuiPassword = newServer.xuiPassword
+    }
+    if (webhookUrl) addClientData.webhookUrl = webhookUrl
+
+    const addResult = await xuiService.addClient(addClientData)
+    const finalUuid = addResult?.vpnUuid || newClientId
+
+    let subscriptionLink
+    if (newTariff.subscriptionLink && newTariff.subscriptionLink.trim()) {
+      const base = newTariff.subscriptionLink.trim().replace(/\/$/, '')
+      subscriptionLink = `${base}/${user.subId || ''}`
+    } else {
+      subscriptionLink = `https://subs.skypath.fun:3458/vk198/${user.subId || ''}`
+    }
+
+    const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+    const updateData = {
+      uuid: finalUuid,
+      plan: newTariff.plan || newPlan,
+      tariffName: newTariff.name,
+      tariffId: newTariff.id,
+      devices: finalDevices,
+      vpnLink: subscriptionLink,
+      subscriptionLink,
+      updatedAt: new Date().toISOString(),
+    }
+    if (nextPaymentDiscountAmount > 0) {
+      updateData.nextPaymentDiscountAmount = nextPaymentDiscountAmount
+    }
+    await updateDoc(userDoc, updateData)
+
+    logger.info('Dashboard', 'Тариф успешно изменен', {
+      userId: user.id,
+      oldPlan,
+      newPlan,
+      nextPaymentDiscountAmount: nextPaymentDiscountAmount || undefined,
+    })
+
+    return {
+      success: true,
+      subscriptionLink,
+      nextPaymentDiscountAmount: nextPaymentDiscountAmount > 0 ? nextPaymentDiscountAmount : undefined,
+      message: nextPaymentDiscountAmount > 0
+        ? `Тариф изменен на ${newTariff.name}. На следующую оплату применена скидка ${nextPaymentDiscountAmount} ₽.`
+        : `Тариф изменен на ${newTariff.name}.`,
     }
   },
 }

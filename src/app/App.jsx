@@ -369,6 +369,8 @@ export default function VPNServiceApp() {
         const hash = (window.location.hash || '').toLowerCase()
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
+        // Отдельная ссылка для Telegram Mini App: вход только по Telegram ID, личный кабинет по пользователю
+        if (path === '/t' || path === '/telegram' || (path.startsWith('/t/') && path.length > 3)) return 'tma'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -563,6 +565,7 @@ export default function VPNServiceApp() {
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
+      if (path === '/t' || path === '/telegram' || (path.startsWith('/t/') && path.length > 3)) setViewState('tma')
     }
     syncViewFromUrl()
     window.addEventListener('hashchange', syncViewFromUrl)
@@ -1097,7 +1100,7 @@ export default function VPNServiceApp() {
     const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY)) || ''
     const hasInitData = !!getTmaInitData()
     const inTmaContext = hasInitData
-    if (inTmaContext && tmaAttemptStartRef.current === 0) {
+    if ((storedToken || hasInitData) && tmaAttemptStartRef.current === 0) {
       tmaAttemptStartRef.current = Date.now()
       setTmaWaitingAuth(true)
     }
@@ -4220,6 +4223,80 @@ export default function VPNServiceApp() {
   }
   if (path === '/payment/fail') {
     return <PaymentResultPage success={false} onGoToDashboard={goToDashboard} />
+  }
+
+  // Мини-интерфейс для Telegram: отдельная ссылка /t или /telegram — вход только по Telegram ID, личный кабинет по пользователю
+  if (view === 'tma') {
+    if (currentUser) {
+      // Авторизован по Telegram — показываем личный кабинет (компактный режим для Mini App)
+      return (
+        <Dashboard
+          currentUser={currentUser}
+          view="dashboard"
+          onSetView={setView}
+          onLogout={handleLogout}
+          tariffs={tariffs}
+          loadTariffs={loadTariffs}
+          dashboardTab={dashboardTab}
+          onSetDashboardTab={setDashboardTab}
+          editingProfile={editingProfile}
+          onSetEditingProfile={setEditingProfile}
+          profileData={profileData}
+          onSetProfileData={setProfileData}
+          creatingSubscription={creatingSubscription}
+          onHandleCreateSubscription={handleCreateSubscription}
+          onHandleRenewSubscription={handleRenewSubscription}
+          onHandleAddDevices={handleAddDevices}
+          onHandleDeleteSubscription={handleDeleteSubscription}
+          onRefreshUserAfterPayment={onRefreshUserAfterPayment}
+          onHandleUpdateProfile={handleUpdateProfile}
+          onHandleDeleteAccount={handleDeleteAccount}
+          onProfileNameChange={handleProfileNameChange}
+          onProfilePhoneChange={handleProfilePhoneChange}
+          payments={payments}
+          paymentsLoading={paymentsLoading}
+          loadPayments={loadPayments}
+          formatDate={formatDate}
+          formatTraffic={formatTraffic}
+          settings={settings}
+          onCopy={handleCopy}
+          showKeyModal={showKeyModal}
+          onSetShowKeyModal={setShowKeyModal}
+          showLogger={showLogger}
+          onSetShowLogger={setShowLogger}
+          onGetKey={handleGetKey}
+          servers={servers}
+          isTelegramMini
+        />
+      )
+    }
+    if (tmaWaitingAuth) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4" />
+          <p className="text-slate-300 font-medium text-center">{i18n.t('app.telegramSigningIn') || 'Вход через Telegram…'}</p>
+          <p className="text-slate-500 text-sm mt-2 text-center">{t('app.telegramMiniHint') || 'Идентификация по вашему Telegram ID'}</p>
+        </div>
+      )
+    }
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4">
+        <MessageCircle className="w-16 h-16 text-slate-500 mb-4" />
+        <h2 className="text-xl font-semibold text-white mb-2 text-center">{t('app.telegramMiniTitle') || 'Личный кабинет в Telegram'}</h2>
+        {error && (
+          <p className="text-amber-400 text-sm text-center max-w-sm mb-4">{error}</p>
+        )}
+        <p className="text-slate-400 text-center max-w-sm mb-6">
+          {t('app.telegramMiniOpenInBot') || 'Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.'}
+        </p>
+        <a
+          href="/"
+          className="text-blue-400 hover:text-blue-300 underline text-sm"
+        >
+          {t('app.goToMainSite') || 'Перейти на основной сайт'}
+        </a>
+      </div>
+    )
   }
 
   // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации

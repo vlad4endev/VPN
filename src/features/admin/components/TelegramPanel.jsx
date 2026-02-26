@@ -17,6 +17,7 @@ const TelegramPanel = () => {
   const [saving, setSaving] = useState(false)
   const [settingWebhook, setSettingWebhook] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [miniAppCopied, setMiniAppCopied] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [testChatId, setTestChatId] = useState('')
   const [sendingTest, setSendingTest] = useState(false)
@@ -131,13 +132,23 @@ const TelegramPanel = () => {
     }
   }
 
-  const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin.replace(/\/$/, '')}/api/telegram/webhook` : ''
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : ''
+  const webhookUrl = baseUrl ? `${baseUrl}/api/telegram/webhook` : ''
+  const miniAppUrl = baseUrl ? `${baseUrl}/t` : ''
 
   const handleCopyWebhook = () => {
     if (webhookUrl && navigator.clipboard) {
       navigator.clipboard.writeText(webhookUrl)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const handleCopyMiniAppUrl = () => {
+    if (miniAppUrl && navigator.clipboard) {
+      navigator.clipboard.writeText(miniAppUrl)
+      setMiniAppCopied(true)
+      setTimeout(() => setMiniAppCopied(false), 2000)
     }
   }
 
@@ -335,6 +346,30 @@ const TelegramPanel = () => {
               <Copy className={`w-4 h-4 ${copied ? 'text-green-400' : ''}`} />
             </button>
           </div>
+        )}
+
+        {/* Mini App — ссылка для бота (BotFather → Menu Button / Mini App) */}
+        {miniAppUrl && (
+          <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Mini App (личный кабинет в боте)</h3>
+            <p className="text-slate-500 text-xs mb-2">
+              Вставьте ссылку в настройках бота: BotFather → ваш бот → Menu Button или в кнопку/команду, открывающую Mini App.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 min-w-0 text-sm text-slate-200 break-all bg-slate-900 px-2 py-1.5 rounded border border-slate-700">
+                {miniAppUrl}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopyMiniAppUrl}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium transition-colors"
+                title="Копировать ссылку"
+              >
+                <Copy className={`w-4 h-4 ${miniAppCopied ? 'text-green-400' : ''}`} />
+                {miniAppCopied ? 'Скопировано' : 'Копировать'}
+              </button>
+            </div>
+          </section>
         )}
 
         {/* Подробнее */}

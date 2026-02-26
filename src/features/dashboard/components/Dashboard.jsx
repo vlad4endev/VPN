@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw, ArrowLeftRight } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
@@ -53,6 +53,7 @@ const Dashboard = ({
   onSetShowLogger,
   onGetKey,
   servers = [],
+  isTelegramMini = false,
 }) => {
   const { t } = useTranslation()
   // Состояние для модальных окон выбора тарифа и успеха
@@ -83,6 +84,9 @@ const Dashboard = ({
   const subscriptionCreatedForOrderIdsRef = useRef(new Set())
   /** orderId, для которого идёт повторная проверка статуса из истории платежей */
   const [recheckingOrderId, setRecheckingOrderId] = useState(null)
+  const [changingPlan, setChangingPlan] = useState(false)
+  const [changePlanError, setChangePlanError] = useState(null)
+  const [changePlanSuccess, setChangePlanSuccess] = useState(null)
 
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
@@ -112,6 +116,12 @@ const Dashboard = ({
   }
   
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
+  const currentPlanKey = (currentUser?.plan || currentUser?.tariffName || '').toLowerCase()
+  const otherTariffForSwitch = tariffs.find(t => {
+    if (!t.active) return false
+    const plan = (t.plan || t.name || '').toLowerCase()
+    return ['super', 'multi'].includes(plan) && plan !== currentPlanKey
+  })
   
   // Состояние для оставшегося времени подписки (обновляется каждую минуту)
   const [timeRemaining, setTimeRemaining] = useState(() => 
@@ -1004,6 +1014,23 @@ const Dashboard = ({
     }
   }
 
+  const handleChangePlan = async () => {
+    if (!currentUser?.id || !otherTariffForSwitch) return
+    setChangePlanError(null)
+    setChangePlanSuccess(null)
+    try {
+      setChangingPlan(true)
+      const result = await dashboardService.changePlanTariff(currentUser, otherTariffForSwitch)
+      await onRefreshUserAfterPayment?.().catch(() => {})
+      setChangePlanSuccess(result.message || t('dashboard.changePlanSuccess'))
+      setTimeout(() => setChangePlanSuccess(null), 6000)
+    } catch (err) {
+      setChangePlanError(err?.message || t('dashboard.changePlanError'))
+    } finally {
+      setChangingPlan(false)
+    }
+  }
+
   // Обработчик ручной проверки статуса оплаты
   const handleManualPaymentCheck = async (orderId) => {
     if (!orderId) {
@@ -1354,15 +1381,48 @@ const Dashboard = ({
 
   return (
     <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:flex-row lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
-      <Sidebar
-        currentUser={currentUser}
-        view={view}
-        onSetView={onSetView}
-        onLogout={onLogout}
-        dashboardTab={dashboardTab}
-        onSetDashboardTab={onSetDashboardTab}
-      />
-      <div className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-8 pt-14 sm:pt-16 lg:pt-6 lg:pt-8 pb-20 sm:pb-24 lg:pb-8 overflow-y-auto overflow-x-hidden">
+      {!isTelegramMini && (
+        <Sidebar
+          currentUser={currentUser}
+          view={view}
+          onSetView={onSetView}
+          onLogout={onLogout}
+          dashboardTab={dashboardTab}
+          onSetDashboardTab={onSetDashboardTab}
+        />
+      )}
+      {isTelegramMini && (
+        <>
+          <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3 bg-slate-900/95 border-b border-slate-800 backdrop-blur safe-area-inset-top">
+            <h1 className="text-lg font-semibold text-white truncate">{t('sidebar.cabinet')}</h1>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="shrink-0 px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              {t('auth.logout') || 'Выход'}
+            </button>
+          </header>
+          <div className="fixed top-[52px] left-0 right-0 z-30 flex gap-1 px-2 py-2 bg-slate-900/90 border-b border-slate-800">
+            {[
+              { id: 'subscription', labelKey: 'sidebar.subscription', icon: CreditCard },
+              { id: 'profile', labelKey: 'sidebar.profile', icon: User },
+              { id: 'payments', labelKey: 'sidebar.payments', icon: History },
+            ].map(({ id, labelKey, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onSetDashboardTab(id)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-colors ${dashboardTab === id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span className="truncate">{t(labelKey)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className={`flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-8 pb-20 sm:pb-24 lg:pb-8 overflow-y-auto overflow-x-hidden ${isTelegramMini ? 'pt-28' : 'pt-14 sm:pt-16 lg:pt-6 lg:pt-8'}`}>
         <div className="mb-4 sm:mb-5 md:mb-6">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-white mb-1.5 sm:mb-2">{t('sidebar.cabinet')}</h1>
           <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">{t('dashboard.subtitle')}</p>
@@ -1827,6 +1887,41 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                           <Calendar className="w-4 h-4 flex-shrink-0" />
                           <span>{creatingSubscription || showPaymentProcessing ? 'Продление...' : 'Продлить подписку'}</span>
                         </button>
+                      </div>
+                    )}
+
+                    {/* Смена тарифа Super ↔ Multi */}
+                    {currentUser?.uuid && otherTariffForSwitch && (
+                      <div className="mt-3 flex flex-col gap-2">
+                        {changePlanSuccess && (
+                          <p className="text-green-400 text-sm px-2 py-1 rounded bg-green-900/20" role="status">
+                            {changePlanSuccess}
+                          </p>
+                        )}
+                        {changePlanError && (
+                          <p className="text-red-400 text-sm px-2 py-1 rounded bg-red-900/20" role="alert">
+                            {changePlanError}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleChangePlan}
+                          disabled={changingPlan || creatingSubscription || showPaymentProcessing}
+                          className="w-full min-h-[40px] px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-200 rounded-lg font-medium text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation border border-slate-600"
+                          aria-label={t('dashboard.changePlanAria', { name: otherTariffForSwitch.name })}
+                        >
+                          {changingPlan ? (
+                            <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
+                          ) : (
+                            <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
+                          )}
+                          <span>{changingPlan ? t('dashboard.changingPlan') : t('dashboard.changePlanTo', { name: otherTariffForSwitch.name })}</span>
+                        </button>
+                        {currentUser?.nextPaymentDiscountAmount > 0 && (
+                          <p className="text-slate-400 text-xs px-2">
+                            {t('dashboard.nextPaymentDiscountHint', { amount: currentUser.nextPaymentDiscountAmount })}
+                          </p>
+                        )}
                       </div>
                     )}
 

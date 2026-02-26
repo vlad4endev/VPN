@@ -6678,6 +6678,7 @@ async function activateSubscriptionAfterPayment(paymentData) {
       paymentStatus: 'paid', // ТОЛЬКО для обратной совместимости (устаревшее поле)
       discount: 0, // Промокод действует только на 1 оплату — не сохраняем скидку (иначе применится при продлении)
       unpaidStartDate: null, // Очищаем дату начала неоплаченного периода
+      nextPaymentDiscountAmount: null, // Скидка за смену тарифа применяется один раз — сбрасываем после успешной оплаты
       updatedAt: new Date().toISOString(),
     }
     
