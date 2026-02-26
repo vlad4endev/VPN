@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Send, CheckCircle2, XCircle, Copy, RefreshCw, ChevronDown, ChevronUp, Bell, Link2, ScrollText } from 'lucide-react'
-import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage, getTelegramLogs } from '../services/telegramAdminService.js'
+import { getTelegramStatus, getTelegramChatInfo, saveTelegramToken, saveTelegramSettings, setTelegramWebhook, getWebhookStatus, sendTestMessage } from '../services/telegramAdminService.js'
 import logger from '../../../shared/utils/logger.js'
 
 /**
@@ -161,7 +161,14 @@ const TelegramPanel = () => {
     setLogsError(null)
     setLogsLoading(true)
     try {
-      const { logs: list } = await getTelegramLogs(150)
+      const mod = await import('../services/telegramAdminService.js')
+      const getLogs = mod.getTelegramLogs
+      if (typeof getLogs !== 'function') {
+        setLogsError('Логи недоступны (обновите страницу или перезапустите dev-сервер)')
+        setLogs([])
+        return
+      }
+      const { logs: list } = await getLogs(150)
       setLogs(Array.isArray(list) ? list : [])
     } catch (err) {
       setLogsError(err?.message || 'Ошибка загрузки логов')
