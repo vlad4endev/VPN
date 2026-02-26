@@ -139,7 +139,7 @@ export function createTelegramRouter(deps) {
       db = getDb()
       admin = getAdmin()
       if (!admin || !db) {
-        logTelegramAuth('error', { step: 'init', message: 'Сервис недоступен (нет Firebase)' })
+        logTelegramAuth('error', { step: 'init', message: 'Сервис недоступен (нет Firebase)', reason: 'auth_fail', severity: 'error' })
         return res.status(503).json({ success: false, error: 'Сервис недоступен. Настройте Firebase Admin (FIREBASE_SERVICE_ACCOUNT_KEY) в server/.env', reason: 'service_unavailable' })
       }
     }
@@ -172,9 +172,9 @@ export function createTelegramRouter(deps) {
           return res.status(401).json({ success: false, error: 'Сессия не найдена.', reason: 'token_not_found' })
         }
       } catch (err) {
-        logTelegramAuth('error', { step: 'session', message: err.message })
+        logTelegramAuth('error', { step: 'session', message: err.message, reason: 'auth_fail', severity: 'error' })
         clearTmaSessionCookie(res)
-        return res.status(503).json({ success: false, error: 'Ошибка проверки сессии.' })
+        return res.status(503).json({ success: false, error: 'Ошибка проверки сессии.', reason: 'auth_fail' })
       }
     }
 
@@ -184,10 +184,12 @@ export function createTelegramRouter(deps) {
     const result = await validateTelegramInitDataWithReasonAsync(initData)
     if (!result.ok) {
       const reason = result.reason || 'unknown'
-      logTelegramAuth('initData_fail', { reason, message: result.message, initDataLength: initData.length, appId })
+      const severity = (reason === 'invalid_hash' || reason === 'no_hash') ? 'error' : (reason === 'expired' ? 'warn' : 'warn')
+      const reasonCode = (reason === 'invalid_hash' || reason === 'no_hash') ? 'auth_403' : (reason === 'expired' ? 'auth_date_expired' : 'auth_fail')
+      logTelegramAuth('initData_fail', { reason: reasonCode, severity, message: result.message, initDataLength: initData.length, appId })
       const message = result.message || 'Данные Telegram не прошли проверку. Откройте приложение заново из меню бота; убедитесь, что токен бота на сервере соответствует этому боту и сессия не старше 24 ч.'
-      const status = (reason === 'invalid_hash' || reason === 'no_hash') ? 403 : 400
-      return res.status(status).json({ success: false, error: message, reason })
+      const status = (reason === 'invalid_hash' || reason === 'no_hash') ? 403 : 503
+      return res.status(status).json({ success: false, error: message, reason: reasonCode })
     }
     const validated = result.data
     const tgId = String(validated.user.id)
@@ -261,8 +263,8 @@ export function createTelegramRouter(deps) {
       setTmaSessionCookie(res, sessionTokenNew)
       return res.json({ success: true, customToken, uid, user: userPayload, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
     } catch (err) {
-      logTelegramAuth('error', { step: 'create_or_update', message: err.message })
-      return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации', reason: 'auth_fail' })
+      logTelegramAuth('error', { step: 'create_or_update', message: err.message, reason: 'auth_fail', severity: 'error' })
+      return res.status(503).json({ success: false, error: err.message || 'Ошибка авторизации', reason: 'auth_fail' })
     }
   })
 

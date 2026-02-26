@@ -1137,8 +1137,8 @@ export default function VPNServiceApp() {
       return fetch(authUrl, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
-        body: JSON.stringify({ initData }),
+        headers: { 'X-Telegram-InitData': initData },
+        body: undefined,
         signal: ac.signal,
       })
         .then((r) => { clearTimeout(tid); return r.json(); })

@@ -90,7 +90,8 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
   })
 }
 
-// Инициализация Firebase
+// Инициализация Firebase (JS SDK: initializeApp + getAuth для signInWithCustomToken в TMA).
+// Для Telegram Mini App: Firebase Console → Authentication → Settings → Authorized domains: ваш домен и при необходимости t.me.
 let app = null
 let auth = null
 let db = null

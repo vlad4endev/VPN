@@ -2,6 +2,14 @@
 
 Документ описывает архитектуру и реализацию входа в личный кабинет **только через Telegram**: пользователь открывает Mini App из бота и попадает в кабинет без логина/пароля. Backend: **Node.js (Express)**. БД: **Firestore**. Идентификация пользователя: **Firebase Auth (customToken)** + серверная сессия (**sessionToken**).
 
+## Спека и коды логов
+
+- **Фронт (/t):** при загрузке вызывается `waitTelegramInitData(7000)`; затем POST `/api/telegram/auth` с пустым body, заголовком `X-Telegram-InitData: initData` и `credentials: 'include'`. При успехе — `signInWithCustomToken` → Dashboard; при ошибке/таймауте — экран «Откройте из бота».
+- **Сервер:** `cookie-parser` подключён; POST `/api/telegram/auth`: сначала проверка cookie `tma_session_token`; при отсутствии/невалидной сессии — чтение initData из заголовка, `validateTelegramInitDataWithReason` (HMAC-SHA256, auth_date); при успехе — `createCustomToken`, установка httpOnly cookie; при ошибке — 403/503 с `reason`.
+- **Firebase:** в Authorized Domains добавьте ваш домен и при необходимости `t.me`. Admin SDK — сервисный аккаунт; JS SDK — `initializeApp` + `getAuth(app)`.
+- **Cookie:** httpOnly, secure (в production), sameSite=lax, path=/, TTL 90 дней. Logout: POST `/api/telegram/logout` сбрасывает cookie (maxAge=0).
+- **Коды логов (reason/event):** `initData_timeout`, `auth_403`, `auth_date_expired`, `firebase_error`, `network_error`; сервер пишет `logTelegramAuth({ event, reason, severity })`.
+
 ## Отдельная ссылка для Telegram Mini App
 
 Для бота можно использовать **отдельный URL** мини-интерфейса:
