@@ -112,6 +112,19 @@ const validateName = (name) => {
   return null
 }
 
+/** Имя для Firestore: 2–100 символов, только [a-zA-Zа-яА-ЯёЁ \\s-]. При пустом/невалидном displayName — из email или "User". */
+function getFirestoreSafeName(displayName, email) {
+  const allowed = /[a-zA-Zа-яА-ЯёЁ\s-]/g
+  const raw = (displayName || '').trim()
+  const cleaned = raw ? raw.match(allowed)?.join('') || '' : ''
+  if (cleaned.length >= 2 && cleaned.length <= 100) return cleaned.slice(0, 100)
+  const fromEmail = (email || '').trim().split('@')[0]
+  const fromEmailCleaned = fromEmail ? fromEmail.match(allowed)?.join('') || '' : ''
+  if (fromEmailCleaned.length >= 2) return fromEmailCleaned.slice(0, 100)
+  if (fromEmailCleaned.length === 1) return fromEmailCleaned + 'u'
+  return 'User'
+}
+
 // Компонент LoginForm вынесен в отдельный файл src/components/LoginForm.jsx
 
 /**
@@ -744,6 +757,7 @@ export default function VPNServiceApp() {
       logger.debug('App', 'onAuthStateChanged', { user: !!firebaseUser, uid: firebaseUser?.uid })
       setFirebaseUser(firebaseUser)
       const dbInstance = getDb()
+      const path = typeof window !== 'undefined' ? (window.location.pathname || '').toLowerCase().replace(/\/+$/, '') : ''
       if (!dbInstance) {
         setLoading(false)
         setAuthChecking(false)
@@ -863,9 +877,10 @@ export default function VPNServiceApp() {
                 const generatedUUID = ThreeXUI.generateUUID()
                 const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
                 const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+                const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
                 const newUserData = {
                   email: firebaseUser.email || '',
-                  name: firebaseUser.displayName || '',
+                  name: safeName,
                   phone: '',
                   role: 'user',
                   plan: 'free',
@@ -1517,9 +1532,10 @@ export default function VPNServiceApp() {
       const generatedUUID = ThreeXUI.generateUUID()
       const generatedSubId = await generateUniqueSubId(db, appId)
       const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+      const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
       const newUserData = {
         email: firebaseUser.email || '',
-        name: firebaseUser.displayName || '',
+        name: safeName,
         phone: '',
         role: 'user',
         plan: 'free',
