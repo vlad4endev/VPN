@@ -56,4 +56,16 @@ export function isLikelyInTelegramContext() {
   return isOpenedInTelegramWebView()
 }
 
-export default { isTmaPath, isOpenedInTelegramWebView, isLikelyInTelegramContext, normalizePath }
+/**
+ * Является ли путь контекстом браузерной авторизации (логин/пароль, Google, Telegram Widget).
+ * На TMA-путях (/t, /telegram) используется только авторизация через Telegram (initData/сессия).
+ * Используйте для: getRedirectResult, виджет-редирект, перенаправления после Google — только на браузерном пути.
+ * @param {string} [path] - путь (по умолчанию window.location.pathname)
+ * @returns {boolean}
+ */
+export function isBrowserAuthPath(path) {
+  const p = path != null ? normalizePath(path) : (typeof window !== 'undefined' ? normalizePath(window.location.pathname) : '')
+  return p !== '' && !isTmaPath(p)
+}
+
+export default { isTmaPath, isBrowserAuthPath, isOpenedInTelegramWebView, isLikelyInTelegramContext, normalizePath }

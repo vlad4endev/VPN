@@ -53,8 +53,9 @@ import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation 
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
+import { authService } from '../features/auth/services/authService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
-import { isTmaPath } from '../features/telegram/utils/tmaPath.js'
+import { isTmaPath, isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
 import TmaLogPanel from '../features/telegram/components/TmaLogPanel.jsx'
 
 // Константа appId для пути Firestore (для обратной совместимости)
@@ -727,54 +728,16 @@ export default function VPNServiceApp() {
     return ThreeXUI.generateSubId()
   }, [])
 
+  // Единая загрузка данных пользователя через authService (subId-миграция, офлайн, permission-denied)
   const loadUserData = useCallback(async (uid, dbOverride) => {
-    const dbToUse = dbOverride ?? getDb()
-    if (!dbToUse || !uid) return null
-    
     try {
-      // КРИТИЧНО: Путь к документу пользователя включает его уникальный uid
-      // Это гарантирует, что каждый пользователь имеет изолированное хранилище данных
-      const userDoc = doc(dbToUse, `artifacts/${appId}/public/data/users_v4`, uid)
-      const userSnapshot = await getDoc(userDoc)
-      
-      if (userSnapshot.exists()) {
-        const userData = { id: userSnapshot.id, ...userSnapshot.data() }
-        logger.debug('Auth', 'Данные пользователя загружены (изолированы по uid)', { uid, email: userData.email })
-        return userData
-      }
-      return null
+      return await authService.loadUserData(uid, dbOverride ?? getDb())
     } catch (err) {
-      // Обработка permission-denied (отсутствует admin claim)
       if (err.code === 'permission-denied') {
-        logger.error('Auth', 'Нет доступа к данным пользователя: отсутствует custom claim admin: true', { uid }, err)
-        setError('Нет доступа к базе данных. У вас отсутствуют необходимые права администратора (custom claim admin: true). Обратитесь к администратору системы.')
+        setError(i18n.t('app.noAccessDb'))
         return null
       }
-      
-      // Обработка офлайн-режима Firebase
-      if (err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')) {
-        logger.warn('Auth', 'Firebase офлайн, пытаемся загрузить из кеша localStorage', { uid })
-        
-        // Пытаемся загрузить из localStorage
-        try {
-          const savedUserStr = localStorage.getItem('vpn_current_user')
-          if (savedUserStr) {
-            const savedUser = JSON.parse(savedUserStr)
-            if (savedUser.id === uid) {
-              logger.info('Auth', 'Данные пользователя загружены из localStorage (офлайн-режим)', { uid, email: savedUser.email })
-              return savedUser
-            }
-          }
-        } catch (localErr) {
-          logger.warn('Auth', 'Ошибка загрузки из localStorage', { uid }, localErr)
-        }
-        
-        // Возвращаем null, но не показываем ошибку - это нормально в офлайн-режиме
-        return null
-      }
-      
-      logger.error('Auth', 'Ошибка загрузки данных пользователя', { uid }, err)
-      return null
+      throw err
     }
   }, [])
 
@@ -796,9 +759,11 @@ export default function VPNServiceApp() {
         return
       }
       if (firebaseUser) {
-        // Telegram Mini App: если только что вошли по TMA и в ответе auth был user — используем его без loadUserData
+        const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
+        const onTmaPath = isTmaPath(path)
+        // Telegram Mini App: используем pending TMA только на TMA-пути (/t), чтобы не смешивать с браузерным входом (Google/email)
         const pendingTma = tmaUserFromAuthRef.current
-        if (pendingTma && pendingTma.uid === firebaseUser.uid && pendingTma.user) {
+        if (onTmaPath && pendingTma && pendingTma.uid === firebaseUser.uid && pendingTma.user) {
           tmaLog('info', 'user_from_auth', 'Пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid })
           tmaUserFromAuthRef.current = null
           const userData = pendingTma.user
@@ -813,10 +778,8 @@ export default function VPNServiceApp() {
           setCurrentUser(currentUserData)
           setLoading(false)
           setAuthChecking(false)
-          const path = typeof window !== 'undefined' ? (window.location.pathname || '').replace(/\/+$/, '') : ''
-          const onTmaPath = isTmaPath(path)
-          setView(onTmaPath ? 'tma' : getAllowedView(localStorage.getItem('vpn_current_view'), effectiveRole))
-          logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole, onTmaPath })
+          setView('tma')
+          logger.info('Firebase', 'TMA: пользователь из ответа auth (без loadUserData)', { uid: firebaseUser.uid, role: effectiveRole })
           return
         }
         // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
@@ -908,17 +871,11 @@ export default function VPNServiceApp() {
               }
             }, 2000) // Задержка 2 секунды, чтобы не показывать запрос сразу при загрузке
             
-            // Проверяем, был ли вход через Google (по провайдеру)
+            // Браузерная авторизация: Google — перенаправление только на браузерном пути (не на /t)
             const isGoogleSignIn = firebaseUser.providerData?.some((p) => p.providerId === 'google.com')
-            
-            // Если это Google-авторизация и мы на странице логина/регистрации - перенаправляем на dashboard
-            if (isGoogleSignIn && (view === 'login' || view === 'register' || view === 'welcome')) {
-              logger.info('Auth', 'Google-авторизация завершена, перенаправление на /dashboard', { 
-                uid: firebaseUser.uid, 
-                role: effectiveRole 
-              })
-              // Используем location.replace для перенаправления без добавления в историю
-              window.location.replace('/dashboard')
+            if (isGoogleSignIn && isBrowserAuthPath(path) && (view === 'login' || view === 'register' || view === 'welcome')) {
+              logger.info('Auth', 'Google-авторизация завершена, перенаправление на /dashboard', { uid: firebaseUser.uid, role: effectiveRole })
+              if (typeof window !== 'undefined') window.location.replace('/dashboard')
               return
             }
             
@@ -1094,7 +1051,7 @@ export default function VPNServiceApp() {
     } catch (_) {}
   }, [])
 
-  // На /t: одна проверка Telegram.WebApp и initData → browserFallback | openFromTelegram | autoLogin(initData). Выполняется один раз за сессию (нет повторов/retryTick).
+  // На /t: одна проверка Telegram.WebApp и initData → browserFallback | openFromTelegram | autoLogin(initData). Выполняется один раз за сессию (нет повторов/retryTick). Если в логах видите «Авто-вход TMA: старт» или retryTick — загружена старая сборка: сделайте npm run build и жёсткое обновление (Ctrl+Shift+R).
   const TMA_SDK_WAIT_MS = 800
   const tmaCheckDoneRef = useRef(false)
   useEffect(() => {
@@ -1105,6 +1062,7 @@ export default function VPNServiceApp() {
     tmaCheckDoneRef.current = true
 
     const timer = setTimeout(() => {
+      tmaLog('info', 'tma_check', 'TMA: одна проверка (v2, без повторов)', {})
       const tg = window.Telegram?.WebApp
       if (!tg) {
         setView('browserFallback')
@@ -1490,7 +1448,15 @@ export default function VPNServiceApp() {
     }
   }, [firebaseUser, loadUsers, loadSettings, error, configError]) // Убираем loading из зависимостей
 
-  // Обработка входа через Firebase Auth
+  // Единое сообщение об ошибке авторизации (i18n + fallback из authService)
+  const getAuthErrorMsg = useCallback((err) => {
+    if (!err) return null
+    const key = authService.getErrorMessageI18nKey(err)
+    const translated = key ? i18n.t(key) : null
+    return (translated && translated !== key ? translated : null) || authService.getErrorMessage(err) || i18n.t('app.loginError')
+  }, [])
+
+  // Обработка входа через Firebase Auth (resolve login→email, затем authService)
   const handleLogin = useCallback(async (e) => {
     e.preventDefault()
     setError('')
@@ -1524,7 +1490,6 @@ export default function VPNServiceApp() {
       }
     } catch (_) {}
 
-    // Firebase принимает только email; если resolve-login не вернул email — проверяем формат
     if (!emailToUse.includes('@')) {
       setError(i18n.t('app.loginEmailOrLoginOnly') || i18n.t('app.invalidEmailFormat'))
       return
@@ -1532,76 +1497,28 @@ export default function VPNServiceApp() {
 
     try {
       logger.info('Auth', 'Попытка входа через Firebase Auth', { loginOrEmail, emailToUse })
-      const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password)
-      const firebaseUser = userCredential.user
-      
-      // Загружаем дополнительные данные пользователя из Firestore
-      let userData = await loadUserData(firebaseUser.uid)
-      
-      if (!userData) {
-        logger.warn('Auth', 'Данные пользователя не найдены в Firestore', { uid: firebaseUser.uid })
-        setError(i18n.t('app.userDataNotFound'))
-        await signOut(auth)
-        return
-      }
+      const result = await authService.signInWithEmail(emailToUse, password)
+      const currentUserData = result.userData
 
-      // Миграция: если у существующего пользователя нет subId, генерируем его
-      if (!userData.subId) {
-        logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный', {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email
-        })
-        const generatedSubId = await generateUniqueSubId(db, appId)
-        const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-        await updateDoc(userDocRef, {
-          subId: generatedSubId,
-          updatedAt: new Date().toISOString(),
-        })
-        userData = { ...userData, subId: generatedSubId }
-        logger.info('Auth', 'subId добавлен существующему пользователю', { uid: firebaseUser.uid, subId: generatedSubId })
-      }
-
-      // Объединяем данные Firebase Auth и Firestore
-      const currentUserData = {
-        ...userData,
-        email: firebaseUser.email || userData.email,
-        photoURL: firebaseUser.photoURL || userData.photoURL || null,
-      }
-      
       setCurrentUser(currentUserData)
       applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
-      logger.info('Auth', 'Успешный вход', { email, uid: firebaseUser.uid, role: userData.role })
-        setSuccess(i18n.t('app.loginSuccess'))
-        setLoginData(prev => ({ ...prev, email: '', password: '' }))
-      setView(userData.role === 'admin' ? 'admin' : 'dashboard')
-      // Устанавливаем вкладку "Подписки" после входа
-      if (userData.role !== 'admin') {
-        setDashboardTab('subscription')
-      }
+      logger.info('Auth', 'Успешный вход', { email: currentUserData.email, uid: result.firebaseUser.uid, role: currentUserData.role })
+      setSuccess(i18n.t('app.loginSuccess'))
+      setLoginData(prev => ({ ...prev, email: '', password: '' }))
+      setView(currentUserData.role === 'admin' ? 'admin' : 'dashboard')
+      if (currentUserData.role !== 'admin') setDashboardTab('subscription')
+
+      try {
+        const notificationService = (await import('../shared/services/notificationService.js')).default
+        const notificationInstance = notificationService.getInstance()
+        if (!notificationInstance.hasPermission()) await notificationInstance.requestPermission()
+      } catch (_) {}
     } catch (err) {
       logger.error('Auth', 'Ошибка входа', { loginOrEmail }, err)
-      
-      // Обработка ошибок Firebase Auth
-      let errorMessage = 'Ошибка входа. Попробуйте еще раз.'
-      if (err.code === 'auth/user-not-found') {
-        errorMessage = 'Пользователь с таким email не найден.'
-      } else if (err.code === 'auth/wrong-password') {
-        errorMessage = 'Неверный пароль.'
-      } else if (err.code === 'auth/invalid-email') {
-        errorMessage = 'Неверный формат email.'
-      } else if (err.code === 'auth/user-disabled') {
-        errorMessage = 'Аккаунт заблокирован. Обратитесь к администратору.'
-      } else if (err.code === 'auth/too-many-requests') {
-        errorMessage = 'Слишком много попыток входа. Попробуйте позже.'
-      } else if (err.code === 'auth/network-request-failed') {
-        errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
-      } else if (err.message) {
-        errorMessage = 'Ошибка входа: ' + err.message
-      }
-      
-      setError(errorMessage)
+      const msg = getAuthErrorMsg(err)
+      if (msg) setError(msg)
     }
-  }, [auth, db, loadUserData, generateUniqueSubId])
+  }, [auth, db, getAuthErrorMsg])
 
   // Обработка регистрации через Firebase Auth
   const handleRegister = useCallback(async (e) => {
@@ -1756,8 +1673,6 @@ export default function VPNServiceApp() {
       }
     } catch (err) {
       logger.error('Auth', 'Ошибка регистрации', { email }, err)
-      
-      // Если пользователь был создан в Firebase Auth, но ошибка при создании в Firestore - удаляем из Auth
       if (firebaseUser) {
         try {
           await firebaseUser.delete()
@@ -1765,28 +1680,10 @@ export default function VPNServiceApp() {
           logger.error('Auth', 'Ошибка удаления пользователя из Firebase Auth после ошибки', { uid: firebaseUser.uid }, deleteError)
         }
       }
-      
-      // Обработка ошибок Firebase Auth
-      let errorMessage = 'Ошибка регистрации. Попробуйте позже.'
-      if (err.code === 'auth/email-already-in-use') {
-        errorMessage = 'Пользователь с таким email уже существует.'
-      } else if (err.code === 'auth/invalid-email') {
-        errorMessage = 'Неверный формат email.'
-      } else if (err.code === 'auth/operation-not-allowed') {
-        errorMessage = 'Регистрация через email/password не включена. Обратитесь к администратору.'
-      } else if (err.code === 'auth/weak-password') {
-        errorMessage = 'Пароль слишком слабый. Используйте более сложный пароль.'
-      } else if (err.code === 'permission-denied') {
-        errorMessage = 'Нет доступа к базе данных. Проверьте правила безопасности Firestore.'
-      } else if (err.code === 'unavailable') {
-        errorMessage = 'Сервис временно недоступен. Попробуйте позже.'
-      } else if (err.message) {
-        errorMessage = 'Ошибка регистрации: ' + err.message
-      }
-      
-      setError(errorMessage)
+      const msg = getAuthErrorMsg(err)
+      setError(msg || i18n.t('app.registerError'))
     }
-  }, [auth, db, generateUniqueSubId, referralCodePending])
+  }, [auth, db, generateUniqueSubId, referralCodePending, getAuthErrorMsg])
 
   // Общая обработка успешного входа через Google (popup или redirect)
   const processGoogleSignInUser = useCallback(async (firebaseUser) => {
@@ -1963,9 +1860,10 @@ export default function VPNServiceApp() {
     return handleGoogleSignIn()
   }, [handleGoogleSignIn, handleGoogleSignInRedirect])
 
-  // Обработка возврата после входа через Google (redirect)
+  // Обработка возврата после входа через Google (redirect) — только на браузерном пути; на /t не трогаем, чтобы не конфликтовать с TMA
   useEffect(() => {
-    if (!auth) return
+    if (!auth || typeof window === 'undefined') return
+    if (!isBrowserAuthPath()) return
     getRedirectResult(auth)
       .then(async (result) => {
         if (!result?.user) return
@@ -2113,9 +2011,10 @@ export default function VPNServiceApp() {
     [auth]
   )
 
-  // Telegram Login Widget: если Telegram вернул пользователя по редиректу (в URL query), завершаем вход
+  // Telegram Login Widget: если Telegram вернул пользователя по редиректу (в URL query) — только на браузерном пути
   useEffect(() => {
     if (!auth || firebaseUser || authChecking || typeof window === 'undefined') return
+    if (!isBrowserAuthPath()) return
     const params = new URLSearchParams(window.location.search)
     const id = params.get('id')
     const hash = params.get('hash')

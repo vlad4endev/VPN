@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuthState } from './useAuthState.js'
 import { authService } from '../services/authService.js'
 import { validateEmail } from '../utils/validateEmail.js'
@@ -15,9 +16,10 @@ import logger from '../../../shared/utils/logger.js'
  * @returns {Object} Объект с состоянием и методами авторизации
  */
 export function useAuth({ onSuccess, setCurrentUser, setView }) {
-  const { 
-    authMode, 
-    loginData, 
+  const { t } = useTranslation()
+  const {
+    authMode,
+    loginData,
     googleSignInLoading,
     error,
     success,
@@ -27,6 +29,13 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
     setError,
     setSuccess,
   } = useAuthState()
+
+  const getAuthErrorMsg = useCallback((err) => {
+    if (!err) return null
+    const key = authService.getErrorMessageI18nKey(err)
+    const translated = key ? t(key) : null
+    return (translated && translated !== key ? translated : null) || authService.getErrorMessage(err)
+  }, [t])
 
   // Обработчик логина
   const handleLogin = useCallback(async (e) => {
@@ -79,12 +88,10 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       }
     } catch (err) {
       logger.error('Auth', 'Ошибка входа', { email }, err)
-      const errorMessage = authService.getErrorMessage(err)
-      if (errorMessage) {
-        setError(errorMessage)
-      }
+      const msg = getAuthErrorMsg(err)
+      if (msg) setError(msg)
     }
-  }, [setError, setSuccess, setCurrentUser, setLoginData, setView, onSuccess])
+  }, [setError, setSuccess, setCurrentUser, setLoginData, setView, onSuccess, getAuthErrorMsg])
 
   // Обработчик регистрации
   const handleRegister = useCallback(async (e) => {
@@ -151,12 +158,10 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
         }
       }
       
-      const errorMessage = authService.getErrorMessage(err)
-      if (errorMessage) {
-        setError(errorMessage)
-      }
+      const msg = getAuthErrorMsg(err)
+      if (msg) setError(msg)
     }
-  }, [setError, setSuccess, setCurrentUser, setLoginData, setView, onSuccess])
+  }, [setError, setSuccess, setCurrentUser, setLoginData, setView, onSuccess, getAuthErrorMsg])
 
   // Обработчик Google Sign-In
   const handleGoogleSignIn = useCallback(async () => {
@@ -204,14 +209,12 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
         return
       }
       
-      const errorMessage = authService.getErrorMessage(err)
-      if (errorMessage) {
-        setError(errorMessage)
-      }
+      const msg = getAuthErrorMsg(err)
+      if (msg) setError(msg)
     } finally {
       setGoogleSignInLoading(false)
     }
-  }, [googleSignInLoading, setError, setSuccess, setCurrentUser, setView, onSuccess, setGoogleSignInLoading])
+  }, [googleSignInLoading, setError, setSuccess, setCurrentUser, setView, onSuccess, setGoogleSignInLoading, getAuthErrorMsg])
 
   // Обработчик выхода
   const handleLogout = useCallback(async () => {

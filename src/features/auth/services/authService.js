@@ -67,13 +67,16 @@ export const authService = {
   /**
    * Загрузка данных пользователя из Firestore по UID
    * @param {string} uid - UID пользователя
+   * @param {Firestore|null} [dbOverride] - опциональный экземпляр Firestore (для onAuthStateChanged с getDb())
    * @returns {Promise<Object|null>} Данные пользователя или null
+   * @throws {Error} при permission-denied (чтобы вызывающий код мог показать setError)
    */
-  async loadUserData(uid) {
-    if (!db || !uid) return null
-    
+  async loadUserData(uid, dbOverride = null) {
+    const dbInstance = dbOverride ?? db
+    if (!dbInstance || !uid) return null
+
     try {
-      const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, uid)
+      const userDoc = doc(dbInstance, `artifacts/${APP_ID}/public/data/users_v4`, uid)
       const userSnapshot = await getDoc(userDoc)
       
       if (userSnapshot.exists()) {
@@ -86,7 +89,7 @@ export const authService = {
             email: userData.email
           })
           try {
-            const generatedSubId = await generateUniqueSubId(db, APP_ID)
+            const generatedSubId = await generateUniqueSubId(dbInstance, APP_ID)
             await updateDoc(userDoc, {
               subId: generatedSubId,
               updatedAt: new Date().toISOString(),
@@ -104,6 +107,11 @@ export const authService = {
       }
       return null
     } catch (err) {
+      // permission-denied пробрасываем, чтобы App мог показать setError
+      if (err.code === 'permission-denied') {
+        logger.error('Auth', 'Нет доступа к данным пользователя (permission-denied)', { uid }, err)
+        throw err
+      }
       // Обработка офлайн-режима Firebase
       if (err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')) {
         logger.warn('Auth', 'Firebase офлайн, пытаемся загрузить из кеша localStorage', { uid })
@@ -340,11 +348,41 @@ export const authService = {
   },
 
   /**
-   * Преобразование ошибки Firebase в понятное сообщение
+   * Ключ i18n для ошибки (app.*), если есть — для использования в UI
    * @param {Error} error - Ошибка Firebase
-   * @returns {string} Сообщение об ошибке
+   * @returns {string|null} Ключ типа 'app.userNotFound' или null
+   */
+  getErrorMessageI18nKey(error) {
+    if (!error?.code) return null
+    const codeToKey = {
+      'auth/user-not-found': 'app.userNotFound',
+      'auth/wrong-password': 'app.wrongPassword',
+      'auth/invalid-email': 'app.invalidEmailFormat',
+      'auth/user-disabled': 'app.accountBlocked',
+      'auth/too-many-requests': 'app.tooManyAttempts',
+      'auth/network-request-failed': 'app.networkError',
+      'auth/email-already-in-use': 'app.emailExists',
+      'auth/operation-not-allowed': 'app.serviceUnavailable',
+      'auth/weak-password': 'validation.passwordMinLength',
+      'auth/popup-blocked': 'app.redirectSignInStateLost',
+      'auth/account-exists-with-different-credential': 'app.emailExists',
+      'permission-denied': 'app.noAccessDb',
+      'unavailable': 'app.serviceUnavailable',
+    }
+    return codeToKey[error.code] ?? null
+  },
+
+  /**
+   * Преобразование ошибки Firebase в понятное сообщение (fallback без i18n)
+   * @param {Error} error - Ошибка Firebase
+   * @returns {string|null} Сообщение об ошибке или null (отмена пользователем)
    */
   getErrorMessage(error) {
+    if (!error) return null
+    // Отменённые операции — не показываем ошибку
+    if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+      return null
+    }
     const errorMessages = {
       'auth/user-not-found': 'Пользователь с таким email не найден.',
       'auth/wrong-password': 'Неверный пароль.',
@@ -357,22 +395,9 @@ export const authService = {
       'auth/weak-password': 'Пароль слишком слабый. Используйте более сложный пароль.',
       'auth/popup-blocked': 'Всплывающее окно заблокировано. Разрешите всплывающие окна и попробуйте еще раз.',
       'auth/account-exists-with-different-credential': 'Аккаунт с таким email уже существует. Используйте другой способ входа.',
-      'auth/cancelled-popup-request': null, // Не показываем ошибку, пользователь отменил
-      'auth/popup-closed-by-user': null, // Не показываем ошибку, пользователь закрыл
-      'permission-denied': 'Нет доступа к базе данных. У вас отсутствуют необходимые права администратора (custom claim admin: true). Обратитесь к администратору системы.',
+      'permission-denied': 'Нет доступа к базе данных. Обратитесь к администратору системы.',
       'unavailable': 'Сервис временно недоступен. Попробуйте позже.',
     }
-    
-    // Специальная обработка для отмененных операций
-    if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-      return null // Возвращаем null, чтобы не показывать ошибку
-    }
-    
-    // Специальная обработка для permission-denied с проверкой на отсутствие admin claim
-    if (error.code === 'permission-denied') {
-      return errorMessages['permission-denied']
-    }
-    
     return errorMessages[error.code] || error.message || 'Произошла ошибка. Попробуйте еще раз.'
   },
 }
