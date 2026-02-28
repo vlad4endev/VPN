@@ -23,6 +23,9 @@ server/.env.*.local
 # Firebase service account key (секретный ключ — не коммитить)
 server/firebase-service-account.json
 
+# Локальные настройки Platega (только на сервере, никуда не передаются)
+server/data/platega-settings.json
+
 # ========================================
 # 🚨 КРИТИЧНО: Секреты в коде
 # ========================================

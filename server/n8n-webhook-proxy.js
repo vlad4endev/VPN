@@ -19,7 +19,7 @@ import dotenv from 'dotenv'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { fileURLToPath } from 'url'
 import firebaseAdmin from 'firebase-admin'
 import crypto, { randomUUID } from 'crypto'
@@ -4677,6 +4677,52 @@ app.delete('/api/admin/promocodes/:id', async (req, res) => {
   }
 })
 
+/** GET /api/admin/platega-settings — настройки Platega из локального файла (только админ). Данные никуда не передаются. */
+app.get('/api/admin/platega-settings', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  try {
+    const data = await getPlategaSettingsFromLocal()
+    res.json({
+      success: true,
+      plategaMerchantId: data.plategaMerchantId || '',
+      plategaSecretKey: data.plategaSecretKey || '',
+      hasMerchantId: !!data.plategaMerchantId,
+      hasSecretKey: !!data.plategaSecretKey,
+    })
+  } catch (err) {
+    console.error('❌ GET /api/admin/platega-settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/** PATCH /api/admin/platega-settings — сохранить настройки Platega в локальный файл (только на сервере, только админ). */
+app.patch('/api/admin/platega-settings', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  try {
+    const body = req.body || {}
+    const plategaMerchantId = (body.plategaMerchantId ?? body.platega_merchant_id ?? '').toString().trim()
+    const plategaSecretKey = (body.plategaSecretKey ?? body.platega_secret_key ?? '').toString().trim()
+    if (plategaMerchantId && plategaMerchantId.length < 10) {
+      return res.status(400).json({ success: false, error: 'ID мерчанта слишком короткий' })
+    }
+    if (plategaSecretKey && plategaSecretKey.length < 10) {
+      return res.status(400).json({ success: false, error: 'API ключ слишком короткий' })
+    }
+    await setPlategaSettingsToLocal({ plategaMerchantId, plategaSecretKey })
+    console.log('✅ Platega: настройки сохранены в локальный файл (server/data/platega-settings.json)')
+    res.json({
+      success: true,
+      hasMerchantId: !!plategaMerchantId,
+      hasSecretKey: !!plategaSecretKey,
+    })
+  } catch (err) {
+    console.error('❌ PATCH /api/admin/platega-settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 /**
  * Создание заказа на оплату (без внешней платёжной системы)
  * POST /api/payment/generate-link
@@ -4741,6 +4787,73 @@ async function loadPaymentSettings() {
     console.error('❌ Ошибка загрузки настроек платежей:', err.message)
     return {}
   }
+}
+
+/**
+ * Загрузка настроек платежей напрямую из Firestore без кэша (для генерации ссылки на оплату).
+ * Сначала читает документ по APP_ID; если в нём нет ключей Platega — пробует artifacts/skyputh/public/settings (на случай старой сборки фронта).
+ */
+async function loadPaymentSettingsFresh() {
+  if (!db) await initFirebaseAdmin()
+  if (!db) return {}
+  const appId = process.env.APP_ID || 'skyputh'
+  const tryDoc = async (id) => {
+    try {
+      const snap = await db.doc(`artifacts/${id}/public/settings`).get()
+      return snap.exists ? snap.data() : {}
+    } catch {
+      return {}
+    }
+  }
+  const data = await tryDoc(appId)
+  const hasPlatega = !!(data.plategaMerchantId || data.platega_merchant_id) && !!(data.plategaSecretKey || data.platega_secret_key)
+  if (hasPlatega) return data
+  if (appId !== 'skyputh') {
+    const fallback = await tryDoc('skyputh')
+    const fallbackHasPlatega = !!(fallback.plategaMerchantId || fallback.platega_merchant_id) && !!(fallback.plategaSecretKey || fallback.platega_secret_key)
+    if (fallbackHasPlatega) {
+      console.log('ℹ️ Platega: ключи взяты из artifacts/skyputh/public/settings (fallback)')
+      return fallback
+    }
+  }
+  return data
+}
+
+/** Путь к локальному файлу с настройками Platega (только на сервере, никуда не передаётся). */
+const PLATEGA_LOCAL_SETTINGS_PATH = path.join(__dirname, 'data', 'platega-settings.json')
+
+/**
+ * Прочитать настройки Platega из локального файла (server/data/platega-settings.json).
+ * Файл в .gitignore, данные никуда не отправляются.
+ * @returns {Promise<{ plategaMerchantId?: string, plategaSecretKey?: string }>}
+ */
+async function getPlategaSettingsFromLocal() {
+  try {
+    const raw = await readFile(PLATEGA_LOCAL_SETTINGS_PATH, 'utf8')
+    const data = JSON.parse(raw || '{}')
+    return {
+      plategaMerchantId: (data.plategaMerchantId || data.platega_merchant_id || '').toString().trim() || null,
+      plategaSecretKey: (data.plategaSecretKey || data.platega_secret_key || '').toString().trim() || null,
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('❌ Ошибка чтения локальных настроек Platega:', err.message)
+    return { plategaMerchantId: null, plategaSecretKey: null }
+  }
+}
+
+/**
+ * Записать настройки Platega в локальный файл (только на сервере).
+ * @param {{ plategaMerchantId?: string, plategaSecretKey?: string }} data
+ */
+async function setPlategaSettingsToLocal(data) {
+  const dir = path.dirname(PLATEGA_LOCAL_SETTINGS_PATH)
+  await mkdir(dir, { recursive: true })
+  const payload = {
+    plategaMerchantId: (data.plategaMerchantId || '').toString().trim() || '',
+    plategaSecretKey: (data.plategaSecretKey || '').toString().trim() || '',
+    updatedAt: new Date().toISOString(),
+  }
+  await writeFile(PLATEGA_LOCAL_SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf8')
 }
 
 const PLATEGA_API_BASE = 'https://app.platega.io'
@@ -5008,14 +5121,28 @@ async function generatePaymentLinkLocal(body) {
   let paymentUrl = ''
   let transactionId = null
 
-  const merchantId = process.env.PLATEGA_MERCHANT_ID || null
-  const secretKey = process.env.PLATEGA_SECRET_KEY || null
-  const settings = await loadPaymentSettings()
-  const effectiveMerchantId = merchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
-  const effectiveSecretKey = secretKey || settings.plategaSecretKey || settings.platega_secret_key || null
+  // Приоритет: локальный файл (server/data/platega-settings.json) → env → Firestore
+  const localPlatega = await getPlategaSettingsFromLocal()
+  const envMerchantId = process.env.PLATEGA_MERCHANT_ID || null
+  const envSecretKey = process.env.PLATEGA_SECRET_KEY || null
+  let effectiveMerchantId = localPlatega.plategaMerchantId || envMerchantId
+  let effectiveSecretKey = localPlatega.plategaSecretKey || envSecretKey
+  if (!effectiveMerchantId || !effectiveSecretKey) {
+    const settings = await loadPaymentSettingsFresh()
+    effectiveMerchantId = effectiveMerchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
+    effectiveSecretKey = effectiveSecretKey || settings.plategaSecretKey || settings.platega_secret_key || null
+  }
 
   if (!effectiveMerchantId || !effectiveSecretKey) {
-    console.log('ℹ️ Platega не настроен (PLATEGA_MERCHANT_ID / PLATEGA_SECRET_KEY или plategaMerchantId / plategaSecretKey в настройках). Создаём только заказ в Firestore.')
+    const fromLocal = !!(localPlatega.plategaMerchantId || localPlatega.plategaSecretKey)
+    console.log('ℹ️ Platega не настроен — создаём только заказ в Firestore. Диагностика:', {
+      APP_ID: process.env.APP_ID || 'skyputh',
+      fromLocalFile: fromLocal,
+      hasEnvMerchantId: !!envMerchantId,
+      hasEnvSecretKey: !!envSecretKey,
+      hasEffectiveMerchantId: !!effectiveMerchantId,
+      hasEffectiveSecretKey: !!effectiveSecretKey,
+    })
   }
 
   if (effectiveMerchantId && effectiveSecretKey) {

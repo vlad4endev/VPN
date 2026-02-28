@@ -1378,11 +1378,11 @@ export const dashboardService = {
         hasSettings: settingsSnapshot.exists()
       })
 
-      // Объединённый тариф: несколько серверов по очереди, настройки и ссылка подписки для каждого; цена общая
-      const linkedConfigs = Array.isArray(tariff.linkedTariffConfigs) && tariff.linkedTariffConfigs.length > 0 ? tariff.linkedTariffConfigs : null
+      // Объединённый тариф: несколько серверов только если явно 2+ связанных тарифов (не для одиночных)
+      const linkedConfigs = Array.isArray(tariff.linkedTariffConfigs) && tariff.linkedTariffConfigs.length >= 2 ? tariff.linkedTariffConfigs : null
       const linkedIds = Array.isArray(tariff.linkedTariffIds) ? tariff.linkedTariffIds.filter(Boolean) : []
-      let listToUse = linkedConfigs && linkedConfigs.length > 0 ? linkedConfigs : null
-      if (!listToUse && linkedIds.length > 0) {
+      let listToUse = linkedConfigs && linkedConfigs.length >= 2 ? linkedConfigs : null
+      if (!listToUse && linkedIds.length >= 2) {
         const linkedTariffs = []
         for (const tid of linkedIds) {
           const ref = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tid)
@@ -1392,17 +1392,19 @@ export const dashboardService = {
         if (linkedTariffs.length === 0) {
           throw new Error('Объединённый тариф: не найдены связанные тарифы. Проверьте настройки тарифа в админке.')
         }
-        listToUse = linkedTariffs.map(lt => ({
-          tariffId: lt.id,
-          subscriptionLink: (lt.subscriptionLink || '').trim(),
-          devices: finalDevices,
-          trafficGB: tariff.trafficGB ?? 0,
-          plan: (lt.plan || lt.name || '').toLowerCase() || undefined,
-        }))
+        if (linkedTariffs.length >= 2) {
+          listToUse = linkedTariffs.map(lt => ({
+            tariffId: lt.id,
+            subscriptionLink: (lt.subscriptionLink || '').trim(),
+            devices: finalDevices,
+            trafficGB: tariff.trafficGB ?? 0,
+            plan: (lt.plan || lt.name || '').toLowerCase() || undefined,
+          }))
+        }
       }
-      const useConfigs = !!linkedConfigs && linkedConfigs.length > 0
+      const useConfigs = !!linkedConfigs && linkedConfigs.length >= 2
 
-      if (listToUse && listToUse.length > 0) {
+      if (listToUse && listToUse.length >= 2) {
         const subscriptionLinks = []
         let firstUuid = null
         const webhookUrl = await loadWebhookUrl()

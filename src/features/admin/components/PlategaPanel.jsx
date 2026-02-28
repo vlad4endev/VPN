@@ -8,20 +8,15 @@ import {
   EyeOff,
   Trash2
 } from 'lucide-react'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { db } from '../../../lib/firebase/config.js'
-import { APP_ID } from '../../../shared/constants/app.js'
-import { stripUndefinedForFirestore } from '../../../shared/utils/firestoreSafe.js'
 import logger from '../../../shared/utils/logger.js'
-import { useAdminContext } from '../context/AdminContext.jsx'
 import { adminService } from '../services/adminService.js'
+import { getPlategaSettings, savePlategaSettings } from '../services/plategaAdminService.js'
 
 /**
  * Панель настроек платёжной системы Platega.
- * ID мерчанта и API ключ используются при генерации ссылки на оплату.
+ * Данные сохраняются в локальный файл на сервере (server/data/platega-settings.json) и никуда не передаются.
  */
 const PlategaPanel = ({ onSaveSettings }) => {
-  const { settings } = useAdminContext()
   const [merchantId, setMerchantId] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
@@ -39,27 +34,13 @@ const PlategaPanel = ({ onSaveSettings }) => {
         setLoading(false)
         return
       }
-      if (!db) {
-        setError('База данных недоступна')
-        setLoading(false)
-        return
-      }
       try {
-        const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-        const snap = await getDoc(settingsDoc)
-        if (snap.exists()) {
-          const data = snap.data()
-          const mid = data.plategaMerchantId || data.platega_merchant_id || ''
-          const key = data.plategaSecretKey || data.platega_secret_key || ''
-          setMerchantId(mid)
-          setApiKey(key)
-        } else {
-          setMerchantId('')
-          setApiKey('')
-        }
+        const data = await getPlategaSettings()
+        setMerchantId(data.plategaMerchantId || '')
+        setApiKey(data.plategaSecretKey || '')
       } catch (err) {
         logger.error('Admin', 'Ошибка загрузки настроек Platega', null, err)
-        setError('Ошибка загрузки настроек')
+        setError(err.message || 'Ошибка загрузки настроек. Проверьте, что backend запущен и вы авторизованы как админ.')
       } finally {
         setLoading(false)
       }
@@ -67,19 +48,7 @@ const PlategaPanel = ({ onSaveSettings }) => {
     loadSettings()
   }, [])
 
-  useEffect(() => {
-    if (justSavedRef.current || !settings) return
-    const mid = settings.plategaMerchantId || settings.platega_merchant_id || ''
-    const key = settings.plategaSecretKey || settings.platega_secret_key || ''
-    if (mid && mid !== merchantId) setMerchantId(mid)
-    if (key && key !== apiKey) setApiKey(key)
-  }, [settings, merchantId, apiKey])
-
   const handleSave = useCallback(async () => {
-    if (!db) {
-      setError('База данных недоступна')
-      return
-    }
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -95,20 +64,12 @@ const PlategaPanel = ({ onSaveSettings }) => {
         return
       }
 
-      const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-      const currentSnap = await getDoc(settingsDoc)
-      const currentData = currentSnap.exists() ? currentSnap.data() : {}
+      await savePlategaSettings({
+        plategaMerchantId: merchantId.trim(),
+        plategaSecretKey: apiKey.trim(),
+      })
 
-      const updatedSettings = {
-        ...currentData,
-        plategaMerchantId: merchantId.trim() || '',
-        plategaSecretKey: apiKey.trim() || '',
-        updatedAt: new Date().toISOString(),
-      }
-
-      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
-
-      logger.info('Admin', 'Настройки Platega сохранены', {
+      logger.info('Admin', 'Настройки Platega сохранены в локальный файл на сервере', {
         hasMerchantId: !!merchantId.trim(),
         hasApiKey: !!apiKey.trim(),
       })
@@ -125,12 +86,12 @@ const PlategaPanel = ({ onSaveSettings }) => {
         }
       }
 
-      setSuccess('Настройки Platega сохранены')
+      setSuccess('Настройки Platega сохранены (локальный файл на сервере)')
       setTimeout(() => setSuccess(null), 3000)
       setTimeout(() => { justSavedRef.current = false }, 1000)
     } catch (err) {
       logger.error('Admin', 'Ошибка сохранения настроек Platega', null, err)
-      setError('Ошибка сохранения: ' + (err.message || 'Неизвестная ошибка'))
+      setError(err.message || 'Ошибка сохранения')
     } finally {
       setSaving(false)
     }
@@ -275,8 +236,9 @@ const PlategaPanel = ({ onSaveSettings }) => {
               <div className="text-sm sm:text-base text-blue-300">
                 <p className="font-semibold mb-1">Важно</p>
                 <ul className="list-disc list-inside space-y-1 text-blue-200/90">
-                  <li>Значения сохраняются в Firestore и подставляются при генерации ссылки на оплату (POST /api/payment/generate-link)</li>
-                  <li>Можно также задать переменные окружения PLATEGA_MERCHANT_ID и PLATEGA_SECRET_KEY на сервере</li>
+                  <li>Значения сохраняются только на сервере в файле server/data/platega-settings.json и никуда не передаются</li>
+                  <li>При генерации ссылки на оплату сервер берёт ключи из этого файла (приоритет: локальный файл → env → Firestore)</li>
+                  <li>Можно также задать PLATEGA_MERCHANT_ID и PLATEGA_SECRET_KEY в server/.env</li>
                   <li>API ключ храните в безопасности и не передавайте третьим лицам</li>
                 </ul>
               </div>
