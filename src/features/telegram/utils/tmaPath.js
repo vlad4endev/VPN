@@ -29,6 +29,20 @@ export function isTmaPath(path) {
 }
 
 /**
+ * Строгая проверка: режим Telegram Mini App с валидным initData.
+ * true только когда есть WebApp SDK, initData — строка и не пустая (в браузере SDK может быть, но initData пустой).
+ * Используйте для: запуск авто-логина по initData; не делать retry и не показывать форму входа в TMA.
+ * @returns {boolean}
+ */
+export function isTelegramMiniApp() {
+  if (typeof window === 'undefined') return false
+  const twa = window.Telegram?.WebApp
+  if (!twa) return false
+  const initData = twa.initData
+  return typeof initData === 'string' && initData.length > 0
+}
+
+/**
  * Открыто ли приложение внутри Telegram WebView (Mini App), а не в обычном браузере.
  * Единый источник истины: устанавливается в index.html до загрузки React (applyTmaInit).
  * Используйте для: не пытаться делать Telegram auth в браузере; показывать «Open from Telegram» + ссылку на бота.
@@ -68,4 +82,4 @@ export function isBrowserAuthPath(path) {
   return p !== '' && !isTmaPath(p)
 }
 
-export default { isTmaPath, isBrowserAuthPath, isOpenedInTelegramWebView, isLikelyInTelegramContext, normalizePath }
+export default { isTmaPath, isBrowserAuthPath, isTelegramMiniApp, isOpenedInTelegramWebView, isLikelyInTelegramContext, normalizePath }

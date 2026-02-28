@@ -425,13 +425,13 @@ async function validateTelegramWidgetData(widgetUser, botToken) {
  */
 
 /**
- * Вход по логину или email: по строке q вернуть email пользователя для signInWithEmailAndPassword.
- * GET /api/auth/resolve-login?q=loginOrEmail
+ * Вход по логину, email или Telegram ID: по строке q вернуть email пользователя для signInWithEmailAndPassword.
+ * GET /api/auth/resolve-login?q=loginOrEmailOrTgId
  * Ответ: { email } или 404.
  */
 app.get('/api/auth/resolve-login', async (req, res) => {
   const q = (req.query.q || '').toString().trim()
-  if (!q) return res.status(400).json({ error: 'Укажите q (логин или email)' })
+  if (!q) return res.status(400).json({ error: 'Укажите q (логин, email или ID)' })
   if (!db) {
     try { await initFirebaseAdmin() } catch (_) {}
     if (!db) return res.status(503).json({ error: 'Сервис недоступен' })
@@ -449,6 +449,21 @@ app.get('/api/auth/resolve-login', async (req, res) => {
     if (!byEmail.empty) {
       const email = byEmail.docs[0].data().email
       if (email) return res.json({ email })
+    }
+    // Поиск по Telegram ID (поле tgId в users_v4)
+    const byTgId = await usersRef.where('tgId', '==', q.trim()).limit(1).get()
+    if (!byTgId.empty) {
+      const email = byTgId.docs[0].data().email
+      if (email) return res.json({ email })
+    }
+    // Документ с id tg_<id> (пользователи, созданные через Telegram)
+    if (/^\d+$/.test(q.trim())) {
+      const docRef = usersRef.doc(`tg_${q.trim()}`)
+      const docSnap = await docRef.get()
+      if (docSnap.exists) {
+        const email = docSnap.data().email
+        if (email) return res.json({ email })
+      }
     }
     return res.status(404).json({ error: 'Пользователь не найден' })
   } catch (err) {
@@ -7366,9 +7381,18 @@ app.post('/admin/sync-payment', async (req, res) => {
   }
 })
 
+// ========== Favicon (избегаем 502 при запросе /favicon.ico) ==========
+const distPath = path.join(__dirname, '..', 'dist')
+const faviconSvg = path.join(distPath, 'favicon.svg')
+if (fs.existsSync(faviconSvg)) {
+  app.get('/favicon.ico', (req, res) => {
+    res.type('image/svg+xml')
+    res.sendFile(faviconSvg, (err) => { if (err) res.status(404).end() })
+  })
+}
+
 // ========== SPA / Frontend (для Mini App /t и остальных путей) ==========
 // Если есть собранный frontend (dist), отдаём его; GET-запросы не к /api отдают index.html
-const distPath = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath, { index: false, maxAge: process.env.NODE_ENV === 'production' ? '1y' : '0' }))
   app.get('*', (req, res, next) => {

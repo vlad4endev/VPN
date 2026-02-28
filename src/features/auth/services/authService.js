@@ -366,6 +366,7 @@ export const authService = {
       'auth/weak-password': 'validation.passwordMinLength',
       'auth/popup-blocked': 'app.redirectSignInStateLost',
       'auth/account-exists-with-different-credential': 'app.emailExists',
+      'auth/invalid-credential': 'app.telegramInvalidCredential',
       'permission-denied': 'app.noAccessDb',
       'unavailable': 'app.serviceUnavailable',
     }
@@ -395,6 +396,7 @@ export const authService = {
       'auth/weak-password': 'Пароль слишком слабый. Используйте более сложный пароль.',
       'auth/popup-blocked': 'Всплывающее окно заблокировано. Разрешите всплывающие окна и попробуйте еще раз.',
       'auth/account-exists-with-different-credential': 'Аккаунт с таким email уже существует. Используйте другой способ входа.',
+      'auth/invalid-credential': 'Не удалось войти. На сервере должен быть настроен тот же проект Firebase (projectId), что и у приложения.',
       'permission-denied': 'Нет доступа к базе данных. Обратитесь к администратору системы.',
       'unavailable': 'Сервис временно недоступен. Попробуйте позже.',
     }

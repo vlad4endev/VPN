@@ -3,14 +3,10 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithCustomToken,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
   onAuthStateChanged,
   updateProfile,
   getAuth,
-  GoogleAuthProvider
 } from 'firebase/auth'
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
@@ -49,13 +45,13 @@ import ConfigErrorScreen from '../shared/components/ConfigErrorScreen.jsx'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
 import { resolveReferralCode, processReferralBonus, saveReferralCodePending, getReferralCodePending, getOrCreateReferralCode } from '../features/referral/services/referralService.js'
-import { app, auth, db, getDb, googleProvider, firebaseInitError, envValidation } from '../lib/firebase/config.js'
+import { app, auth, db, getDb, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 import { authService } from '../features/auth/services/authService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
-import { isTmaPath, isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
+import { isTmaPath, isBrowserAuthPath, isTelegramMiniApp } from '../features/telegram/utils/tmaPath.js'
 import TmaLogPanel from '../features/telegram/components/TmaLogPanel.jsx'
 
 // Константа appId для пути Firestore (для обратной совместимости)
@@ -452,7 +448,6 @@ export default function VPNServiceApp() {
   const [settings, setSettings] = useState(null)
   const [tariffs, setTariffs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [googleSignInLoading, setGoogleSignInLoading] = useState(false)
   const [authMode, setAuthMode] = useState('login') // 'login' | 'register'
   const [loginData, setLoginData] = useState({ email: '', login: '', password: '', name: '' })
   const [firebaseUser, setFirebaseUser] = useState(null)
@@ -470,7 +465,7 @@ export default function VPNServiceApp() {
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
-  /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой) */
+  /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой). Определяется один раз при проверке на /t. */
   const [hasTmaInitData, setHasTmaInitData] = useState(false)
   const isTelegramApp = hasTmaInitData
   /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
@@ -871,17 +866,14 @@ export default function VPNServiceApp() {
               }
             }, 2000) // Задержка 2 секунды, чтобы не показывать запрос сразу при загрузке
             
-            // Браузерная авторизация: Google — перенаправление только на браузерном пути (не на /t)
-            const isGoogleSignIn = firebaseUser.providerData?.some((p) => p.providerId === 'google.com')
-            if (isGoogleSignIn && isBrowserAuthPath(path) && (view === 'login' || view === 'register' || view === 'welcome')) {
-              logger.info('Auth', 'Google-авторизация завершена, перенаправление на /dashboard', { uid: firebaseUser.uid, role: effectiveRole })
-              if (typeof window !== 'undefined') window.location.replace('/dashboard')
-              return
-            }
-            
             // Устанавливаем view с учётом роли (многопользовательский режим: не показывать админку не-админу)
             const savedView = localStorage.getItem('vpn_current_view')
-            setView(getAllowedView(savedView, effectiveRole))
+            // Всегда редирект с экрана логина после успешной загрузки пользователя (email, Google, customToken)
+            const nextView = getAllowedView(savedView, effectiveRole)
+            setView(nextView)
+            if ((view === 'login' || view === 'register' || view === 'welcome') && isBrowserAuthPath(path)) {
+              logger.debug('App', 'onAuthStateChanged: редирект с экрана входа', { nextView, role: effectiveRole })
+            }
           } else {
             // Данные не найдены — для Google создаём документ (fallback на случай гонки с popup)
             if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
@@ -1015,8 +1007,11 @@ export default function VPNServiceApp() {
         }
       } else {
         // Пользователь не авторизован
-        setCurrentUser(null)
-        logger.info('Firebase', 'Пользователь не авторизован')
+        // Не сбрасывать currentUser во время TMA sign-in (гонка: onAuthStateChanged(null) может прийти после успешного входа)
+        if (!signInInProgressRef.current) {
+          setCurrentUser(null)
+          logger.info('Firebase', 'Пользователь не авторизован')
+        }
         // Не переключать view — остаёмся на welcome до клика (без глобального редиректа)
         if (typeof window !== 'undefined') {
           const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
@@ -1051,36 +1046,49 @@ export default function VPNServiceApp() {
     } catch (_) {}
   }, [])
 
-  // На /t: одна проверка Telegram.WebApp и initData → browserFallback | openFromTelegram | autoLogin(initData). Выполняется один раз за сессию (нет повторов/retryTick). Если в логах видите «Авто-вход TMA: старт» или retryTick — загружена старая сборка: сделайте npm run build и жёсткое обновление (Ctrl+Shift+R).
+  // На /t: одна проверка (один раз за сессию). Без setInterval/retry. isTelegram = WebApp + непустой initData.
   const TMA_SDK_WAIT_MS = 800
+  const TMA_CHECK_VERSION = 'v3'
   const tmaCheckDoneRef = useRef(false)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
     if (!isTmaPath(pathname)) return
     if (tmaCheckDoneRef.current) return
+    try {
+      if (sessionStorage.getItem('__tma_check_done__') === TMA_CHECK_VERSION) return
+    } catch (_) {}
     tmaCheckDoneRef.current = true
+    try {
+      sessionStorage.setItem('__tma_check_done__', TMA_CHECK_VERSION)
+    } catch (_) {}
 
     const timer = setTimeout(() => {
-      tmaLog('info', 'tma_check', 'TMA: одна проверка (v2, без повторов)', {})
       const tg = window.Telegram?.WebApp
       if (!tg) {
-        setView('browserFallback')
-        tmaLog('info', 'tma_check', 'Открыт в обычном браузере (нет Telegram.WebApp)', {})
+        tmaLog('info', 'tma_check', 'Браузер: нет Telegram WebApp, переход на главную', {})
+        setView('welcome')
+        if (typeof window !== 'undefined') window.history.replaceState(null, '', '/')
+        return
+      }
+      // Строгая проверка: только непустой initData = режим Mini App (в браузере initData пустой)
+      if (!isTelegramMiniApp()) {
+        setView('open_from_bot_instructions')
+        tmaLog('info', 'tma_check', 'В Telegram или браузер с SDK, но initData пустой — открыть из меню бота', {})
         return
       }
       const initData = tg.initData
-      if (!initData || initData.length === 0) {
-        setView('openFromTelegram')
-        tmaLog('info', 'tma_check', 'Пустой initData — открыть Mini App из меню бота', {})
-        return
-      }
-      setHasTmaInitData(true)
-      setTmaInitDataFromCheck(initData)
-      tmaLog('info', 'tma_check', 'initData есть, запуск авторизации', { len: initData.length })
+      autoLoginWithInitData(initData)
     }, TMA_SDK_WAIT_MS)
     return () => clearTimeout(timer)
   }, [])
+
+  // Вызывается из проверки выше при наличии initData. Запускает эффект авто-входа (POST /api/telegram/auth → customToken → signInWithCustomToken).
+  function autoLoginWithInitData(initData) {
+    setHasTmaInitData(true)
+    setTmaInitDataFromCheck(initData)
+    tmaLog('info', 'tma_check', 'initData есть — запуск авторизации', { len: initData?.length ?? 0 })
+  }
 
   // Telegram Mini App: авто-вход только при наличии initData (tmaInitDataFromCheck). POST → HMAC → customToken → Firebase → Dashboard.
   const TMA_LOG = 'TelegramAuth'
@@ -1091,12 +1099,16 @@ export default function VPNServiceApp() {
     const pathname = (window.location.pathname || '').replace(/\/+$/, '')
     const onTmaPath = isTmaPath(pathname)
     const initData = tmaInitDataFromCheck
-    if (!onTmaPath || !auth || firebaseUser || authChecking || !initData) return
+    if (!onTmaPath || !auth || firebaseUser || authChecking) return
+    // Без initData не запускаем авто-вход и не логируем «старт» — одна проверка уже показала экран «Откройте из бота»
+    if (!initData || typeof initData !== 'string' || !initData.trim()) return
     if (authInProgressRef.current || tmaFlowStartedThisSessionRef.current) return
 
     tmaFlowStartedThisSessionRef.current = true
     authInProgressRef.current = true
     setTmaWaitingAuth(true)
+    const hasStoredToken = !!(typeof localStorage !== 'undefined' && localStorage.getItem(TMA_SESSION_KEY))
+    tmaLog('info', 'auth_start', 'Авто-вход TMA: старт', { hasStoredToken, hasInitData: true })
 
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
       ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
@@ -1113,7 +1125,31 @@ export default function VPNServiceApp() {
       if (data.uid && data.user) tmaUserFromAuthRef.current = { uid: data.uid, user: { ...data.user, id: data.uid } }
       const signInPromise = signInWithCustomToken(auth, data.customToken)
       const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('Firebase signIn timeout')), 8000))
-      return Promise.race([signInPromise, timeoutPromise]).finally(() => { signInInProgressRef.current = false })
+      return Promise.race([signInPromise, timeoutPromise])
+        .then(() => {
+          if (cancelled) return
+          // Сразу обновляем состояние и переходим в ЛК, не дожидаясь onAuthStateChanged (избегаем гонки/задержки)
+          if (data?.uid && data?.user) {
+            const currentUserData = { ...data.user, id: data.uid, role: data.user.role || 'user' }
+            setCurrentUser(currentUserData)
+            setView('tma')
+            setTmaWaitingAuth(false)
+            authInProgressRef.current = false
+            tmaLog('info', 'auth_navigate_after_signin', 'Вход успешен, переход в ЛК', { uid: data.uid })
+          }
+        })
+        .finally(() => { signInInProgressRef.current = false })
+        .catch((err) => {
+          if (cancelled) return
+          setTmaWaitingAuth(false)
+          authInProgressRef.current = false
+          const code = err?.code || (err?.message?.includes('timeout') ? 'auth/timeout' : null)
+          const msg = code === 'auth/invalid-credential'
+            ? (i18n.t('app.telegramInvalidCredential') || 'Не удалось войти. На сервере должен быть настроен тот же проект Firebase (projectId), что и у приложения.')
+            : getAuthErrorMsg(err) || err?.message || i18n.t('app.telegramSignInError')
+          tmaLog('error', 'auth_error_firebase', 'Ошибка Firebase при входе по custom token', { code: code || 'firebase_error', message: err?.message })
+          setError(msg)
+        })
     }
 
     const tryInitDataAuth = (initDataStr) => {
@@ -1482,16 +1518,25 @@ export default function VPNServiceApp() {
 
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     let emailToUse = loginOrEmail
+    let resolveServiceUnavailable = false
     try {
       const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(loginOrEmail)}`)
       if (res.ok) {
         const data = await res.json().catch(() => ({}))
         if (data.email) emailToUse = data.email
+      } else if (res.status === 503) {
+        resolveServiceUnavailable = true
       }
-    } catch (_) {}
+    } catch (_) {
+      resolveServiceUnavailable = true
+    }
 
     if (!emailToUse.includes('@')) {
-      setError(i18n.t('app.loginEmailOrLoginOnly') || i18n.t('app.invalidEmailFormat'))
+      if (resolveServiceUnavailable) {
+        setError(i18n.t('app.authServiceUnavailable') || 'Сервис входа временно недоступен. Войдите по email.')
+      } else {
+        setError(i18n.t('app.loginEmailOrLoginOnly') || i18n.t('app.invalidEmailFormat'))
+      }
       return
     }
 
@@ -1515,7 +1560,9 @@ export default function VPNServiceApp() {
       } catch (_) {}
     } catch (err) {
       logger.error('Auth', 'Ошибка входа', { loginOrEmail }, err)
-      const msg = getAuthErrorMsg(err)
+      const msg = err?.code === 'auth/invalid-credential'
+        ? i18n.t('app.invalidCredentialEmail')
+        : getAuthErrorMsg(err)
       if (msg) setError(msg)
     }
   }, [auth, db, getAuthErrorMsg])
@@ -1803,11 +1850,39 @@ export default function VPNServiceApp() {
     } catch (err) {
       const isUserClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request'
       if (isUserClosed) {
-        logger.debug('Auth', 'Вход через Google отменён пользователем (popup закрыт)')
+        // Попап может закрыться после успешного входа (расширения/автозаполнение закрывают окно). Ждём пользователя через onAuthStateChanged с таймаутом.
+        const POPUP_CLOSED_WAIT_MS = 2800
+        const user = await new Promise((resolve) => {
+          let resolved = false
+          const unsub = onAuthStateChanged(auth, (fbUser) => {
+            if (resolved) return
+            if (fbUser?.providerData?.some((p) => p?.providerId === 'google.com')) {
+              resolved = true
+              unsub()
+              resolve(fbUser)
+            }
+          })
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true
+              unsub()
+              resolve(null)
+            }
+          }, POPUP_CLOSED_WAIT_MS)
+        })
+        if (user) {
+          logger.info('Auth', 'Вход через Google завершён (popup закрыт, пользователь авторизован)', { uid: user.uid })
+          try {
+            await processGoogleSignInUser(user)
+          } catch (processErr) {
+            logger.error('Auth', 'Ошибка обработки пользователя после Google', { uid: user.uid }, processErr)
+            setError(i18n.t('app.loginError') || 'Ошибка входа. Попробуйте ещё раз.')
+          }
+        } else {
+          logger.debug('Auth', 'Вход через Google отменён пользователем (popup закрыт)')
+        }
       } else {
         logger.error('Auth', 'Ошибка входа через Google', null, err)
-      }
-      if (!isUserClosed) {
         let errorMessage = 'Ошибка входа через Google. Попробуйте ещё раз.'
         if (err?.code === 'auth/network-request-failed') {
           errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
@@ -1826,7 +1901,7 @@ export default function VPNServiceApp() {
     } finally {
       setGoogleSignInLoading(false)
     }
-  }, [app, db, processGoogleSignInUser, googleSignInLoading])
+  }, [app, auth, db, processGoogleSignInUser, googleSignInLoading])
 
   // Вход через Google через переход на страницу (redirect). В WebView (Telegram и др.) sessionStorage часто сбрасывается при редиректе → getRedirectResult даёт "missing initial state", поэтому в WebView используем popup.
   const handleGoogleSignInRedirect = useCallback(() => {
@@ -1958,6 +2033,12 @@ export default function VPNServiceApp() {
           if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
         }
         await signInWithCustomToken(auth, data.customToken)
+        // Сразу редирект: форма входа скрывается без ожидания onAuthStateChanged
+        if (data.user && data.uid) {
+          const currentUserData = { ...data.user, id: data.uid, role: data.user?.role || 'user' }
+          setCurrentUser(currentUserData)
+          setView(currentUserData.role === 'admin' ? 'admin' : 'dashboard')
+        }
       } else {
         tmaLog('warn', 'button_error', 'Вход по кнопке: ошибка от сервера', { reason: data.reason, error: data.error })
         logger.warn('TelegramAuth', 'Вход по кнопке: ошибка', { error: data.error, reason: data.reason })
@@ -1994,7 +2075,15 @@ export default function VPNServiceApp() {
             localStorage.setItem('tma_session_token', data.sessionToken)
             if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
           }
-          await signInWithCustomToken(auth, data.customToken)
+          const cred = await signInWithCustomToken(auth, data.customToken)
+          // /api/telegram/auth-widget не возвращает uid/user — сразу грузим данные и редиректим (без ожидания onAuthStateChanged)
+          const userData = await loadUserData(cred.user.uid)
+          if (userData) {
+            const currentUserData = { ...userData, id: cred.user.uid, role: userData.role || 'user' }
+            setCurrentUser(currentUserData)
+            setView(currentUserData.role === 'admin' ? 'admin' : 'dashboard')
+            logger.info('TelegramAuth', 'Login Widget: вход успешен, переход в ЛК', { uid: cred.user.uid })
+          }
         } else {
           tmaLog('warn', 'widget_error', 'Login Widget: ошибка от сервера', { error: data.error })
           logger.warn('TelegramAuth', 'Login Widget: ошибка', { error: data.error })
@@ -2008,7 +2097,7 @@ export default function VPNServiceApp() {
         setTelegramSignInLoading(false)
       }
     },
-    [auth]
+    [auth, loadUserData, setView]
   )
 
   // Telegram Login Widget: если Telegram вернул пользователя по редиректу (в URL query) — только на браузерном пути
@@ -4127,9 +4216,9 @@ export default function VPNServiceApp() {
     return <PaymentResultPage success={false} onGoToDashboard={goToDashboard} />
   }
 
-  // Мини-интерфейс для Telegram: /t или /telegram; view может быть tma | browserFallback | openFromTelegram (устанавливается эффектом проверки tg/initData)
+  // Мини-интерфейс для Telegram: /t или /telegram; view: tma | open_in_browser_fallback | open_from_bot_instructions (устанавливается эффектом проверки tg/initData)
   const onTmaPath = isTmaPath(path)
-  if (view === 'tma' || view === 'browserFallback' || view === 'openFromTelegram' || onTmaPath) {
+  if (view === 'tma' || view === 'open_in_browser_fallback' || view === 'open_from_bot_instructions' || onTmaPath) {
     if (currentUser) {
       // Авторизован по Telegram — показываем личный кабинет (компактный режим для Mini App)
       return (
@@ -4199,7 +4288,7 @@ export default function VPNServiceApp() {
         </>
       )
     }
-    if (view === 'browserFallback') {
+    if (view === 'open_in_browser_fallback') {
       const botUsername = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
         ? String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME).trim().replace(/^@/, '')
         : DEFAULT_TELEGRAM_BOT_USERNAME
@@ -4241,7 +4330,7 @@ export default function VPNServiceApp() {
         </>
       )
     }
-    if (view === 'openFromTelegram') {
+    if (view === 'open_from_bot_instructions') {
       return (
         <>
         <div
@@ -4322,6 +4411,11 @@ export default function VPNServiceApp() {
         <p style={{ margin: '0 0 1.5rem', fontSize: '0.875rem', color: '#94a3b8', textAlign: 'center', maxWidth: '20rem' }}>
           {t('app.telegramMiniOpenInBot')}
         </p>
+        {error && (
+          <a href="/" style={{ display: 'inline-block', marginBottom: '1rem', fontSize: '0.875rem', color: '#60a5fa', fontWeight: 500 }}>
+            {t('app.goToMainSite')}
+          </a>
+        )}
         <a href="/" style={{ fontSize: '0.875rem', color: '#60a5fa' }}>{t('app.goToMainSite')}</a>
       </div>
       <TmaLogPanel />

@@ -27,9 +27,14 @@ export function useView({ currentUser, onViewChange } = {}) {
     }
     try {
       const savedView = localStorage.getItem('vpn_current_view')
-      if (savedView && ['dashboard', 'admin', 'finances', 'analytics', 'login', 'register'].includes(savedView)) {
+      const restorableViews = ['dashboard', 'admin', 'finances', 'analytics', 'login', 'register']
+      if (savedView && restorableViews.includes(savedView)) {
         logger.debug('useView', 'Восстановлен view из localStorage', { view: savedView })
         return savedView
+      }
+      // Очистить устаревшие TMA view'ы, которые не восстанавливаются (избегаем мусора в localStorage)
+      if (savedView && ['tma', 'open_from_bot_instructions', 'open_in_browser_fallback'].includes(savedView)) {
+        localStorage.removeItem('vpn_current_view')
       }
     } catch (err) {
       logger.error('useView', 'Ошибка при восстановлении view из localStorage', null, err)
@@ -37,10 +42,14 @@ export function useView({ currentUser, onViewChange } = {}) {
     return 'welcome'
   })
 
+  // Не сохраняем в localStorage эфемерные view'ы: welcome/login/register и TMA-специфичные (определяются заново при загрузке /t)
+  const PERSIST_VIEWS = ['dashboard', 'admin', 'finances', 'analytics']
+  const shouldPersistView = (v) => v && PERSIST_VIEWS.includes(v)
+
   // Обертка для setView с сохранением в localStorage
   const setView = useCallback((newView) => {
     setViewState(newView)
-    if (newView && newView !== 'welcome' && newView !== 'login' && newView !== 'register') {
+    if (shouldPersistView(newView)) {
       try {
         localStorage.setItem('vpn_current_view', newView)
         logger.debug('useView', 'View сохранен в localStorage', { view: newView })
@@ -48,7 +57,9 @@ export function useView({ currentUser, onViewChange } = {}) {
         logger.error('useView', 'Ошибка при сохранении view в localStorage', { view: newView }, err)
       }
     } else {
-      localStorage.removeItem('vpn_current_view')
+      try {
+        localStorage.removeItem('vpn_current_view')
+      } catch (_) {}
     }
     
     // Вызываем callback, если он передан
@@ -60,7 +71,9 @@ export function useView({ currentUser, onViewChange } = {}) {
   // Автоматическое определение view на основе текущего пользователя
   useEffect(() => {
     if (!currentUser) {
-      // Если пользователь не авторизован, показываем welcome
+      // Не переключать на welcome, если показан экран TMA (иначе бесконечные переключения view на /t)
+      const tmaViews = ['tma', 'open_from_bot_instructions', 'open_in_browser_fallback']
+      if (tmaViews.includes(view)) return
       if (view !== 'welcome' && view !== 'login' && view !== 'register') {
         setView('welcome')
       }
