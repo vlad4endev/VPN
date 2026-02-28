@@ -270,13 +270,6 @@ export default function VPNServiceApp() {
         })
       })
       
-      // Проверяем, есть ли уже тарифы SUPER или MULTI
-      const existingSuperMulti = tariffsList.filter(t => {
-        const plan = t.plan?.toLowerCase()
-        const name = t.name?.toLowerCase()
-        return (plan === 'super' || plan === 'multi') || (name === 'super' || name === 'multi')
-      })
-      
       // Если тарифов нет вообще, создаем по умолчанию (только SUPER и MULTI)
       if (tariffsList.length === 0) {
         const defaultTariffs = [
@@ -303,116 +296,16 @@ export default function VPNServiceApp() {
           logger.info('Tariffs', 'Созданы тарифы по умолчанию', { count: createdTariffs.length })
         }
       } else {
-        // Логируем все загруженные тарифы для отладки
-        logger.debug('Tariffs', 'Все тарифы из базы', { 
-          total: tariffsList.length, 
-          tariffs: tariffsList.map(t => ({ id: t.id, name: t.name, plan: t.plan, active: t.active }))
+        // Все активные тарифы (в т.ч. добавленные в админке) отображаются в выборе в личном кабинете
+        const activeTariffs = tariffsList
+          .filter(t => t.active !== false)
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        setTariffs(activeTariffs)
+        logger.info('Tariffs', 'Загружены тарифы', {
+          total: tariffsList.length,
+          active: activeTariffs.length,
+          names: activeTariffs.map(t => t.name)
         })
-        
-        // Фильтруем только тарифы SUPER и MULTI
-        const filteredTariffs = tariffsList.filter(t => {
-          const plan = t.plan?.toLowerCase()
-          const name = t.name?.toLowerCase()
-          return (plan === 'super' || plan === 'multi') || 
-                 (name === 'super' || name === 'multi')
-        })
-        
-        // Дедупликация: оставляем только по одному тарифу каждого типа (super и multi)
-        const uniqueTariffs = []
-        const seenPlans = new Set()
-        
-        for (const tariff of filteredTariffs) {
-          const plan = tariff.plan?.toLowerCase()
-          const name = tariff.name?.toLowerCase()
-          let tariffType = null
-          
-          if (plan === 'super' || name === 'super') {
-            tariffType = 'super'
-          } else if (plan === 'multi' || name === 'multi') {
-            tariffType = 'multi'
-          }
-          
-          // Берем только первый активный тариф каждого типа
-          if (tariffType && !seenPlans.has(tariffType) && tariff.active !== false) {
-            seenPlans.add(tariffType)
-            uniqueTariffs.push(tariff)
-          }
-        }
-        
-        // Если не нашли оба тарифа, создаем недостающие
-        if (uniqueTariffs.length < 2) {
-          const hasSuper = uniqueTariffs.some(t => {
-            const plan = t.plan?.toLowerCase()
-            const name = t.name?.toLowerCase()
-            return plan === 'super' || name === 'super'
-          })
-          const hasMulti = uniqueTariffs.some(t => {
-            const plan = t.plan?.toLowerCase()
-            const name = t.name?.toLowerCase()
-            return plan === 'multi' || name === 'multi'
-          })
-          
-          if (!hasSuper) {
-            try {
-              const docRef = await addDoc(tariffsCollection, {
-                name: 'Super',
-                plan: 'super',
-                price: 150,
-                devices: 1,
-                trafficGB: 0,
-                durationDays: 30,
-                active: true,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              })
-              uniqueTariffs.push({ id: docRef.id, name: 'Super', plan: 'super', price: 150, devices: 1, trafficGB: 0, durationDays: 30, active: true })
-            } catch (err) {
-              logger.error('Tariffs', 'Ошибка создания тарифа Super', null, err)
-            }
-          }
-          
-          if (!hasMulti) {
-            try {
-              const docRef = await addDoc(tariffsCollection, {
-                name: 'MULTI',
-                plan: 'multi',
-                price: 250,
-                devices: 5,
-                trafficGB: 0,
-                durationDays: 30,
-                active: true,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              })
-              uniqueTariffs.push({ id: docRef.id, name: 'MULTI', plan: 'multi', price: 250, devices: 5, trafficGB: 0, durationDays: 30, active: true })
-            } catch (err) {
-              logger.error('Tariffs', 'Ошибка создания тарифа MULTI', null, err)
-            }
-          }
-        }
-        
-        // Сортируем: сначала Super, потом MULTI
-        uniqueTariffs.sort((a, b) => {
-          const aPlan = a.plan?.toLowerCase() || a.name?.toLowerCase()
-          const bPlan = b.plan?.toLowerCase() || b.name?.toLowerCase()
-          if (aPlan === 'super') return -1
-          if (bPlan === 'super') return 1
-          return 0
-        })
-        
-        setTariffs(uniqueTariffs)
-        logger.info('Tariffs', 'Загружены тарифы (дедуплицированы)', { 
-          count: uniqueTariffs.length,
-          tariffs: uniqueTariffs.map(t => ({ id: t.id, name: t.name, plan: t.plan }))
-        })
-        
-        // Если после фильтрации тарифов нет, но в базе они есть - просто показываем сообщение
-        // Не создаем новые тарифы, чтобы избежать дублирования
-        if (filteredTariffs.length === 0 && tariffsList.length > 0) {
-          logger.warn('Tariffs', 'Тарифы в базе не соответствуют SUPER/MULTI', { 
-            totalInDb: tariffsList.length 
-          })
-        }
       }
     } catch (err) {
       logger.error('Tariffs', 'Ошибка загрузки тарифов', null, err)

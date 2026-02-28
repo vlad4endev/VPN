@@ -1374,6 +1374,141 @@ export const dashboardService = {
         totalServers: serversList.length,
         hasSettings: settingsSnapshot.exists()
       })
+
+      // Объединённый тариф: несколько серверов по очереди, несколько ссылок на подписку
+      const linkedIds = Array.isArray(tariff.linkedTariffIds) ? tariff.linkedTariffIds.filter(Boolean) : []
+      if (linkedIds.length > 0) {
+        const linkedTariffs = []
+        for (const tid of linkedIds) {
+          const ref = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tid)
+          const snap = await getDoc(ref)
+          if (snap.exists()) linkedTariffs.push({ id: snap.id, ...snap.data() })
+        }
+        if (linkedTariffs.length === 0) {
+          throw new Error('Объединённый тариф: не найдены связанные тарифы. Проверьте настройки тарифа в админке.')
+        }
+
+        const subscriptionLinks = []
+        let firstUuid = null
+        const webhookUrl = await loadWebhookUrl()
+        const totalGB = isTestPeriodForTraffic ? (3 * 1024 * 1024 * 1024) : (tariff.trafficGB > 0 ? tariff.trafficGB * 1024 * 1024 * 1024 : 0)
+
+        for (let i = 0; i < linkedTariffs.length; i++) {
+          const lt = linkedTariffs[i]
+          let serversForTariff = serversList.filter(s => (s.tariffIds || []).includes(lt.id))
+          if (serversForTariff.length === 0) serversForTariff = serversList
+          let server = null
+          for (const s of serversForTariff) {
+            if (s.active === false || !s.serverIP || !s.serverPort) continue
+            if (s.sessionCookie && s.sessionCookieReceivedAt) {
+              const age = Date.now() - new Date(s.sessionCookieReceivedAt).getTime()
+              if (age < 60 * 60 * 1000) { server = s; break }
+            }
+          }
+          if (!server) {
+            for (const s of serversForTariff) {
+              if (s.active !== false && s.xuiUsername && s.xuiPassword && s.serverIP && s.serverPort) {
+                server = s
+                break
+              }
+            }
+          }
+          if (!server) {
+            throw new Error(`Не найден активный сервер для тарифа «${lt.name || lt.id}». Настройте сервер в админке.`)
+          }
+
+          const perClientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0
+            const v = c === 'x' ? r : (r & 0x3) | 0x8
+            return v.toString(16)
+          })
+          const serverInboundId = server.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID || '1'
+          const addData = {
+            operation: 'add_client',
+            category: 'combined_tariff',
+            timestamp: new Date().toISOString(),
+            userId: user.id,
+            userUuid: perClientId,
+            userName: user.name || user.email?.split('@')[0] || 'User',
+            userEmail: user.email,
+            email: user.name || user.email,
+            inboundId: parseInt(serverInboundId),
+            totalGB,
+            expiryTime: expiryTime,
+            limitIp: finalDevices,
+            clientId: perClientId,
+            subId: user.subId || '',
+            tgId: user.tgId || '',
+            serverId: server.id,
+            sessionCookie: server.sessionCookie || null,
+            serverIP: server.serverIP,
+            serverPort: server.serverPort,
+            randompath: server.randompath || '',
+            protocol: server.protocol || (server.serverPort === 443 || server.serverPort === 40919 ? 'https' : 'http'),
+            subscriptionDetails: {
+              tariffName: lt.name || lt.plan || 'Unknown',
+              devices: finalDevices,
+              period: { months: finalPeriodMonths, expiryDate3xui: expiryTime, expiryDateIso: expiryTime > 0 ? new Date(expiryTime).toISOString() : null, expiryDateUnix: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0 },
+              userName: user.name || user.email?.split('@')[0] || 'User',
+              profileUuid: perClientId,
+            },
+          }
+          if (server.xuiUsername && server.xuiPassword && !addData.sessionCookie) {
+            addData.xuiUsername = server.xuiUsername
+            addData.xuiPassword = server.xuiPassword
+          }
+          if (webhookUrl) addData.webhookUrl = webhookUrl
+
+          const result = await xuiService.addClient(addData)
+          const linkBase = (lt.subscriptionLink && lt.subscriptionLink.trim()) ? lt.subscriptionLink.trim().replace(/\/$/, '') : 'https://subs.skypath.fun:3458/vk198'
+          subscriptionLinks.push(`${linkBase}/${user.subId || ''}`)
+          if (i === 0) firstUuid = result?.vpnUuid || perClientId
+        }
+
+        const primaryLink = subscriptionLinks[0]
+        const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
+        await updateDoc(userDoc, {
+          plan: tariff.plan,
+          expiresAt: expiryTime > 0 ? expiryTime : null,
+          tariffName: tariff.name,
+          tariffId: tariff.id,
+          devices: finalDevices,
+          periodMonths: finalPeriodMonths,
+          paymentStatus: paymentStatus,
+          testPeriodStartDate: testPeriodStartDate,
+          testPeriodEndDate: testPeriodEndDate,
+          discount: 0,
+          vpnLink: primaryLink,
+          subscriptionLink: primaryLink,
+          subscriptionLinks,
+          uuid: firstUuid,
+          updatedAt: new Date().toISOString(),
+        })
+        if (paymentStatus === 'paid') {
+          await updateDoc(userDoc, { unpaidStartDate: null })
+        }
+
+        logger.info('Dashboard', 'Объединённый тариф: клиенты созданы на всех серверах', {
+          userId: user.id,
+          serversCount: linkedTariffs.length,
+          subscriptionLinksCount: subscriptionLinks.length,
+        })
+
+        return {
+          success: true,
+          uuid: firstUuid,
+          plan: tariff.plan,
+          expiresAt: expiryTime > 0 ? expiryTime : null,
+          tariffName: tariff.name,
+          tariffId: tariff.id,
+          devices: finalDevices,
+          periodMonths: finalPeriodMonths,
+          paymentStatus: paymentStatus,
+          vpnLink: primaryLink,
+          subscriptionLink: primaryLink,
+          subscriptionLinks,
+        }
+      }
       
       // Ищем сервер, привязанный к данному тарифу (если есть привязка)
       let serversToCheck = serversList.filter(server => {
@@ -1667,21 +1802,19 @@ export const dashboardService = {
       randompath: randompath || '',
       protocol: protocol,
       
-      // Если это новая подписка, добавляем детальные данные для n8n
-      ...(isNewSubscription ? {
-        subscriptionDetails: {
-          tariffName: tariff.name || tariff.plan || 'Unknown',
-          devices: finalDevices,
-          period: {
-            months: finalPeriodMonths,
-            expiryDate3xui: expiryTimeForBackend, // В миллисекундах для 3x-ui (Unix Timestamp * 1000)
-            expiryDateIso: expiryTime > 0 ? new Date(expiryTime).toISOString() : null,
-            expiryDateUnix: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0, // Unix timestamp в секундах
-          },
-          userName: user.name || user.email?.split('@')[0] || 'User',
-          profileUuid: clientId, // UUID профиля - самое главное!
-        }
-      } : {}),
+      // Всегда передаём subscriptionDetails в webhook (n8n: body.subscriptionDetails.tariffName и др.)
+      subscriptionDetails: {
+        tariffName: tariff.name || tariff.plan || 'Unknown',
+        devices: finalDevices,
+        period: {
+          months: finalPeriodMonths,
+          expiryDate3xui: expiryTimeForBackend,
+          expiryDateIso: expiryTime > 0 ? new Date(expiryTime).toISOString() : null,
+          expiryDateUnix: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0,
+        },
+        userName: user.name || user.email?.split('@')[0] || 'User',
+        profileUuid: clientId,
+      },
       
       // Если сессия отсутствует, передаем credentials для автоматического получения сессии
       ...(xuiUsername && xuiPassword && !sessionCookie ? {
@@ -2900,6 +3033,18 @@ export const dashboardService = {
       serverPort: newServer.serverPort,
       randompath: newServer.randompath || '',
       protocol: newServer.protocol || (newServer.serverPort === 443 || newServer.serverPort === 40919 ? 'https' : 'http'),
+      subscriptionDetails: {
+        tariffName: newTariff.name || newTariff.plan || 'Unknown',
+        devices: finalDevices,
+        period: {
+          months: user.periodMonths || 1,
+          expiryDate3xui: user.expiresAt,
+          expiryDateIso: user.expiresAt ? new Date(user.expiresAt).toISOString() : null,
+          expiryDateUnix: user.expiresAt ? Math.floor(user.expiresAt / 1000) : 0,
+        },
+        userName: user.name || user.email?.split('@')[0] || 'User',
+        profileUuid: newClientId,
+      },
     }
     if (newServer.xuiUsername && newServer.xuiPassword && !addClientData.sessionCookie) {
       addClientData.xuiUsername = newServer.xuiUsername

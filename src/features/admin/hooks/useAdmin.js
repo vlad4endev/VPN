@@ -168,6 +168,7 @@ export function useAdmin({
     handleTariffDurationDaysChange: tariffsHook.handleTariffDurationDaysChange,
     handleTariffActiveChange: tariffsHook.handleTariffActiveChange,
     handleTariffSubscriptionLinkChange: tariffsHook.handleTariffSubscriptionLinkChange,
+    handleTariffLinkedTariffIdsChange: tariffsHook.handleTariffLinkedTariffIdsChange,
 
     // Отзывы пользователей
     reviews: reviewsHook.reviews,

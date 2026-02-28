@@ -356,7 +356,33 @@ export const adminService = {
   },
 
   /**
-   * Сохранение тарифа
+   * Создание нового тарифа
+   * @param {Object} tariffData - Данные тарифа (name, plan, price, devices, trafficGB, durationDays, active, subscriptionLink)
+   * @returns {Promise<{ id: string, ...tariffData }>} Созданный тариф с id
+   */
+  async createTariff(tariffData) {
+    if (!db) {
+      throw new Error('База данных недоступна')
+    }
+
+    try {
+      const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
+      const data = {
+        ...tariffData,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      const docRef = await addDoc(tariffsCollection, data)
+      logger.info('Admin', 'Тариф создан', { tariffId: docRef.id })
+      return { id: docRef.id, ...data }
+    } catch (err) {
+      logger.error('Admin', 'Ошибка создания тарифа', null, err)
+      throw err
+    }
+  },
+
+  /**
+   * Сохранение тарифа (обновление существующего)
    * @param {string} tariffId - ID тарифа
    * @param {Object} tariffData - Данные тарифа
    * @returns {Promise<Object>} Сохраненные данные тарифа

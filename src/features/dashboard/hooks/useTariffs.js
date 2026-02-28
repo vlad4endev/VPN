@@ -25,18 +25,16 @@ export function useTariffs() {
         tariffs.push({ id: doc.id, ...doc.data() })
       })
 
-      // Фильтруем только SUPER и MULTI
-      const filtered = tariffs.filter((t) => {
-        const plan = t.plan?.toLowerCase()
-        const name = t.name?.toLowerCase()
-        return plan === 'super' || plan === 'multi' || name === 'super' || name === 'multi'
-      })
+      // Показываем все активные тарифы (добавленные в админке отображаются в личном кабинете)
+      const activeTariffs = tariffs
+        .filter((t) => t.active !== false)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 
       logger.info('Tariffs', 'Тарифы загружены', { 
         total: tariffs.length, 
-        filtered: filtered.length 
+        active: activeTariffs.length 
       })
-      return filtered
+      return activeTariffs
     },
     enabled: !!db,
     staleTime: 10 * 60 * 1000, // 10 минут (тарифы редко меняются)

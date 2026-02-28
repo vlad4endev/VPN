@@ -237,6 +237,7 @@
     "userDataNotFound": "User data not found.",
     "loginSuccess": "Sign-in successful",
     "loginError": "Sign-in error",
+    "redirectSignInStateLost": "Sign-in session expired or unavailable. Click «Sign in with Google» again.",
     "userNotFound": "User with this email not found.",
     "wrongPassword": "Wrong password.",
     "invalidEmailFormat": "Invalid email format.",
@@ -374,7 +375,9 @@
     "warningDoNotShare": "Do not share this link with others.",
     "downloadApp": "Download the app on your device",
     "addSubscription": "Add subscription to app",
-    "downloadFor": "Download for {{platform}}"
+    "downloadFor": "Download for {{platform}}",
+    "multipleLinksHint": "Subscription links for each server:",
+    "serverLink": "Server {{n}}"
   },
   "tariff": {
     "title": "Choose plan",

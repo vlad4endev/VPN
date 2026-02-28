@@ -7,6 +7,7 @@ import { detectPlatform, getPlatformInfo } from '../../../shared/utils/detectPla
 
 const SubscriptionSuccessModal = ({ 
   vpnLink, 
+  subscriptionLinks: subscriptionLinksProp = null,
   onClose, 
   onCopy,
   tariffName = '',
@@ -27,14 +28,30 @@ const SubscriptionSuccessModal = ({
 }) => {
   const [copied, setCopied] = useState(false)
   const [subscriptionLink, setSubscriptionLink] = useState(vpnLink || null)
+  const [subscriptionLinksList, setSubscriptionLinksList] = useState(subscriptionLinksProp && Array.isArray(subscriptionLinksProp) ? subscriptionLinksProp : null)
   const [checkingPayment, setCheckingPayment] = useState(false)
   const [checkPaymentMessage, setCheckPaymentMessage] = useState('')
+
+  // Объединённый тариф: несколько ссылок из пропса или user
+  useEffect(() => {
+    if (subscriptionLinksProp && Array.isArray(subscriptionLinksProp) && subscriptionLinksProp.length > 0) {
+      setSubscriptionLinksList(subscriptionLinksProp)
+      setSubscriptionLink(subscriptionLinksProp[0])
+      return
+    }
+    if (user?.subscriptionLinks && Array.isArray(user.subscriptionLinks) && user.subscriptionLinks.length > 0) {
+      setSubscriptionLinksList(user.subscriptionLinks)
+      setSubscriptionLink(user.subscriptionLinks[0])
+      return
+    }
+    setSubscriptionLinksList(null)
+  }, [subscriptionLinksProp, user?.subscriptionLinks])
 
   // Загружаем правильную ссылку на подписку с учетом тарифа
   useEffect(() => {
     const loadSubscriptionLink = async () => {
+      if (subscriptionLinksList?.length > 0) return
       if (!user) {
-        // Если user не передан, используем vpnLink из пропсов
         setSubscriptionLink(vpnLink || null)
         return
       }
@@ -101,7 +118,7 @@ const SubscriptionSuccessModal = ({
     }
 
     loadSubscriptionLink()
-  }, [user?.tariffId, user?.subId, user?.subscriptionLink, vpnLink, user])
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, vpnLink, user, subscriptionLinksList?.length])
 
   const handleCopy = () => {
     if (onCopy && subscriptionLink) {
@@ -437,12 +454,33 @@ const SubscriptionSuccessModal = ({
           </div>
           )}
 
-          {/* Ссылка на подписку - Mobile First с вертикальным стеком на мобильных */}
+          {/* Ссылка на подписку - одна или несколько (объединённый тариф) */}
           {!requiresPayment && subscriptionLink && (
             <div className="space-y-2">
             <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium">
-              Ваша ссылка на подписку (скопируйте ссылку):
+              {subscriptionLinksList && subscriptionLinksList.length > 1 ? 'Ссылки на подписку (по одной на каждый сервер):' : 'Ваша ссылка на подписку (скопируйте ссылку):'}
             </label>
+            {subscriptionLinksList && subscriptionLinksList.length > 1 ? (
+              <div className="space-y-3">
+                {subscriptionLinksList.map((link, idx) => (
+                  <div key={idx} className="flex flex-col gap-1.5">
+                    <span className="text-slate-500 text-xs font-medium">Сервер {idx + 1}</span>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 rounded-lg overflow-x-auto">
+                        <code className="text-blue-400 text-xs font-mono break-all">{link}</code>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { onCopy(link); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                        className="min-h-[40px] px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2"
+                      >
+                        <Copy size={16} /> Копировать
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <div className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 sm:p-4 rounded-lg sm:rounded-xl overflow-x-auto">
                 <code className="text-blue-400 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs font-mono break-all select-all whitespace-pre-wrap word-break break-words">
@@ -468,6 +506,7 @@ const SubscriptionSuccessModal = ({
                 )}
               </button>
             </div>
+            )}
           </div>
           )}
 

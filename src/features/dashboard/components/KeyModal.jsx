@@ -10,6 +10,7 @@ import { detectPlatform, getPlatformInfo } from '../../../shared/utils/detectPla
 const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatDate }) => {
   const { t } = useTranslation()
   const [subscriptionLink, setSubscriptionLink] = useState(null)
+  const [subscriptionLinksList, setSubscriptionLinksList] = useState(null)
   const [loadingLink, setLoadingLink] = useState(true)
 
   // Проверяем наличие user
@@ -34,6 +35,14 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         return
       }
 
+      // Объединённый тариф: несколько ссылок на подписку (2+ серверов)
+      if (user.subscriptionLinks && Array.isArray(user.subscriptionLinks) && user.subscriptionLinks.length > 0) {
+        setSubscriptionLinksList(user.subscriptionLinks)
+        setSubscriptionLink(user.subscriptionLinks[0])
+        setLoadingLink(false)
+        return
+      }
+
       // ВАЖНО: Приоритет - сначала ссылка из тарифа (актуальная), затем сохраненная, затем дефолтная
       // Загружаем тариф и используем ссылку из него (если есть tariffId)
       if (user.tariffId) {
@@ -44,9 +53,9 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           if (tariffSnapshot.exists()) {
             const tariff = tariffSnapshot.data()
             if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
-              // Убираем завершающий слэш, если есть, и добавляем subId
               const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
               const linkFromTariff = `${baseLink}/${subId}`
+              setSubscriptionLinksList(null)
               setSubscriptionLink(linkFromTariff)
               setLoadingLink(false)
               logger.info('KeyModal', 'Использована ссылка из тарифа', {
@@ -70,6 +79,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         const savedLink = String(user.subscriptionLink).trim()
         // Проверяем, что ссылка содержит правильный формат
         if (savedLink.includes('subs.skypath.fun') || savedLink.startsWith('https://')) {
+          setSubscriptionLinksList(null)
           setSubscriptionLink(savedLink)
           setLoadingLink(false)
           logger.info('KeyModal', 'Использована сохраненная ссылка (fallback)', {
@@ -81,6 +91,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       
       // Если ссылка из тарифа и сохраненная не получены, используем дефолтную
       const defaultLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      setSubscriptionLinksList(null)
       setSubscriptionLink(defaultLink)
       setLoadingLink(false)
       logger.info('KeyModal', 'Использована дефолтная ссылка', {
@@ -89,7 +100,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
     }
     
     loadSubscriptionLink()
-  }, [user?.tariffId, user?.subId, user?.subscriptionLink, subId])
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, user?.subscriptionLinks, subId])
 
   // Загружаем настройки для получения ссылок на приложения
   const [appLinks, setAppLinks] = useState(null)
@@ -216,18 +227,42 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           </div>
           <div className="space-y-2">
             <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">{t('app.subscriptionLinkLabel')}</p>
-            <div className="bg-black/40 border border-slate-800 p-3 sm:p-4 md:p-5 rounded-2xl sm:rounded-3xl break-all font-mono text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs text-blue-400 leading-relaxed ring-1 ring-blue-500/10 word-break break-words whitespace-pre-wrap">
-              {subscriptionLink}
-            </div>
+            {subscriptionLinksList && subscriptionLinksList.length > 1 ? (
+              <div className="space-y-3">
+                <p className="text-slate-500 text-xs">{t('keyModal.multipleLinksHint', 'Ссылки на подписку для каждого сервера:')}</p>
+                {subscriptionLinksList.map((link, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <span className="text-slate-500 text-xs font-medium">{t('keyModal.serverLink', { n: idx + 1 })}</span>
+                    <div className="bg-black/40 border border-slate-800 p-3 sm:p-4 rounded-xl break-all font-mono text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs text-blue-400 word-break break-words">
+                      {link}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onCopy(link)}
+                      className="w-full min-h-[40px] py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 text-white"
+                      aria-label={t('dashboard.copyLinkAria')}
+                    >
+                      <Copy size={16} className="flex-shrink-0" /> {t('app.copyLink')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="bg-black/40 border border-slate-800 p-3 sm:p-4 md:p-5 rounded-2xl sm:rounded-3xl break-all font-mono text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs text-blue-400 leading-relaxed ring-1 ring-blue-500/10 word-break break-words whitespace-pre-wrap">
+                  {subscriptionLink}
+                </div>
+                <button
+                  onClick={() => onCopy(subscriptionLink)}
+                  className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 sm:py-4 md:py-5 rounded-2xl sm:rounded-3xl font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] flex items-center justify-center gap-2 sm:gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-95 touch-manipulation"
+                  aria-label={t('dashboard.copyLinkAria')}
+                >
+                  <Copy size={18} className="sm:w-5 sm:h-5 flex-shrink-0" /> 
+                  <span>{t('app.copyLink')}</span>
+                </button>
+              </>
+            )}
           </div>
-          <button
-            onClick={() => onCopy(subscriptionLink)}
-            className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 sm:py-4 md:py-5 rounded-2xl sm:rounded-3xl font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] flex items-center justify-center gap-2 sm:gap-3 transition-all text-white shadow-xl shadow-blue-600/20 active:scale-95 touch-manipulation"
-            aria-label={t('dashboard.copyLinkAria')}
-          >
-            <Copy size={18} className="sm:w-5 sm:h-5 flex-shrink-0" /> 
-            <span>{t('app.copyLink')}</span>
-          </button>
           
           {/* Кнопка скачивания приложения для текущей ОС */}
           {userPlatform !== 'unknown' && (

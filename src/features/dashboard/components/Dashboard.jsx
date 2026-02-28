@@ -117,11 +117,13 @@ const Dashboard = ({
   
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
   const currentPlanKey = (currentUser?.plan || currentUser?.tariffName || '').toLowerCase()
-  const otherTariffForSwitch = tariffs.find(t => {
+  // Все остальные активные тарифы для переключения (в т.ч. любые добавленные в админке)
+  const otherTariffsForSwitch = tariffs.filter(t => {
     if (!t.active) return false
-    const plan = (t.plan || t.name || '').toLowerCase()
-    return ['super', 'multi'].includes(plan) && plan !== currentPlanKey
+    if (t.id === currentUser?.tariffId) return false
+    return true
   })
+  const otherTariffForSwitch = otherTariffsForSwitch[0] ?? null
   
   // Состояние для оставшегося времени подписки (обновляется каждую минуту)
   const [timeRemaining, setTimeRemaining] = useState(() => 
@@ -949,6 +951,7 @@ const Dashboard = ({
         
         setSubscriptionSuccess({
           vpnLink: result.vpnLink || null,
+          subscriptionLinks: result.subscriptionLinks || null,
           tariffId: result.tariffId || subscriptionData.tariff?.id || null,
           tariffName: result.tariffName || subscriptionData.tariff?.name || null,
           devices: result.devices || subscriptionData.devices || 1,
@@ -1014,13 +1017,14 @@ const Dashboard = ({
     }
   }
 
-  const handleChangePlan = async () => {
-    if (!currentUser?.id || !otherTariffForSwitch) return
+  const handleChangePlan = async (targetTariff) => {
+    const tariff = targetTariff ?? otherTariffForSwitch
+    if (!currentUser?.id || !tariff) return
     setChangePlanError(null)
     setChangePlanSuccess(null)
     try {
       setChangingPlan(true)
-      const result = await dashboardService.changePlanTariff(currentUser, otherTariffForSwitch)
+      const result = await dashboardService.changePlanTariff(currentUser, tariff)
       await onRefreshUserAfterPayment?.().catch(() => {})
       setChangePlanSuccess(result.message || t('dashboard.changePlanSuccess'))
       setTimeout(() => setChangePlanSuccess(null), 6000)
@@ -1890,8 +1894,8 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                       </div>
                     )}
 
-                    {/* Смена тарифа Super ↔ Multi */}
-                    {currentUser?.uuid && otherTariffForSwitch && (
+                    {/* Смена тарифа на другой (все активные тарифы) */}
+                    {currentUser?.uuid && otherTariffsForSwitch.length > 0 && (
                       <div className="mt-3 flex flex-col gap-2">
                         {changePlanSuccess && (
                           <p className="text-green-400 text-sm px-2 py-1 rounded bg-green-900/20" role="status">
@@ -1903,20 +1907,25 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                             {changePlanError}
                           </p>
                         )}
-                        <button
-                          type="button"
-                          onClick={handleChangePlan}
-                          disabled={changingPlan || creatingSubscription || showPaymentProcessing}
-                          className="w-full min-h-[40px] px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-200 rounded-lg font-medium text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation border border-slate-600"
-                          aria-label={t('dashboard.changePlanAria', { name: otherTariffForSwitch.name })}
-                        >
-                          {changingPlan ? (
-                            <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
-                          ) : (
-                            <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
-                          )}
-                          <span>{changingPlan ? t('dashboard.changingPlan') : t('dashboard.changePlanTo', { name: otherTariffForSwitch.name })}</span>
-                        </button>
+                        <div className="flex flex-col gap-1.5">
+                          {otherTariffsForSwitch.map((tariff) => (
+                            <button
+                              key={tariff.id}
+                              type="button"
+                              onClick={() => handleChangePlan(tariff)}
+                              disabled={changingPlan || creatingSubscription || showPaymentProcessing}
+                              className="w-full min-h-[40px] px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-200 rounded-lg font-medium text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center gap-2 touch-manipulation border border-slate-600"
+                              aria-label={t('dashboard.changePlanAria', { name: tariff.name })}
+                            >
+                              {changingPlan ? (
+                                <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
+                              ) : (
+                                <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
+                              )}
+                              <span>{changingPlan ? t('dashboard.changingPlan') : t('dashboard.changePlanTo', { name: tariff.name })}</span>
+                            </button>
+                          ))}
+                        </div>
                         {currentUser?.nextPaymentDiscountAmount > 0 && (
                           <p className="text-slate-400 text-xs px-2">
                             {t('dashboard.nextPaymentDiscountHint', { amount: currentUser.nextPaymentDiscountAmount })}
@@ -1946,21 +1955,26 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
               <div>
                 <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-3 sm:mb-4">{t('dashboard.chooseTariff')}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  {tariffs.filter(t => t.active && (t.name === 'Super' || t.name === 'MULTI')).map((tariff) => {
-                    // Определяем характеристики для каждого тарифа
-                    const isSuper = tariff.name === 'Super'
-                    const features = isSuper 
+                  {tariffs.filter(t => t.active !== false).map((tariff) => {
+                    const planKey = (tariff.plan || tariff.name || '').toLowerCase()
+                    const isSuper = planKey === 'super' || tariff.name === 'Super'
+                    const isMulti = planKey === 'multi' || tariff.name === 'MULTI'
+                    const features = isSuper
                       ? [
-                          `${tariff.devices} ${tariff.devices === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')}`,
+                          `${tariff.devices ?? 1} ${(tariff.devices ?? 1) === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')}`,
                           t('dashboard.supportPriority'),
                           t('dashboard.connectionFast')
                         ]
-                      : [
-                          `${tariff.devices} ${tariff.devices === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')}`,
-                          t('dashboard.trafficSpeed'),
-                          t('dashboard.supportStandard')
-                        ]
-                    
+                      : isMulti
+                        ? [
+                            `${tariff.devices ?? 5} ${(tariff.devices ?? 5) === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')}`,
+                            t('dashboard.trafficSpeed'),
+                            t('dashboard.supportStandard')
+                          ]
+                        : [
+                            `${tariff.devices ?? 1} ${(tariff.devices ?? 1) === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')}`,
+                            t('dashboard.supportStandard')
+                          ]
                     return (
                       <div key={tariff.id} className="bg-slate-800 rounded-lg sm:rounded-xl p-4 sm:p-5 border border-slate-700 flex flex-col">
                         <div className="flex items-center justify-between mb-3">
@@ -1970,7 +1984,7 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                           )}
                         </div>
                         <div className="mb-3 sm:mb-4">
-                          <span className="text-[clamp(1.5rem,1.4rem+0.5vw,2rem)] font-bold text-blue-400">{tariff.price}</span>
+                          <span className="text-[clamp(1.5rem,1.4rem+0.5vw,2rem)] font-bold text-blue-400">{tariff.price ?? 0}</span>
                           <span className="text-slate-400 ml-1.5 sm:ml-2 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{t('dashboard.perMonthShort')}</span>
                         </div>
                         <ul className="space-y-1.5 sm:space-y-2 mb-4 sm:mb-5 flex-1">
@@ -1987,7 +2001,7 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                           className="w-full min-h-[44px] px-4 sm:px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation mt-auto"
                           aria-label={t('dashboard.selectTariffAria', { name: tariff.name })}
                         >
-                          {t('dashboard.selectTariffBtn')} {tariff.name === 'Super' ? 'Super' : tariff.name}
+                          {t('dashboard.selectTariffBtn')} {tariff.name}
                         </button>
                       </div>
                     )
@@ -2370,6 +2384,7 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
         {showSuccessModal && subscriptionSuccess && (
           <SubscriptionSuccessModal
             vpnLink={subscriptionSuccess.vpnLink}
+            subscriptionLinks={subscriptionSuccess.subscriptionLinks || null}
             user={currentUser}
             onClose={() => {
               setShowSuccessModal(false)

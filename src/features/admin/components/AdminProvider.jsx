@@ -52,6 +52,7 @@ function buildContextValue(adminHandlers, adminTab, setAdminTab) {
     handleTariffDurationDaysChange: ensureFunction(adminHandlers.handleTariffDurationDaysChange, 'handleTariffDurationDaysChange'),
     handleTariffActiveChange: ensureFunction(adminHandlers.handleTariffActiveChange, 'handleTariffActiveChange'),
     handleTariffSubscriptionLinkChange: ensureFunction(adminHandlers.handleTariffSubscriptionLinkChange, 'handleTariffSubscriptionLinkChange'),
+    handleTariffLinkedTariffIdsChange: ensureFunction(adminHandlers.handleTariffLinkedTariffIdsChange, 'handleTariffLinkedTariffIdsChange'),
     reviews: adminHandlers.reviews ?? [],
     reviewsLoading: adminHandlers.reviewsLoading ?? false,
     loadReviews: ensureFunction(adminHandlers.loadReviews, 'loadReviews'),

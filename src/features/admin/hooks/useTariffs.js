@@ -25,33 +25,46 @@ export function useTariffs(tariffs, setTariffs, setError, setSuccess) {
     }
   }, [setTariffs, setError])
 
-  // Сохранение тарифа
+  // Сохранение или создание тарифа
   const handleSaveTariff = useCallback(async (tariffData) => {
-    // Проверяем, что это редактирование существующего тарифа SUPER или MULTI
-    if (!editingTariff || !editingTariff.id || editingTariff.id.startsWith('default-')) {
-      setError('Можно редактировать только существующие тарифы SUPER и MULTI')
-      return
-    }
+    if (!editingTariff) return
 
-    // Проверяем, что тариф - это SUPER или MULTI
-    const plan = tariffData.plan?.toLowerCase()
-    const name = tariffData.name?.toLowerCase()
-    if (plan !== 'super' && plan !== 'multi' && name !== 'super' && name !== 'multi') {
-      setError('Разрешены только тарифы SUPER и MULTI')
+    const isNew = !editingTariff.id || editingTariff.id.startsWith('default-')
+    const name = (tariffData.name || '').trim()
+    const plan = (tariffData.plan || '').trim().toLowerCase()
+
+    if (!name) {
+      setError('Введите название тарифа')
       return
     }
 
     try {
-      await adminService.saveTariff(editingTariff.id, tariffData)
-      setTariffs(prev => prev.map(t => t.id === editingTariff.id ? { ...t, ...tariffData } : t))
-      setSuccess('Тариф сохранен')
+      if (isNew) {
+        const created = await adminService.createTariff({
+          name: tariffData.name,
+          plan: plan || name.toLowerCase().replace(/\s+/g, '_'),
+          price: Number(tariffData.price) || 0,
+          devices: Number(tariffData.devices) || 1,
+          trafficGB: Number(tariffData.trafficGB) ?? 0,
+          durationDays: Number(tariffData.durationDays) || 30,
+          active: tariffData.active !== false,
+          subscriptionLink: tariffData.subscriptionLink || '',
+          linkedTariffIds: Array.isArray(tariffData.linkedTariffIds) ? tariffData.linkedTariffIds : [],
+        })
+        setTariffs(prev => [...prev, created])
+        setSuccess('Тариф создан')
+      } else {
+        await adminService.saveTariff(editingTariff.id, tariffData)
+        setTariffs(prev => prev.map(t => t.id === editingTariff.id ? { ...t, ...tariffData } : t))
+        setSuccess('Тариф сохранен')
+      }
       setEditingTariff(null)
       setTimeout(() => setSuccess(''), 3000)
     } catch (err) {
-      logger.error('Admin', 'Ошибка сохранения тарифа', { tariffId: editingTariff?.id }, err)
-      setError('Ошибка сохранения тарифа')
+      logger.error('Admin', isNew ? 'Ошибка создания тарифа' : 'Ошибка сохранения тарифа', { tariffId: editingTariff?.id }, err)
+      setError(isNew ? 'Ошибка создания тарифа' : 'Ошибка сохранения тарифа')
     }
-  }, [editingTariff, tariffs, setTariffs, setError, setSuccess])
+  }, [editingTariff, setTariffs, setError, setSuccess])
 
   // Удаление тарифа
   const handleDeleteTariff = useCallback(async (tariffId) => {
@@ -123,6 +136,10 @@ export function useTariffs(tariffs, setTariffs, setError, setSuccess) {
     setEditingTariff(prev => prev ? { ...prev, subscriptionLink: newValue } : null)
   }, [])
 
+  const handleTariffLinkedTariffIdsChange = useCallback((linkedTariffIds) => {
+    setEditingTariff(prev => prev ? { ...prev, linkedTariffIds: Array.isArray(linkedTariffIds) ? linkedTariffIds : [] } : null)
+  }, [])
+
   return {
     editingTariff,
     setEditingTariff,
@@ -137,6 +154,7 @@ export function useTariffs(tariffs, setTariffs, setError, setSuccess) {
     handleTariffDurationDaysChange,
     handleTariffActiveChange,
     handleTariffSubscriptionLinkChange,
+    handleTariffLinkedTariffIdsChange,
   }
 }
 

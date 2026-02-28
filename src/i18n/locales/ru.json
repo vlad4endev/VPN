@@ -237,6 +237,7 @@
     "userDataNotFound": "Данные пользователя не найдены.",
     "loginSuccess": "Вход выполнен успешно",
     "loginError": "Ошибка входа",
+    "redirectSignInStateLost": "Сессия входа истекла или недоступна. Нажмите «Войти через Google» снова.",
     "userNotFound": "Пользователь с таким email не найден.",
     "wrongPassword": "Неверный пароль.",
     "invalidEmailFormat": "Неверный формат email.",
@@ -381,7 +382,9 @@
     "warningDoNotShare": "Не передавайте эту ссылку третьим лицам.",
     "downloadApp": "Скачайте приложение на свое устройство",
     "addSubscription": "Добавить подписку в приложение",
-    "downloadFor": "Скачать для {{platform}}"
+    "downloadFor": "Скачать для {{platform}}",
+    "multipleLinksHint": "Ссылки на подписку для каждого сервера:",
+    "serverLink": "Сервер {{n}}"
   },
   "tariff": {
     "title": "Выбор тарифа",

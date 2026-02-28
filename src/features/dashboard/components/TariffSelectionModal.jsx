@@ -27,6 +27,8 @@ const TariffSelectionModal = ({
   const { t } = useTranslation()
   const isSuper = tariff?.name?.toLowerCase() === 'super' || tariff?.plan?.toLowerCase() === 'super'
   const isMulti = tariff?.name?.toLowerCase() === 'multi' || tariff?.plan?.toLowerCase() === 'multi'
+  // Остальные тарифы (добавленные в админке) — фиксированная цена за период, как MULTI
+  const isFixedTariff = !isSuper && !isMulti
 
   // Для MULTI тарифа: находим серверы с отметкой multi (через tariffIds)
   const multiServers = isMulti && tariff?.id 
@@ -44,12 +46,11 @@ const TariffSelectionModal = ({
   const baseMonthlyPrice = selectedDevices * devicePrice
   const totalMonthlyPrice = baseMonthlyPrice * selectedPeriod
   
-  // Для MULTI тарифа: расчет итоговой стоимости с учетом периода и скидки
-  // Используем цену из тарифа (цена за месяц)
-  const multiBasePrice = tariff?.price || 0 // Цена тарифа MULTI за месяц
+  // Для MULTI и прочих тарифов: фиксированная цена за месяц, итог = цена * период
+  const multiBasePrice = tariff?.price || 0
   const multiTotalMonthlyPrice = multiBasePrice * selectedPeriod
-  
-  // Скидка 10% для годовой оплаты (12 месяцев) - для обоих тарифов
+
+  // Базовая цена: Super — по устройствам и периоду, остальные — фиксированная за период
   const basePrice = isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice
   const periodDiscount = selectedPeriod === 12 ? 0.1 : 0
   const periodDiscountAmount = periodDiscount > 0 ? basePrice * periodDiscount : 0
@@ -71,11 +72,11 @@ const TariffSelectionModal = ({
     setPromoError(null)
     setPromoData(null)
     try {
-      const basePrice = isSuper ? selectedDevices * devicePrice * selectedPeriod : multiBasePrice * selectedPeriod
+      const baseForPromo = isSuper ? selectedDevices * devicePrice * selectedPeriod : multiBasePrice * selectedPeriod
       const res = await fetch('/api/promocodes/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, tariffId: tariff?.id, amount: basePrice, userId: userId || undefined }),
+        body: JSON.stringify({ code, tariffId: tariff?.id, amount: baseForPromo, userId: userId || undefined }),
       })
       const data = await res.json()
       if (data.valid) {
@@ -585,6 +586,115 @@ const TariffSelectionModal = ({
             </div>
           )}
 
+          {/* Для остальных тарифов (добавленных в админке): период + фиксированная цена */}
+          {isFixedTariff && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
+                  {t('tariff.period')}
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { months: 1, label: t('tariff.month1') },
+                    { months: 3, label: t('tariff.months3') },
+                    { months: 6, label: t('tariff.months6') },
+                    { months: 12, label: t('tariff.year'), badge: t('tariff.discount10') },
+                  ].map((option) => (
+                    <button
+                      key={option.months}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPeriod(option.months)
+                        setConfirmed(false)
+                        setPaymentMode(null)
+                        setPromoData(null)
+                        setPromoError(null)
+                      }}
+                      disabled={isLoading || confirmed}
+                      className={`min-h-[44px] px-2 sm:px-3 py-2.5 sm:py-3 rounded-lg border-2 transition-all font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm ${
+                        selectedPeriod === option.months
+                          ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                      } disabled:opacity-50 disabled:cursor-not-allowed relative touch-manipulation`}
+                    >
+                      {option.label}
+                      {option.badge && (
+                        <span className="absolute -top-1.5 sm:-top-2 -right-1.5 sm:-right-2 bg-green-500 text-white text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs px-1 sm:px-1.5 py-0.5 rounded-full font-bold">
+                          {option.badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5">{t('tariff.promocode')}</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(null) }}
+                    placeholder={t('tariff.promoPlaceholder')}
+                    disabled={isLoading || confirmed}
+                    className="flex-1 min-h-[44px] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyPromo}
+                    disabled={isLoading || confirmed || !promoCode.trim()}
+                    className="min-h-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg font-medium text-slate-200 flex items-center gap-2"
+                  >
+                    {promoLoading ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
+                    <span>{t('tariff.apply')}</span>
+                  </button>
+                  {promoData?.valid && (
+                    <button type="button" onClick={handleRemovePromo} className="min-h-[44px] px-3 text-slate-400 hover:text-red-400" aria-label={t('tariff.removePromo')}>
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                {promoData?.valid && <p className="mt-1.5 text-green-400 text-sm">{promoData.message}</p>}
+                {promoError && <p className="mt-1.5 text-red-400 text-sm">{promoError}</p>}
+              </div>
+
+              <div className="bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.tariffLabel')}</span>
+                  <span className="text-white font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{tariff?.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.pricePerMonth')}</span>
+                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiBasePrice} ₽</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.periodLabel')}</span>
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}</span>
+                </div>
+                <div className="flex justify-between items-center flex-wrap gap-1">
+                  <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm break-words">{t('tariff.costWithPeriod', { count: selectedPeriod, monthWord: selectedPeriod === 1 ? t('tariff.month_one') : selectedPeriod < 5 ? t('tariff.month_few') : t('tariff.month_many') })}</span>
+                  <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiTotalMonthlyPrice.toFixed(2)} ₽</span>
+                </div>
+                {discount > 0 && (
+                  <div className="flex justify-between items-center text-green-400">
+                    <span className="font-medium text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.discountPercent', { percent: Math.round(discount * 100) })}</span>
+                    <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">−{effectiveDiscountAmount.toFixed(2)} ₽</span>
+                  </div>
+                )}
+                <div className="border-t border-slate-700 mt-2 sm:mt-3 pt-2 sm:pt-3 flex justify-between items-center">
+                  <span className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">{t('tariff.total')}</span>
+                  <span className="text-blue-400 font-bold text-[clamp(1.5rem,1.3rem+1vw,2.25rem)] sm:text-2xl">{totalPrice.toFixed(2)} ₽</span>
+                </div>
+              </div>
+
+              {!confirmed && (
+                <p className="text-slate-400 text-sm text-center">
+                  {t('tariff.confirmHint')}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Подтверждение - Mobile First */}
           {confirmed && !paymentMode && (
             <div className="bg-blue-900/20 border border-blue-800 rounded-lg sm:rounded-xl p-3 sm:p-4">
@@ -605,7 +715,7 @@ const TariffSelectionModal = ({
                     {discount > 0 && <span className="text-green-400 ml-1">(со скидкой {Math.round(discount * 100)}%)</span>}
                   </>
                 )}
-                {isMulti && (
+                {(isMulti || isFixedTariff) && (
                   <>
                     {' '}на {selectedPeriod === 1 ? '1 месяц' :
                             selectedPeriod === 3 ? '3 месяца' :
