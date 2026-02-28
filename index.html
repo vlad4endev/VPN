@@ -94,6 +94,8 @@
       var p = (window.location.pathname || '').replace(/\/+$/, '');
       window.__IS_TMA_PATH__ = p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3);
       window.__TELEGRAM_INIT_DATA = null;
+      /** true = opened inside Telegram WebView (Mini App); false = opened in regular browser. Set before any auth attempt. */
+      window.__TMA_OPENED_IN_TELEGRAM__ = false;
       function applyTmaInit(reason) {
         var tg = window.Telegram && window.Telegram.WebApp;
         if (tg) {
@@ -160,6 +162,7 @@
         if (window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
           try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
         }
+        window.__TMA_OPENED_IN_TELEGRAM__ = (window.self !== window.top) || !!(window.__TELEGRAM_INIT_DATA && String(window.__TELEGRAM_INIT_DATA).trim());
       }
       applyTmaInit('boot');
       if (window.Telegram && window.Telegram.WebApp) {

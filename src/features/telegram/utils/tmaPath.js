@@ -29,17 +29,17 @@ export function isTmaPath(path) {
 }
 
 /**
- * Есть ли признаки того, что страница открыта внутри Telegram (Mini App / WebView),
- * а не в обычном браузере. Используется, чтобы не запускать авто-вход TMA и не крутить
- * «ожидание initData», когда пользователь зашёл на /t из Chrome/Safari (в т.ч. по ссылке с t.me).
- * Не используем referrer — ссылка с t.me, открытая в браузере, даёт referrer t.me, но это не Mini App.
+ * Открыто ли приложение внутри Telegram WebView (Mini App), а не в обычном браузере.
+ * Единый источник истины: устанавливается в index.html до загрузки React (applyTmaInit).
+ * Используйте для: не пытаться делать Telegram auth в браузере; показывать «Open from Telegram» + ссылку на бота.
  * @returns {boolean}
  */
-export function isLikelyInTelegramContext() {
+export function isOpenedInTelegramWebView() {
   if (typeof window === 'undefined') return false
-  // Страница в iframe — Mini App внутри клиента Telegram всегда в iframe/WebView
+  if (window.__TMA_OPENED_IN_TELEGRAM__ === true) return true
+  if (window.__TMA_OPENED_IN_TELEGRAM__ === false) return false
+  // Fallback если флаг не задан (тесты / SSR): iframe или наличие initData
   if (window.self !== window.top) return true
-  // initData уже есть — точно из Telegram (SDK уже передал данные)
   const fromWebApp = window.Telegram?.WebApp?.initData
   const fromGlobal = window.__TELEGRAM_INIT_DATA
   if (typeof fromWebApp === 'string' && fromWebApp.trim()) return true
@@ -47,4 +47,13 @@ export function isLikelyInTelegramContext() {
   return false
 }
 
-export default { isTmaPath, isLikelyInTelegramContext, normalizePath }
+/**
+ * Есть ли признаки того, что страница открыта внутри Telegram (Mini App / WebView).
+ * Совпадает с isOpenedInTelegramWebView (читает тот же флаг или ту же логику).
+ * @returns {boolean}
+ */
+export function isLikelyInTelegramContext() {
+  return isOpenedInTelegramWebView()
+}
+
+export default { isTmaPath, isOpenedInTelegramWebView, isLikelyInTelegramContext, normalizePath }
