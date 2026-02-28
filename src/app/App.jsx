@@ -1213,6 +1213,16 @@ export default function VPNServiceApp() {
     }
   }, [firebaseUser, view, currentUser?.role, setView])
 
+  // Страховка: если currentUser есть, но view всё ещё экран входа — принудительно переключаем в ЛК (обход гонок после Google/email входа)
+  useEffect(() => {
+    if (currentUser && (view === 'login' || view === 'register' || view === 'welcome')) {
+      const nextView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
+      setView(nextView)
+      if (currentUser.role !== 'admin') setDashboardTab('subscription')
+      logger.info('App', 'Переход в ЛК по currentUser (страховка)', { view, nextView, uid: currentUser.id })
+    }
+  }, [currentUser, view, setView])
+
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
 
