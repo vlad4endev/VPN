@@ -123,6 +123,20 @@ export function useSettings(currentUser, setError, setSuccess) {
     }
   }, [currentUser, settings, servers, setError, setSuccess])
 
+  // Условия тарифов (отображаются в ЛК под описанием). Ключи: super, multi, megamix, default
+  const handleTariffConditionChange = useCallback((tariffKey, value) => {
+    setSettings(prev => {
+      const base = prev || {}
+      return {
+        ...base,
+        tariffConditions: {
+          ...(base.tariffConditions || {}),
+          [tariffKey]: value,
+        },
+      }
+    })
+  }, [])
+
   return {
     settings,
     settingsLoading,
@@ -131,6 +145,7 @@ export function useSettings(currentUser, setError, setSuccess) {
     setServers,
     loadSettings,
     handleSaveSettings,
+    handleTariffConditionChange,
   }
 }
 

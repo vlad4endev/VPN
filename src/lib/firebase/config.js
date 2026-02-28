@@ -1,5 +1,5 @@
 import { initializeApp, getApp } from 'firebase/app'
-import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth'
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
 import { getDatabase } from 'firebase/database'
 
@@ -97,7 +97,6 @@ let app = null
 let auth = null
 let db = null
 let realtimeDb = null
-let googleProvider = null
 let appCheck = null
 let firebaseInitError = null
 
@@ -167,11 +166,6 @@ try {
       // Не устанавливаем firebaseInitError, так как это не критично
     }
     
-    googleProvider = new GoogleAuthProvider()
-    googleProvider.setCustomParameters({
-      prompt: 'select_account'
-    })
-
     // Realtime Database (опционально: задайте VITE_FIREBASE_DATABASE_URL в .env)
     const databaseURL = import.meta.env.VITE_FIREBASE_DATABASE_URL
     if (databaseURL && typeof databaseURL === 'string' && databaseURL.trim()) {
@@ -223,4 +217,4 @@ try {
 }
 
 // Экспортируем инициализированные объекты
-export { app, auth, db, getDb, realtimeDb, getRealtimeDb, googleProvider, appCheck, firebaseInitError, envValidation }
+export { app, auth, db, getDb, realtimeDb, getRealtimeDb, appCheck, firebaseInitError, envValidation }

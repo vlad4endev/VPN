@@ -13,8 +13,6 @@ const RegisterPage = ({
   onAuthModeRegister,
   onLogin,
   onRegister,
-  onGoogleSignIn,
-  googleSignInLoading,
 }) => {
   // Устанавливаем режим регистрации при монтировании
   useEffect(() => {
@@ -34,8 +32,6 @@ const RegisterPage = ({
       onAuthModeRegister={onAuthModeRegister}
       onLogin={onLogin}
       onRegister={onRegister}
-      onGoogleSignIn={onGoogleSignIn}
-      googleSignInLoading={googleSignInLoading}
       onSetView={() => {}} // Не используется в роутере
     />
   )

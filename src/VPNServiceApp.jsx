@@ -49,7 +49,7 @@ import { useUIStore } from './lib/store/uiStore.js'
 
 export default function VPNServiceApp() {
   // Инициализация Firebase через хук
-  const { app, auth, db, googleProvider, firebaseInitError, configError: firebaseConfigError, loading: firebaseLoading } = useFirebase()
+  const { app, auth, db, firebaseInitError, configError: firebaseConfigError, loading: firebaseLoading } = useFirebase()
   
   // Используем хуки для управления состоянием
   const appState = useAppState()
@@ -296,22 +296,37 @@ export default function VPNServiceApp() {
           logger.info('Tariffs', 'Созданы тарифы по умолчанию', { count: createdTariffs.length })
         }
       } else {
-        // Все активные тарифы (в т.ч. добавленные в админке) отображаются в выборе в личном кабинете
-        const activeTariffs = tariffsList
-          .filter(t => t.active !== false)
-          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        setTariffs(activeTariffs)
+        let list = tariffsList
+        if (currentUser?.role === 'admin') {
+          try {
+            const counts = await adminService.getTariffUsageCounts()
+            list = tariffsList.map(t => {
+              const c = counts[t.id]
+              return { ...t, usersCount: c?.users ?? 0, paymentsCount: c?.payments ?? 0 }
+            })
+          } catch (e) {
+            logger.error('Tariffs', 'Ошибка загрузки счётчиков тарифов', null, e)
+          }
+        }
+        const sorted = list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        setTariffs(sorted)
+        const activeCount = sorted.filter(t => t.active !== false).length
+        const nameCounts = sorted.reduce((acc, t) => {
+          const n = (t.name || t.plan || '—').toString()
+          acc[n] = (acc[n] || 0) + 1
+          return acc
+        }, {})
         logger.info('Tariffs', 'Загружены тарифы', {
-          total: tariffsList.length,
-          active: activeTariffs.length,
-          names: activeTariffs.map(t => t.name)
+          total: sorted.length,
+          active: activeCount,
+          byName: nameCounts
         })
       }
     } catch (err) {
       logger.error('Tariffs', 'Ошибка загрузки тарифов', null, err)
       setError('Ошибка загрузки тарифов')
     }
-  }, [db])
+  }, [db, currentUser?.role])
 
   // Загрузка данных при открытии админ-панели
   // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере
@@ -1502,37 +1517,28 @@ export default function VPNServiceApp() {
     }
   }, [db, tariffs, editingTariff])
 
-  // Удаление тарифа (запрещено для SUPER и MULTI)
+  // Полное удаление тарифа (любого, в т.ч. Super/Multi при 0 пользователей и 0 платежей)
   const handleDeleteTariff = useCallback(async (tariffId) => {
     const tariff = tariffs.find(t => t.id === tariffId)
     if (!tariff) return
 
-    // Проверяем, что это не SUPER или MULTI
-    const plan = tariff.plan?.toLowerCase()
-    const name = tariff.name?.toLowerCase()
-    if (plan === 'super' || plan === 'multi' || name === 'super' || name === 'multi') {
-      setError('Нельзя удалить тарифы SUPER и MULTI')
-      setTimeout(() => setError(''), 3000)
-      return
-    }
-
-    if (!db) return
-
-    if (!window.confirm('Вы уверены, что хотите удалить этот тариф?')) {
+    if (!window.confirm(`Удалить тариф «${tariff.name || tariff.plan || tariffId}» полностью? У пользователей и платежей с этим тарифом привязка будет сброшена.`)) {
       return
     }
 
     try {
-      const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tariffId)
-      await deleteDoc(tariffDoc)
-      setTariffs(tariffs.filter(t => t.id !== tariffId))
-      setSuccess('Тариф удален')
-      setTimeout(() => setSuccess(''), 3000)
+      const result = await adminService.deleteTariff(tariffId)
+      setTariffs(prev => prev.filter(t => t.id !== tariffId))
+      const msg = result.remappedUsers > 0 || result.remappedPayments > 0
+        ? `Тариф удален. Переназначено пользователей: ${result.remappedUsers}, платежей: ${result.remappedPayments}.`
+        : 'Тариф удален.'
+      setSuccess(msg)
+      setTimeout(() => setSuccess(''), 4000)
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
-      setError('Ошибка удаления тарифа')
+      setError(err?.message || 'Ошибка удаления тарифа')
     }
-  }, [db, tariffs])
+  }, [tariffs, setTariffs, setError, setSuccess])
 
   // Компонент Dashboard вынесен в отдельный файл src/components/Dashboard.jsx
   // Компонент AdminPanel вынесен в отдельный файл src/components/AdminPanel.jsx
@@ -1609,8 +1615,6 @@ export default function VPNServiceApp() {
           onAuthModeRegister={authHandlers.handleAuthModeRegister}
           onLogin={authHandlers.handleLogin}
           onRegister={authHandlers.handleRegister}
-          onGoogleSignIn={authHandlers.handleGoogleSignIn}
-          googleSignInLoading={authHandlers.googleSignInLoading}
         onSetView={setView}
       />
       </Suspense>
@@ -1719,6 +1723,7 @@ export default function VPNServiceApp() {
         onHandleTariffDurationDaysChange={adminHandlers.handleTariffDurationDaysChange}
         onHandleTariffActiveChange={adminHandlers.handleTariffActiveChange}
         onHandleTariffSubscriptionLinkChange={adminHandlers.handleTariffSubscriptionLinkChange}
+        onHandleTariffConditionChange={adminHandlers.handleTariffConditionChange}
         onHandleSaveUserCard={finalHandleSaveUserCard}
         onGenerateUUID={finalGenerateUUID}
         />

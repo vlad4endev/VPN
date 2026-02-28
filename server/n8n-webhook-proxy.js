@@ -691,7 +691,7 @@ function substituteTemplate(template, user, extra = {}) {
 }
 
 /** Единый APP_ID для Telegram router и артефактов; задаётся через process.env.APP_ID или один допустимый fallback. */
-const APP_ID = process.env.APP_ID || 'skypath'
+const APP_ID = process.env.APP_ID || 'skyputh'
 
 // Web Push (VAPID) — для уведомлений в фоне (тикеты поддержки)
 const VAPID_PUBLIC = (process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC || '').trim()
@@ -5011,8 +5011,8 @@ async function generatePaymentLinkLocal(body) {
   const merchantId = process.env.PLATEGA_MERCHANT_ID || null
   const secretKey = process.env.PLATEGA_SECRET_KEY || null
   const settings = await loadPaymentSettings()
-  const effectiveMerchantId = merchantId || settings.plategaMerchantId || null
-  const effectiveSecretKey = secretKey || settings.plategaSecretKey || null
+  const effectiveMerchantId = merchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
+  const effectiveSecretKey = secretKey || settings.plategaSecretKey || settings.platega_secret_key || null
 
   if (!effectiveMerchantId || !effectiveSecretKey) {
     console.log('ℹ️ Platega не настроен (PLATEGA_MERCHANT_ID / PLATEGA_SECRET_KEY или plategaMerchantId / plategaSecretKey в настройках). Создаём только заказ в Firestore.')

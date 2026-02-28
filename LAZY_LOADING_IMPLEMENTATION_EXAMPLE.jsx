@@ -48,7 +48,7 @@ export default function VPNServiceApp() {
   // ============================================
   // СУЩЕСТВУЮЩАЯ ЛОГИКА (без изменений)
   // ============================================
-  const { app, auth, db, googleProvider, firebaseInitError, configError: firebaseConfigError, loading: firebaseLoading } = useFirebase()
+  const { app, auth, db, firebaseInitError, configError: firebaseConfigError, loading: firebaseLoading } = useFirebase()
   const appState = useAppState()
   const { users, currentUser, error, success, loading, setUsers, setCurrentUser, setError, setSuccess, setLoading } = appState
   const { view, setView } = useView({ currentUser })
@@ -123,8 +123,6 @@ export default function VPNServiceApp() {
             onAuthModeRegister={authHandlers.handleAuthModeRegister}
             onLogin={authHandlers.handleLogin}
             onRegister={authHandlers.handleRegister}
-            onGoogleSignIn={authHandlers.handleGoogleSignIn}
-            googleSignInLoading={authHandlers.googleSignInLoading}
             onSetView={setView}
           />
         </Suspense>

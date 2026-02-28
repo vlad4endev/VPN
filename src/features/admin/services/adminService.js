@@ -327,8 +327,38 @@ export const adminService = {
   },
 
   /**
-   * Загрузка тарифов из Firestore
-   * @returns {Promise<Array>} Список тарифов
+   * Подсчёт пользователей и платежей по каждому тарифу
+   * @returns {Promise<Record<string, { users: number, payments: number }>>}
+   */
+  async getTariffUsageCounts() {
+    if (!db) throw new Error('База данных недоступна')
+
+    const counts = {}
+
+    const usersSnap = await getDocs(collection(db, `artifacts/${APP_ID}/public/data/users_v4`))
+    usersSnap.forEach((d) => {
+      const tid = d.data().tariffId
+      if (tid) {
+        counts[tid] = counts[tid] || { users: 0, payments: 0 }
+        counts[tid].users++
+      }
+    })
+
+    const paymentsSnap = await getDocs(collection(db, `artifacts/${APP_ID}/public/data/payments`))
+    paymentsSnap.forEach((d) => {
+      const tid = d.data().tariffId
+      if (tid) {
+        counts[tid] = counts[tid] || { users: 0, payments: 0 }
+        counts[tid].payments++
+      }
+    })
+
+    return counts
+  },
+
+  /**
+   * Загрузка тарифов из Firestore с количеством пользователей и платежей по каждому тарифу
+   * @returns {Promise<Array>} Список тарифов (с полями usersCount, paymentsCount)
    */
   async loadTariffs() {
     if (!db) {
@@ -339,14 +369,21 @@ export const adminService = {
       const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
       const tariffsSnapshot = await getDocs(tariffsCollection)
       const tariffsList = []
-      
+
       tariffsSnapshot.forEach((docSnapshot) => {
         tariffsList.push({
           id: docSnapshot.id,
           ...docSnapshot.data(),
         })
       })
-      
+
+      const usageCounts = await this.getTariffUsageCounts()
+      tariffsList.forEach((t) => {
+        const c = usageCounts[t.id]
+        t.usersCount = c?.users ?? 0
+        t.paymentsCount = c?.payments ?? 0
+      })
+
       logger.info('Admin', 'Тарифы загружены', { count: tariffsList.length })
       return tariffsList
     } catch (err) {
@@ -367,11 +404,11 @@ export const adminService = {
 
     try {
       const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
-      const data = {
+      const data = stripUndefinedForFirestore({
         ...tariffData,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      }
+      })
       const docRef = await addDoc(tariffsCollection, data)
       logger.info('Admin', 'Тариф создан', { tariffId: docRef.id })
       return { id: docRef.id, ...data }
@@ -382,7 +419,8 @@ export const adminService = {
   },
 
   /**
-   * Сохранение тарифа (обновление существующего)
+   * Сохранение тарифа (обновление существующего).
+   * Настройки объединённых тарифов (linkedTariffConfigs) хранятся только в этом тарифе, в исходные тарифы не записываются.
    * @param {string} tariffId - ID тарифа
    * @param {Object} tariffData - Данные тарифа
    * @returns {Promise<Object>} Сохраненные данные тарифа
@@ -407,22 +445,176 @@ export const adminService = {
   },
 
   /**
-   * Удаление тарифа
+   * Полное удаление тарифа: очистка привязок у пользователей, платежей и серверов, затем удаление документа.
    * @param {string} tariffId - ID тарифа
-   * @returns {Promise<void>}
+   * @returns {Promise<{ remappedUsers: number, remappedPayments: number }>}
    */
   async deleteTariff(tariffId) {
-    if (!db) {
-      throw new Error('База данных недоступна')
+    if (!db) throw new Error('База данных недоступна')
+
+    let remappedUsers = 0
+    let remappedPayments = 0
+
+    const usersRef = collection(db, `artifacts/${APP_ID}/public/data/users_v4`)
+    const usersSnap = await getDocs(usersRef)
+    for (const d of usersSnap.docs) {
+      const data = d.data()
+      if (data.tariffId === tariffId) {
+        await updateDoc(d.ref, {
+          tariffId: null,
+          tariffName: null,
+          plan: 'free',
+          updatedAt: new Date().toISOString(),
+        })
+        remappedUsers++
+      }
     }
 
-    try {
-      const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tariffId)
-      await deleteDoc(tariffDoc)
-      logger.info('Admin', 'Тариф удален', { tariffId })
-    } catch (err) {
-      logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
-      throw err
+    const paymentsRef = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+    const paymentsSnap = await getDocs(paymentsRef)
+    for (const d of paymentsSnap.docs) {
+      const data = d.data()
+      if (data.tariffId === tariffId) {
+        await updateDoc(d.ref, { tariffId: null })
+        remappedPayments++
+      }
+    }
+
+    const settingsRef = doc(db, `artifacts/${APP_ID}/public/settings`)
+    const settingsSnap = await getDoc(settingsRef)
+    if (settingsSnap.exists()) {
+      const data = settingsSnap.data()
+      const servers = data.servers || []
+      const newServers = servers.map((s) => ({
+        ...s,
+        tariffIds: Array.isArray(s.tariffIds) ? s.tariffIds.filter((id) => id !== tariffId) : [],
+      }))
+      const changed = newServers.some((s, i) => (s.tariffIds || []).length !== (servers[i].tariffIds || []).length)
+      if (changed) {
+        await updateDoc(settingsRef, { servers: newServers, updatedAt: new Date().toISOString() })
+      }
+    }
+
+    const tariffDoc = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tariffId)
+    await deleteDoc(tariffDoc)
+
+    logger.info('Admin', 'Тариф полностью удален', {
+      tariffId,
+      remappedUsers,
+      remappedPayments,
+    })
+    return { remappedUsers, remappedPayments }
+  },
+
+  /**
+   * Удаление дублей тарифов: объединяются только полностью одинаковые (название, план, цена, устройства, трафик, срок).
+   * Разные по цене/трафику тарифы с одним именем (например MULTI 3₽ и MULTI 250₽) сохраняются.
+   * Пользователи, платежи и серверы переназначаются на оставшийся документ в группе дублей.
+   * @returns {Promise<{ deleted: number, kept: number, remappedUsers: number, remappedPayments: number }>}
+   */
+  async deduplicateTariffs() {
+    if (!db) throw new Error('База данных недоступна')
+
+    const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
+    const snapshot = await getDocs(tariffsCollection)
+    const all = []
+    snapshot.forEach((d) => all.push({ id: d.id, ref: d.ref, ...d.data() }))
+
+    // Ключ полного совпадения: одинаковые параметры = один тариф, остальное — дубли
+    const key = (t) => [
+      (t.name || '').toString().trim(),
+      (t.plan || '').toString().toLowerCase().trim(),
+      Number(t.price),
+      Number(t.devices) || 0,
+      Number(t.trafficGB) || 0,
+      Number(t.durationDays) || 0,
+    ].join('|')
+    const groups = new Map()
+    for (const t of all) {
+      const k = key(t)
+      if (!groups.has(k)) groups.set(k, [])
+      groups.get(k).push(t)
+    }
+
+    const keepRefs = new Set()
+    const deleteIdToKeepId = {}
+    for (const [, list] of groups) {
+      if (list.length <= 1) {
+        keepRefs.add(list[0].id)
+        continue
+      }
+      // В группе дублей оставляем первый (по имени для стабильности), остальные — на удаление
+      const sorted = [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '') || a.id.localeCompare(b.id))
+      const keeper = sorted[0]
+      keepRefs.add(keeper.id)
+      for (let i = 1; i < sorted.length; i++) {
+        deleteIdToKeepId[sorted[i].id] = keeper.id
+      }
+    }
+
+    const toDeleteIds = Object.keys(deleteIdToKeepId)
+    if (toDeleteIds.length === 0) {
+      logger.info('Admin', 'Дублей тарифов нет')
+      return { deleted: 0, kept: all.length, remappedUsers: 0, remappedPayments: 0 }
+    }
+
+    const usersRef = collection(db, `artifacts/${APP_ID}/public/data/users_v4`)
+    const usersSnap = await getDocs(usersRef)
+    let remappedUsers = 0
+    for (const d of usersSnap.docs) {
+      const data = d.data()
+      const tid = data.tariffId
+      if (tid && deleteIdToKeepId[tid]) {
+        await updateDoc(d.ref, { tariffId: deleteIdToKeepId[tid], updatedAt: new Date().toISOString() })
+        remappedUsers++
+      }
+    }
+
+    const paymentsRef = collection(db, `artifacts/${APP_ID}/public/data/payments`)
+    const paymentsSnap = await getDocs(paymentsRef)
+    let remappedPayments = 0
+    for (const d of paymentsSnap.docs) {
+      const data = d.data()
+      const tid = data.tariffId
+      if (tid && deleteIdToKeepId[tid]) {
+        await updateDoc(d.ref, { tariffId: deleteIdToKeepId[tid] })
+        remappedPayments++
+      }
+    }
+
+    const settingsRef = doc(db, `artifacts/${APP_ID}/public/settings`)
+    const settingsSnap = await getDoc(settingsRef)
+    if (settingsSnap.exists()) {
+      const data = settingsSnap.data()
+      const servers = data.servers || []
+      let changed = false
+      const newServers = servers.map((s) => {
+        const ids = s.tariffIds || []
+        const mapped = ids.map((id) => deleteIdToKeepId[id] || id)
+        const newIds = [...new Set(mapped)]
+        if (newIds.length !== ids.length || newIds.some((id, i) => id !== ids[i])) changed = true
+        return { ...s, tariffIds: newIds }
+      })
+      if (changed) {
+        await updateDoc(settingsRef, { servers: newServers, updatedAt: new Date().toISOString() })
+      }
+    }
+
+    for (const id of toDeleteIds) {
+      await deleteDoc(doc(db, `artifacts/${APP_ID}/public/data/tariffs`, id))
+    }
+
+    logger.info('Admin', 'Дубли тарифов удалены', {
+      deleted: toDeleteIds.length,
+      kept: keepRefs.size,
+      remappedUsers,
+      remappedPayments,
+    })
+    return {
+      deleted: toDeleteIds.length,
+      kept: keepRefs.size,
+      remappedUsers,
+      remappedPayments,
     }
   },
 

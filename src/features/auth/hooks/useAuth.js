@@ -20,12 +20,10 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
   const {
     authMode,
     loginData,
-    googleSignInLoading,
     error,
     success,
     setAuthMode,
     setLoginData,
-    setGoogleSignInLoading,
     setError,
     setSuccess,
   } = useAuthState()
@@ -163,59 +161,6 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
     }
   }, [setError, setSuccess, setCurrentUser, setLoginData, setView, onSuccess, getAuthErrorMsg])
 
-  // Обработчик Google Sign-In
-  const handleGoogleSignIn = useCallback(async () => {
-    // Предотвращаем множественные одновременные запросы
-    if (googleSignInLoading) {
-      logger.warn('Auth', 'Попытка входа через Google, когда уже выполняется вход')
-      return
-    }
-
-    setError('')
-    setSuccess('')
-    setGoogleSignInLoading(true)
-
-    try {
-      const result = await authService.signInWithGoogle()
-      
-      setCurrentUser(result.userData)
-      setSuccess('Вход выполнен успешно')
-      setView(result.userData.role === 'admin' ? 'admin' : 'dashboard')
-      
-      // Запрашиваем разрешение на уведомления для существующих пользователей
-      try {
-        const notificationService = (await import('../../../shared/services/notificationService.js')).default
-        const notificationInstance = notificationService.getInstance()
-        // Запрашиваем только если разрешения еще нет
-        if (!notificationInstance.hasPermission()) {
-          await notificationInstance.requestPermission()
-          logger.info('Auth', 'Запрос разрешения на уведомления выполнен после входа через Google')
-        }
-      } catch (notificationError) {
-        logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
-        // Не блокируем вход из-за ошибки уведомлений
-      }
-      
-      if (onSuccess) {
-        onSuccess(result.userData)
-      }
-    } catch (err) {
-      logger.error('Auth', 'Ошибка входа через Google', null, err)
-      
-      // Специальная обработка для отмененных операций
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        // Не показываем ошибку, пользователь просто отменил вход
-        logger.info('Auth', 'Вход через Google отменен пользователем')
-        return
-      }
-      
-      const msg = getAuthErrorMsg(err)
-      if (msg) setError(msg)
-    } finally {
-      setGoogleSignInLoading(false)
-    }
-  }, [googleSignInLoading, setError, setSuccess, setCurrentUser, setView, onSuccess, setGoogleSignInLoading, getAuthErrorMsg])
-
   // Обработчик выхода
   const handleLogout = useCallback(async () => {
     try {
@@ -257,14 +202,12 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
     // State
     authMode,
     loginData,
-    googleSignInLoading,
     error,
     success,
     
     // Actions
     handleLogin,
     handleRegister,
-    handleGoogleSignIn,
     handleLogout,
     handleEmailChange,
     handlePasswordChange,

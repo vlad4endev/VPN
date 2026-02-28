@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Check, Loader2, AlertCircle, Clock, Tag } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import logger from '../../../shared/utils/logger.js'
@@ -23,10 +23,17 @@ const TariffSelectionModal = ({
   const [promoData, setPromoData] = useState(null) // { valid, discount, discountAmount, promocodeId, message }
   const [promoLoading, setPromoLoading] = useState(false)
   const [promoError, setPromoError] = useState(null)
+  // MegaMIX: доп. устройства к Super по 100 ₽/мес за каждое
+  const [megaMixExtraDevices, setMegaMixExtraDevices] = useState(0)
+
+  useEffect(() => {
+    setMegaMixExtraDevices(0)
+  }, [tariff?.id])
 
   const { t } = useTranslation()
   const isSuper = tariff?.name?.toLowerCase() === 'super' || tariff?.plan?.toLowerCase() === 'super'
   const isMulti = tariff?.name?.toLowerCase() === 'multi' || tariff?.plan?.toLowerCase() === 'multi'
+  const isMegaMix = (tariff?.name || '').toLowerCase() === 'megamix'
   // Остальные тарифы (добавленные в админке) — фиксированная цена за период, как MULTI
   const isFixedTariff = !isSuper && !isMulti
 
@@ -48,9 +55,12 @@ const TariffSelectionModal = ({
   
   // Для MULTI и прочих тарифов: фиксированная цена за месяц, итог = цена * период
   const multiBasePrice = tariff?.price || 0
-  const multiTotalMonthlyPrice = multiBasePrice * selectedPeriod
+  // MegaMIX: базовая цена + 100 ₽/мес за каждое доп. устройство к Super
+  const megaMixExtraPerMonth = 100
+  const megaMixMonthlyTotal = isMegaMix ? multiBasePrice + (megaMixExtraDevices * megaMixExtraPerMonth) : multiBasePrice
+  const multiTotalMonthlyPrice = (isMegaMix ? megaMixMonthlyTotal : multiBasePrice) * selectedPeriod
 
-  // Базовая цена: Super — по устройствам и периоду, остальные — фиксированная за период
+  // Базовая цена: Super — по устройствам и периоду, остальные — фиксированная за период (MegaMIX уже с доп. устройствами)
   const basePrice = isSuper ? totalMonthlyPrice : multiTotalMonthlyPrice
   const periodDiscount = selectedPeriod === 12 ? 0.1 : 0
   const periodDiscountAmount = periodDiscount > 0 ? basePrice * periodDiscount : 0
@@ -72,7 +82,7 @@ const TariffSelectionModal = ({
     setPromoError(null)
     setPromoData(null)
     try {
-      const baseForPromo = isSuper ? selectedDevices * devicePrice * selectedPeriod : multiBasePrice * selectedPeriod
+      const baseForPromo = isSuper ? selectedDevices * devicePrice * selectedPeriod : (isMegaMix ? megaMixMonthlyTotal : multiBasePrice) * selectedPeriod
       const res = await fetch('/api/promocodes/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -125,7 +135,8 @@ const TariffSelectionModal = ({
     // После выбора режима оплаты - вызываем обработчик
     const subscriptionData = {
       tariff,
-      devices: isSuper ? selectedDevices : (tariff?.devices || 1),
+      devices: isSuper ? selectedDevices : (isMegaMix ? 1 + megaMixExtraDevices : (tariff?.devices || 1)),
+      megaMixExtraDevices: isMegaMix ? megaMixExtraDevices : undefined,
       natrockPort: null,
       totalPrice: totalPrice,
       periodMonths: selectedPeriod,
@@ -165,7 +176,8 @@ const TariffSelectionModal = ({
     
     const subscriptionData = {
       tariff,
-      devices: isSuper ? selectedDevices : (tariff?.devices || 1),
+      devices: isSuper ? selectedDevices : (isMegaMix ? 1 + megaMixExtraDevices : (tariff?.devices || 1)),
+      megaMixExtraDevices: isMegaMix ? megaMixExtraDevices : undefined,
       natrockPort: null,
       totalPrice: totalPrice,
       periodMonths: selectedPeriod,
@@ -232,7 +244,8 @@ const TariffSelectionModal = ({
     
     const subscriptionData = {
       tariff,
-      devices: isSuper ? selectedDevices : (tariff?.devices || 1),
+      devices: isSuper ? selectedDevices : (isMegaMix ? 1 + megaMixExtraDevices : (tariff?.devices || 1)),
+      megaMixExtraDevices: isMegaMix ? megaMixExtraDevices : undefined,
       natrockPort: null,
       totalPrice: totalPrice,
       periodMonths: selectedPeriod,
@@ -586,9 +599,40 @@ const TariffSelectionModal = ({
             </div>
           )}
 
-          {/* Для остальных тарифов (добавленных в админке): период + фиксированная цена */}
+          {/* Для остальных тарифов (добавленные в админке): период + фиксированная цена; MegaMIX — доп. устройства к Super */}
           {isFixedTariff && (
             <div className="space-y-4">
+              {isMegaMix && (
+                <div>
+                  <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
+                    Доп. устройства к Super
+                  </label>
+                  <p className="text-slate-400 text-xs mb-2">+100 ₽/мес за каждое устройство — гибко настройте под себя</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => {
+                          setMegaMixExtraDevices(num)
+                          setConfirmed(false)
+                          setPaymentMode(null)
+                          setPromoData(null)
+                          setPromoError(null)
+                        }}
+                        disabled={isLoading || confirmed}
+                        className={`min-h-[40px] min-w-[44px] px-3 py-2 rounded-lg border-2 transition-all font-semibold text-sm ${
+                          megaMixExtraDevices === num
+                            ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                            : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        {num === 0 ? '0' : `+${num}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
                   {t('tariff.period')}
@@ -667,6 +711,12 @@ const TariffSelectionModal = ({
                   <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.pricePerMonth')}</span>
                   <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">{multiBasePrice} ₽</span>
                 </div>
+                {isMegaMix && megaMixExtraDevices > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Доп. устройства Super ({megaMixExtraDevices} × 100 ₽/мес)</span>
+                    <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">+{(megaMixExtraDevices * 100 * selectedPeriod).toFixed(0)} ₽</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.periodLabel')}</span>
                   <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}</span>

@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import PropTypes from 'prop-types'
 import { useTranslation } from 'react-i18next'
@@ -86,13 +86,48 @@ const AdminPanel = ({
   onHandleTariffActiveChange,
   onHandleTariffSubscriptionLinkChange = () => {},
   onHandleTariffLinkedTariffIdsChange = () => {},
+  onHandleDeduplicateTariffs = () => {},
   settings,
   onHandleAppLinkChange,
   onHandleSeoChange = () => {},
+  onHandleTariffConditionChange = () => {},
   onSetSuccess = () => {},
   onSetError = () => {},
   sidebarView, // для раздела «Аналитика»: передать 'analytics', чтобы в сайдбаре подсвечивался нужный пункт
 }) => {
+  const ctx = useAdminContext()
+  const onHandleDeduplicateTariffsEffective = ctx?.handleDeduplicateTariffs ?? onHandleDeduplicateTariffs
+  const onHandleTariffLinkedTariffIdsChangeEffective = ctx?.handleTariffLinkedTariffIdsChange ?? onHandleTariffLinkedTariffIdsChange
+  const onHandleAddLinkedTariff = ctx?.handleAddLinkedTariff ?? (() => {})
+  const onHandleRemoveLinkedTariff = ctx?.handleRemoveLinkedTariff ?? (() => {})
+  const onHandleUpdateLinkedTariffConfig = ctx?.handleUpdateLinkedTariffConfig ?? (() => {})
+  // Форма тарифа использует контекст, чтобы состояние и обработчики были из одного источника (иначе поля не редактируются)
+  const effectiveEditingTariff = ctx?.editingTariff ?? editingTariff
+  const effectiveSetEditingTariff = ctx?.setEditingTariff ?? onSetEditingTariff
+  const effectiveHandleTariffNameChange = ctx?.handleTariffNameChange ?? onHandleTariffNameChange
+  const effectiveHandleTariffPlanChange = ctx?.handleTariffPlanChange ?? onHandleTariffPlanChange
+  const effectiveHandleTariffPriceChange = ctx?.handleTariffPriceChange ?? onHandleTariffPriceChange
+  const effectiveHandleTariffDevicesChange = ctx?.handleTariffDevicesChange ?? onHandleTariffDevicesChange
+  const effectiveHandleTariffTrafficGBChange = ctx?.handleTariffTrafficGBChange ?? onHandleTariffTrafficGBChange
+  const effectiveHandleTariffDurationDaysChange = ctx?.handleTariffDurationDaysChange ?? onHandleTariffDurationDaysChange
+  const effectiveHandleTariffActiveChange = ctx?.handleTariffActiveChange ?? onHandleTariffActiveChange
+  const effectiveHandleTariffSubscriptionLinkChange = ctx?.handleTariffSubscriptionLinkChange ?? onHandleTariffSubscriptionLinkChange
+  const effectiveHandleSaveTariff = ctx?.handleSaveTariff ?? onHandleSaveTariff
+  const linkedConfigsSyncedRef = useRef(false)
+  useEffect(() => {
+    if (!effectiveEditingTariff || !tariffs?.length) return
+    const ids = effectiveEditingTariff.linkedTariffIds
+    const configs = effectiveEditingTariff.linkedTariffConfigs
+    if (Array.isArray(ids) && ids.length > 0 && (!Array.isArray(configs) || configs.length === 0) && !linkedConfigsSyncedRef.current) {
+      linkedConfigsSyncedRef.current = true
+      const built = ids.map(tariffId => {
+        const t = tariffs.find(x => x.id === tariffId)
+        return t ? { tariffId: t.id, subscriptionLink: (t.subscriptionLink || '').trim(), devices: Number(t.devices) || 1, trafficGB: Number(t.trafficGB) ?? 0 } : null
+      }).filter(Boolean)
+      if (built.length) effectiveSetEditingTariff({ ...effectiveEditingTariff, linkedTariffConfigs: built })
+    }
+    if (!effectiveEditingTariff.linkedTariffIds?.length) linkedConfigsSyncedRef.current = false
+  }, [effectiveEditingTariff?.id, effectiveEditingTariff?.linkedTariffIds?.length, tariffs?.length, effectiveSetEditingTariff])
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
     PropTypes.checkPropTypes(AdminPanelPropTypes, { 
@@ -108,7 +143,7 @@ const AdminPanel = ({
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
       onHandleTariffNameChange, onHandleTariffPlanChange, onHandleTariffPriceChange,
       onHandleTariffDevicesChange, onHandleTariffTrafficGBChange, onHandleTariffDurationDaysChange,
-      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, onHandleTariffLinkedTariffIdsChange, settings, onHandleAppLinkChange, onHandleSeoChange
+      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, onHandleTariffLinkedTariffIdsChange, onHandleDeduplicateTariffs, settings, onHandleAppLinkChange, onHandleSeoChange, onHandleTariffConditionChange
       // onHandleSaveUserCard и onGenerateUUID больше не передаются через пропсы - используются из контекста в UserCard
     }, 'prop', 'AdminPanel')
   }
@@ -798,6 +833,55 @@ const AdminPanel = ({
                 </div>
               )}
             </div>
+
+            {/* Блок 3: Описания и условия тарифов (отображаются в личном кабинете) */}
+            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
+              <div className="mb-4 sm:mb-5 md:mb-6">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-1.5 sm:mb-2 flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                  <span>Описания и условия тарифов</span>
+                </h2>
+                <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">
+                  Текст отображается в личном кабинете под описанием тарифа. Ключи: Super, MULTI, MegaMIX, для остальных — «По умолчанию».
+                </p>
+              </div>
+              {settingsLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-7 h-7 border-2 border-slate-600 border-t-blue-600 rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {[
+                    { key: 'super', label: 'Super' },
+                    { key: 'multi', label: 'MULTI' },
+                    { key: 'megamix', label: 'MegaMIX' },
+                    { key: 'default', label: 'По умолчанию (остальные тарифы)' },
+                  ].map(({ key, label }) => (
+                    <div key={key}>
+                      <label htmlFor={`tariff-condition-${key}`} className="block text-slate-300 text-sm font-medium mb-1.5">{label}</label>
+                      <textarea
+                        id={`tariff-condition-${key}`}
+                        rows={2}
+                        value={settings?.tariffConditions?.[key] ?? ''}
+                        onChange={(e) => onHandleTariffConditionChange(key, e.target.value)}
+                        className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[60px]"
+                        placeholder={key === 'default' ? 'Условия для тарифов без отдельной настройки' : `Условия тарифа ${label}`}
+                      />
+                    </div>
+                  ))}
+                  <div className="flex justify-end pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={onHandleSaveSettings}
+                      className="min-h-[40px] px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm flex items-center gap-2"
+                    >
+                      <Save className="w-4 h-4" />
+                      Сохранить настройки
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -825,109 +909,131 @@ const AdminPanel = ({
                 <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-1.5 sm:mb-2">Тарифы и цены</h2>
                 <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">Управление тарифными планами. Новые тарифы отображаются в выборе в личном кабинете.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => onSetEditingTariff({ id: 'default-new', name: '', plan: '', price: 0, devices: 1, trafficGB: 0, durationDays: 30, active: true, subscriptionLink: '' })}
-                className="min-h-[40px] px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2 touch-manipulation"
-                aria-label="Добавить тариф"
-              >
-                <PlusCircle className="w-4 h-4 flex-shrink-0" />
-                <span>Добавить тариф</span>
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onHandleDeduplicateTariffsEffective}
+                  className="min-h-[40px] px-4 py-2 bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2 touch-manipulation"
+                  aria-label="Объединить дубли тарифов"
+                  title="Объединить полностью одинаковые тарифы в один; пользователи и платежи привяжутся к оставшемуся"
+                >
+                  <Trash2 className="w-4 h-4 flex-shrink-0" />
+                  <span>Объединить дубли тарифов</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => effectiveSetEditingTariff({ id: 'default-new', name: '', plan: '', price: 0, devices: 1, trafficGB: 0, durationDays: 30, active: true, subscriptionLink: '', linkedTariffIds: [] })}
+                  className="min-h-[40px] px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2 touch-manipulation"
+                  aria-label="Добавить тариф"
+                >
+                  <PlusCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>Добавить тариф</span>
+                </button>
+              </div>
             </div>
 
-            {editingTariff && (
+            {effectiveEditingTariff && (
               <div className="mb-4 sm:mb-5 md:mb-6 p-4 sm:p-5 md:p-6 bg-slate-800 rounded-lg sm:rounded-xl border border-slate-700">
                 <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-slate-200 mb-3 sm:mb-4">
-                  {editingTariff.id && !editingTariff.id.startsWith('default-') ? 'Редактирование тарифа' : 'Новый тариф'}
+                  {effectiveEditingTariff.id && !effectiveEditingTariff.id.startsWith('default-') ? 'Редактирование тарифа' : 'Новый тариф'}
                 </h3>
+                {(() => {
+                  const isCombined = Array.isArray(effectiveEditingTariff?.linkedTariffConfigs) && effectiveEditingTariff.linkedTariffConfigs.length > 0
+                  return (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-name`} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">Название</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-name`} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">Название</label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-name`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-name`}
                       name="tariff-name"
                       type="text"
-                      value={editingTariff.name || ''}
-                      onChange={onHandleTariffNameChange}
+                      value={effectiveEditingTariff.name || ''}
+                      onChange={effectiveHandleTariffNameChange}
                       className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
                       placeholder="Премиум"
                     />
                   </div>
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-plan`} className="block text-slate-300 text-sm font-medium mb-2">План (ID)</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-plan`} className="block text-slate-300 text-sm font-medium mb-2">План (ID)</label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-plan`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-plan`}
                       name="tariff-plan"
                       type="text"
-                      value={editingTariff.plan || ''}
-                      onChange={onHandleTariffPlanChange}
+                      value={effectiveEditingTariff.plan || ''}
+                      onChange={effectiveHandleTariffPlanChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="premium"
                     />
                   </div>
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-price`} className="block text-slate-300 text-sm font-medium mb-2">Цена (руб.)</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-price`} className="block text-slate-300 text-sm font-medium mb-2">
+                      {isCombined ? 'Общая цена (руб.)' : 'Цена (руб.)'}
+                    </label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-price`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-price`}
                       name="tariff-price"
                       type="number"
                       min="0"
-                      value={editingTariff.price || 0}
-                      onChange={onHandleTariffPriceChange}
+                      value={effectiveEditingTariff.price ?? ''}
+                      onChange={effectiveHandleTariffPriceChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="500"
                     />
                   </div>
+                  {!isCombined && (
+                    <>
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-devices`} className="block text-slate-300 text-sm font-medium mb-2">Количество устройств</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-devices`} className="block text-slate-300 text-sm font-medium mb-2">Количество устройств</label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-devices`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-devices`}
                       name="tariff-devices"
                       type="number"
                       min="1"
-                      value={editingTariff.devices || 1}
-                      onChange={onHandleTariffDevicesChange}
+                      value={effectiveEditingTariff.devices || 1}
+                      onChange={effectiveHandleTariffDevicesChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="5"
                     />
                   </div>
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-traffic-gb`} className="block text-slate-300 text-sm font-medium mb-2">Трафик (GB, 0 = безлимит)</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-traffic-gb`} className="block text-slate-300 text-sm font-medium mb-2">Трафик (GB, 0 = безлимит)</label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-traffic-gb`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-traffic-gb`}
                       name="tariff-traffic-gb"
                       type="number"
                       min="0"
-                      value={editingTariff.trafficGB || 0}
-                      onChange={onHandleTariffTrafficGBChange}
+                      value={effectiveEditingTariff.trafficGB || 0}
+                      onChange={effectiveHandleTariffTrafficGBChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="0"
                     />
                   </div>
+                    </>
+                  )}
                   <div>
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-duration-days`} className="block text-slate-300 text-sm font-medium mb-2">Длительность (дней)</label>
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-duration-days`} className="block text-slate-300 text-sm font-medium mb-2">Длительность (дней)</label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-duration-days`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-duration-days`}
                       name="tariff-duration-days"
                       type="number"
                       min="1"
-                      value={editingTariff.durationDays || 30}
-                      onChange={onHandleTariffDurationDaysChange}
+                      value={effectiveEditingTariff.durationDays || 30}
+                      onChange={effectiveHandleTariffDurationDaysChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="30"
                     />
                   </div>
+                  {!isCombined && (
                   <div className="md:col-span-2">
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-subscription-link`} className="block text-slate-300 text-sm font-medium mb-2">
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-subscription-link`} className="block text-slate-300 text-sm font-medium mb-2">
                       Ссылка для подписок (без subId)
                     </label>
                     <input
-                      id={`tariff-${editingTariff.id || 'new'}-subscription-link`}
+                      id={`tariff-${effectiveEditingTariff.id || 'new'}-subscription-link`}
                       name="tariff-subscription-link"
                       type="url"
-                      value={editingTariff.subscriptionLink || ''}
-                      onChange={onHandleTariffSubscriptionLinkChange}
+                      value={effectiveEditingTariff.subscriptionLink || ''}
+                      onChange={effectiveHandleTariffSubscriptionLinkChange}
                       className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                       placeholder="https://subs.skypath.fun:3458/vk198/"
                     />
@@ -935,56 +1041,103 @@ const AdminPanel = ({
                       Введите ссылку без subId. При оформлении подписки к ней будет добавлен subId пользователя.
                     </p>
                   </div>
+                  )}
                   <div className="md:col-span-2">
                     <label className="block text-slate-300 text-sm font-medium mb-2">
                       Объединённые тарифы (2+ серверов)
                     </label>
                     <p className="text-slate-500 text-xs mb-2">
-                      Выберите тарифы по порядку: клиент будет создан на каждом сервере этих тарифов, пользователь получит ссылки на подписку для всех серверов.
+                      Цена — общая (указана выше). Выберите тарифы по порядку: подтянутся ссылки подписки, устройства и трафик; их можно изменить для каждого. Клиент создаётся на каждом сервере, пользователь получает ссылки на подписку для всех.
                     </p>
-                    <div className="flex flex-wrap gap-2">
-                      {tariffs.filter(t => t.id !== (editingTariff?.id)).map((t) => {
-                        const linked = Array.isArray(editingTariff.linkedTariffIds) && editingTariff.linkedTariffIds.includes(t.id)
-                        const orderIndex = linked ? editingTariff.linkedTariffIds.indexOf(t.id) + 1 : 0
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {tariffs.filter(t => t.id !== (effectiveEditingTariff?.id)).map((t) => {
+                        const configs = Array.isArray(effectiveEditingTariff?.linkedTariffConfigs) ? effectiveEditingTariff.linkedTariffConfigs : []
+                        const linked = configs.some(c => c.tariffId === t.id)
                         return (
                           <label key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/50 cursor-pointer hover:border-slate-500">
                             <input
                               type="checkbox"
                               checked={linked}
                               onChange={() => {
-                                const prev = Array.isArray(editingTariff.linkedTariffIds) ? [...editingTariff.linkedTariffIds] : []
-                                const next = linked ? prev.filter(id => id !== t.id) : [...prev, t.id]
-                                onHandleTariffLinkedTariffIdsChange(next)
+                                if (linked) onHandleRemoveLinkedTariff(t.id)
+                                else onHandleAddLinkedTariff(t)
                               }}
                               className="w-4 h-4 text-blue-600 rounded border-slate-600"
                             />
                             <span className="text-slate-200 text-sm">{t.name || t.plan}</span>
-                            {orderIndex > 0 && <span className="text-slate-500 text-xs">#{orderIndex}</span>}
                           </label>
                         )
                       })}
-                      {tariffs.filter(t => t.id !== (editingTariff?.id)).length === 0 && (
+                      {tariffs.filter(t => t.id !== (effectiveEditingTariff?.id)).length === 0 && (
                         <span className="text-slate-500 text-sm">Нет других тарифов для выбора</span>
                       )}
                     </div>
+                    {Array.isArray(effectiveEditingTariff?.linkedTariffConfigs) && effectiveEditingTariff.linkedTariffConfigs.length > 0 && (
+                      <div className="space-y-3 mt-3 p-3 rounded-lg border border-slate-600 bg-slate-800/30">
+                        <span className="text-slate-400 text-xs font-medium uppercase">Настройки по каждому тарифу (ссылка, устройства, трафик)</span>
+                        {effectiveEditingTariff.linkedTariffConfigs.map((cfg, idx) => {
+                          const t = tariffs.find(x => x.id === cfg.tariffId)
+                          const name = t?.name || t?.plan || cfg.tariffId
+                          return (
+                            <div key={cfg.tariffId} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end p-3 rounded-lg bg-slate-900/50 border border-slate-700">
+                              <div className="sm:col-span-12 flex items-center justify-between gap-2">
+                                <span className="text-slate-200 font-medium text-sm">#{idx + 1} {name}</span>
+                                <button type="button" onClick={() => onHandleRemoveLinkedTariff(cfg.tariffId)} className="text-red-400 hover:text-red-300 text-xs">Убрать</button>
+                              </div>
+                              <div className="sm:col-span-12">
+                                <label className="block text-slate-400 text-xs mb-1">Ссылка подписки</label>
+                                <input
+                                  type="url"
+                                  value={cfg.subscriptionLink || ''}
+                                  onChange={(e) => onHandleUpdateLinkedTariffConfig(cfg.tariffId, { subscriptionLink: e.target.value })}
+                                  placeholder="https://..."
+                                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-slate-200 text-sm"
+                                />
+                              </div>
+                              <div className="sm:col-span-4">
+                                <label className="block text-slate-400 text-xs mb-1">Устройства</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={cfg.devices ?? 1}
+                                  onChange={(e) => onHandleUpdateLinkedTariffConfig(cfg.tariffId, { devices: e.target.value })}
+                                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-slate-200 text-sm"
+                                />
+                              </div>
+                              <div className="sm:col-span-4">
+                                <label className="block text-slate-400 text-xs mb-1">Трафик (GB, 0 = безлимит)</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={cfg.trafficGB ?? 0}
+                                  onChange={(e) => onHandleUpdateLinkedTariffConfig(cfg.tariffId, { trafficGB: e.target.value })}
+                                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-slate-200 text-sm"
+                                />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                   <div className="md:col-span-2">
-                    <label htmlFor={`tariff-${editingTariff.id || 'new'}-active`} className="flex items-center gap-2">
+                    <label htmlFor={`tariff-${effectiveEditingTariff.id || 'new'}-active`} className="flex items-center gap-2">
                       <input
-                        id={`tariff-${editingTariff.id || 'new'}-active`}
+                        id={`tariff-${effectiveEditingTariff.id || 'new'}-active`}
                         name="tariff-active"
                         type="checkbox"
-                        checked={editingTariff.active !== false}
-                        onChange={onHandleTariffActiveChange}
+                        checked={effectiveEditingTariff.active !== false}
+                        onChange={effectiveHandleTariffActiveChange}
                         className="w-4 h-4 text-blue-600 bg-slate-900 border-slate-700 rounded focus:ring-blue-500"
                       />
                       <span className="text-slate-300 text-sm">Активен</span>
                     </label>
                   </div>
                 </div>
+                ); })()}
                 <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 mt-4 sm:mt-5">
                   <button
-                    onClick={() => onSetEditingTariff(null)}
+                    onClick={() => effectiveSetEditingTariff(null)}
                     className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                     aria-label="Отмена"
                   >
@@ -992,7 +1145,7 @@ const AdminPanel = ({
                     <span className="btn-text">Отмена</span>
                   </button>
                   <button
-                    onClick={() => onHandleSaveTariff(editingTariff)}
+                    onClick={() => effectiveHandleSaveTariff(effectiveEditingTariff)}
                     className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
                     aria-label="Сохранить тариф"
                   >
@@ -1037,6 +1190,14 @@ const AdminPanel = ({
                         <p className="text-slate-200 mt-0.5">{tariff.durationDays} дн.</p>
                       </div>
                       <div>
+                        <span className="text-xs font-medium text-slate-400 uppercase">Пользователи</span>
+                        <p className="text-slate-200 mt-0.5">{tariff.usersCount ?? 0}</p>
+                      </div>
+                      <div>
+                        <span className="text-xs font-medium text-slate-400 uppercase">Платежи</span>
+                        <p className="text-slate-200 mt-0.5">{tariff.paymentsCount ?? 0}</p>
+                      </div>
+                      <div>
                         <span className="text-xs font-medium text-slate-400 uppercase">Статус</span>
                         <div className="mt-0.5">
                           <span className={`px-2 py-1 rounded text-xs font-medium ${
@@ -1048,7 +1209,7 @@ const AdminPanel = ({
                       </div>
                       <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
                         <button
-                          onClick={() => onSetEditingTariff({ ...tariff })}
+                          onClick={() => effectiveSetEditingTariff({ ...tariff })}
                           className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] min-w-[32px] sm:min-w-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                           aria-label="Редактировать тариф"
                         >
@@ -1056,16 +1217,17 @@ const AdminPanel = ({
                           <span className="btn-text">Редактировать</span>
                         </button>
                         {(() => {
-                          const plan = tariff.plan?.toLowerCase()
-                          const name = tariff.name?.toLowerCase()
-                          const isSuperOrMulti = plan === 'super' || plan === 'multi' || name === 'super' || name === 'multi'
-                          
-                          if (!isSuperOrMulti && !tariff.id?.startsWith('default-')) {
+                          const users = Number(tariff.usersCount) || 0
+                          const payments = Number(tariff.paymentsCount) || 0
+                          const hasNoUsage = users === 0 && payments === 0
+                          const canDelete = !tariff.id?.startsWith('default-') && hasNoUsage
+                          if (canDelete) {
                             return (
                               <button
                                 onClick={() => onHandleDeleteTariff(tariff.id)}
                                 className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] min-w-[32px] sm:min-w-[40px] flex-1 sm:flex-initial px-2.5 sm:px-3 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                                 aria-label="Удалить тариф"
+                                title="Удалить тариф (0 пользователей, 0 платежей)"
                               >
                                 <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                                 <span className="btn-text">Удалить</span>
@@ -1093,6 +1255,8 @@ const AdminPanel = ({
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Устройства</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Трафик</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Длительность</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Пользователи</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Платежи</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Статус</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Действия</th>
                     </tr>
@@ -1108,6 +1272,8 @@ const AdminPanel = ({
                           {tariff.trafficGB === 0 ? 'Безлимит' : `${tariff.trafficGB} GB`}
                         </td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-slate-200">{tariff.durationDays} дн.</td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-slate-200">{tariff.usersCount ?? 0}</td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-slate-200">{tariff.paymentsCount ?? 0}</td>
                         <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                           <span className={`px-2 py-1 rounded text-xs font-medium ${
                             tariff.active ? 'bg-green-900/30 text-green-400' : 'bg-slate-700 text-slate-400'
@@ -1118,7 +1284,7 @@ const AdminPanel = ({
                         <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                             <button
-                              onClick={() => onSetEditingTariff({ ...tariff })}
+                              onClick={() => effectiveSetEditingTariff({ ...tariff })}
                               className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                               aria-label="Редактировать тариф"
                             >
@@ -1126,16 +1292,17 @@ const AdminPanel = ({
                               <span>Редактировать</span>
                             </button>
                             {(() => {
-                              const plan = tariff.plan?.toLowerCase()
-                              const name = tariff.name?.toLowerCase()
-                              const isSuperOrMulti = plan === 'super' || plan === 'multi' || name === 'super' || name === 'multi'
-                              
-                              if (!isSuperOrMulti && !tariff.id?.startsWith('default-')) {
+                              const users = Number(tariff.usersCount) || 0
+                              const payments = Number(tariff.paymentsCount) || 0
+                              const hasNoUsage = users === 0 && payments === 0
+                              const canDelete = !tariff.id?.startsWith('default-') && hasNoUsage
+                              if (canDelete) {
                                 return (
                                   <button
                                     onClick={() => onHandleDeleteTariff(tariff.id)}
                                     className="min-h-[32px] sm:min-h-[40px] px-2.5 sm:px-3 py-1.5 sm:py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 touch-manipulation"
                                     aria-label="Удалить тариф"
+                                    title="Удалить тариф (0 пользователей, 0 платежей)"
                                   >
                                     <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                                     <span>Удалить</span>

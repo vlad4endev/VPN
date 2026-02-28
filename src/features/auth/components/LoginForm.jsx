@@ -20,6 +20,7 @@ const AUTH_FALLBACKS = {
   'auth.password': 'Пароль',
   'auth.submitLogin': 'Войти',
   'auth.submitRegister': 'Зарегистрироваться',
+  'auth.forgotPassword': 'Забыли пароль?',
   'common.or': 'или',
 }
 
@@ -56,6 +57,7 @@ const LoginForm = ({
   onLogin,
   onRegister,
   onSetView,
+  onForgotPassword,
   onTelegramSignIn,
   onTelegramWidgetAuth,
   onTelegramWidgetError,
@@ -194,7 +196,18 @@ const LoginForm = ({
           )}
 
           <div className="space-y-2">
-            <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.password', forceFallbackLabels)}</label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor={`${authMode}-password`} className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.password', forceFallbackLabels)}</label>
+              {authMode === 'login' && onForgotPassword && (
+                <button
+                  type="button"
+                  onClick={onForgotPassword}
+                  className="text-xs font-semibold text-slate-400 hover:text-blue-400 transition-colors bg-transparent border-0 cursor-pointer p-0"
+                >
+                  {labelT(t, 'auth.forgotPassword', forceFallbackLabels)}
+                </button>
+              )}
+            </div>
             <input
               id={`${authMode}-password`}
               type="password"

@@ -13,8 +13,6 @@ const LoginPage = ({
   onAuthModeRegister,
   onLogin,
   onRegister,
-  onGoogleSignIn,
-  googleSignInLoading,
 }) => {
   // Устанавливаем режим входа при монтировании
   useEffect(() => {
@@ -34,8 +32,6 @@ const LoginPage = ({
       onAuthModeRegister={onAuthModeRegister}
       onLogin={onLogin}
       onRegister={onRegister}
-      onGoogleSignIn={onGoogleSignIn}
-      googleSignInLoading={googleSignInLoading}
       onSetView={() => {}} // Не используется в роутере
     />
   )

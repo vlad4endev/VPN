@@ -1352,6 +1352,9 @@ export const dashboardService = {
       paymentStatus = 'paid'
     }
 
+    // Тестовый период для лимита трафика (нужно до блока объединённого тарифа)
+    const isTestPeriodForTraffic = Boolean(testPeriod || paymentMode === 'pay_later')
+
     // Получаем активный сервер с сохраненной сессией из настроек
     let serverId = null
     let sessionCookie = null
@@ -1375,9 +1378,11 @@ export const dashboardService = {
         hasSettings: settingsSnapshot.exists()
       })
 
-      // Объединённый тариф: несколько серверов по очереди, несколько ссылок на подписку
+      // Объединённый тариф: несколько серверов по очереди, настройки и ссылка подписки для каждого; цена общая
+      const linkedConfigs = Array.isArray(tariff.linkedTariffConfigs) && tariff.linkedTariffConfigs.length > 0 ? tariff.linkedTariffConfigs : null
       const linkedIds = Array.isArray(tariff.linkedTariffIds) ? tariff.linkedTariffIds.filter(Boolean) : []
-      if (linkedIds.length > 0) {
+      let listToUse = linkedConfigs && linkedConfigs.length > 0 ? linkedConfigs : null
+      if (!listToUse && linkedIds.length > 0) {
         const linkedTariffs = []
         for (const tid of linkedIds) {
           const ref = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tid)
@@ -1387,15 +1392,29 @@ export const dashboardService = {
         if (linkedTariffs.length === 0) {
           throw new Error('Объединённый тариф: не найдены связанные тарифы. Проверьте настройки тарифа в админке.')
         }
+        listToUse = linkedTariffs.map(lt => ({
+          tariffId: lt.id,
+          subscriptionLink: (lt.subscriptionLink || '').trim(),
+          devices: finalDevices,
+          trafficGB: tariff.trafficGB ?? 0,
+          plan: (lt.plan || lt.name || '').toLowerCase() || undefined,
+        }))
+      }
+      const useConfigs = !!linkedConfigs && linkedConfigs.length > 0
 
+      if (listToUse && listToUse.length > 0) {
         const subscriptionLinks = []
         let firstUuid = null
         const webhookUrl = await loadWebhookUrl()
-        const totalGB = isTestPeriodForTraffic ? (3 * 1024 * 1024 * 1024) : (tariff.trafficGB > 0 ? tariff.trafficGB * 1024 * 1024 * 1024 : 0)
 
-        for (let i = 0; i < linkedTariffs.length; i++) {
-          const lt = linkedTariffs[i]
-          let serversForTariff = serversList.filter(s => (s.tariffIds || []).includes(lt.id))
+        for (let i = 0; i < listToUse.length; i++) {
+          const cfg = listToUse[i]
+          const tid = cfg.tariffId || cfg.id
+          const perDevices = useConfigs ? (Number(cfg.devices) || 1) : finalDevices
+          const perTrafficGB = useConfigs ? (Number(cfg.trafficGB) ?? 0) : (tariff.trafficGB ?? 0)
+          const totalGB = isTestPeriodForTraffic ? (3 * 1024 * 1024 * 1024) : (perTrafficGB > 0 ? perTrafficGB * 1024 * 1024 * 1024 : 0)
+
+          let serversForTariff = serversList.filter(s => (s.tariffIds || []).includes(tid))
           if (serversForTariff.length === 0) serversForTariff = serversList
           let server = null
           for (const s of serversForTariff) {
@@ -1414,7 +1433,7 @@ export const dashboardService = {
             }
           }
           if (!server) {
-            throw new Error(`Не найден активный сервер для тарифа «${lt.name || lt.id}». Настройте сервер в админке.`)
+            throw new Error(`Не найден активный сервер для тарифа (id: ${tid}). Настройте сервер в админке.`)
           }
 
           const perClientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -1423,10 +1442,12 @@ export const dashboardService = {
             return v.toString(16)
           })
           const serverInboundId = server.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID || '1'
+          // Формат как у одиночного тарифа, чтобы n8n получал и обрабатывал каждый вызов так же (webhook 1 раз для 1-го клиента, 2-й раз для 2-го)
           const addData = {
             operation: 'add_client',
-            category: 'combined_tariff',
+            category: 'new_subscription',
             timestamp: new Date().toISOString(),
+            testPeriod: !!testPeriod,
             userId: user.id,
             userUuid: perClientId,
             userName: user.name || user.email?.split('@')[0] || 'User',
@@ -1435,7 +1456,7 @@ export const dashboardService = {
             inboundId: parseInt(serverInboundId),
             totalGB,
             expiryTime: expiryTime,
-            limitIp: finalDevices,
+            limitIp: perDevices,
             clientId: perClientId,
             subId: user.subId || '',
             tgId: user.tgId || '',
@@ -1446,12 +1467,20 @@ export const dashboardService = {
             randompath: server.randompath || '',
             protocol: server.protocol || (server.serverPort === 443 || server.serverPort === 40919 ? 'https' : 'http'),
             subscriptionDetails: {
-              tariffName: lt.name || lt.plan || 'Unknown',
-              devices: finalDevices,
-              period: { months: finalPeriodMonths, expiryDate3xui: expiryTime, expiryDateIso: expiryTime > 0 ? new Date(expiryTime).toISOString() : null, expiryDateUnix: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0 },
+              tariffName: tariff.name || tariff.plan || 'Unknown',
+              devices: perDevices,
+              period: {
+                months: finalPeriodMonths,
+                expiryDate3xui: expiryTime,
+                expiryDateIso: expiryTime > 0 ? new Date(expiryTime).toISOString() : null,
+                expiryDateUnix: expiryTime > 0 ? Math.floor(expiryTime / 1000) : 0,
+              },
               userName: user.name || user.email?.split('@')[0] || 'User',
               profileUuid: perClientId,
             },
+            isCombinedTariff: true,
+            combinedTariffIndex: i + 1,
+            combinedTariffTotal: listToUse.length,
           }
           if (server.xuiUsername && server.xuiPassword && !addData.sessionCookie) {
             addData.xuiUsername = server.xuiUsername
@@ -1460,11 +1489,17 @@ export const dashboardService = {
           if (webhookUrl) addData.webhookUrl = webhookUrl
 
           const result = await xuiService.addClient(addData)
-          const linkBase = (lt.subscriptionLink && lt.subscriptionLink.trim()) ? lt.subscriptionLink.trim().replace(/\/$/, '') : 'https://subs.skypath.fun:3458/vk198'
+          const linkBase = (cfg.subscriptionLink && String(cfg.subscriptionLink).trim())
+            ? String(cfg.subscriptionLink).trim().replace(/\/$/, '')
+            : 'https://subs.skypath.fun:3458/vk198'
           subscriptionLinks.push(`${linkBase}/${user.subId || ''}`)
           if (i === 0) firstUuid = result?.vpnUuid || perClientId
         }
 
+        const subscriptionLinksWithPlan = listToUse.map((cfg, idx) => ({
+          link: subscriptionLinks[idx],
+          plan: (cfg.plan || '').toLowerCase() || (idx === 0 ? 'super' : 'multi'),
+        }))
         const primaryLink = subscriptionLinks[0]
         const userDoc = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
         await updateDoc(userDoc, {
@@ -1481,6 +1516,7 @@ export const dashboardService = {
           vpnLink: primaryLink,
           subscriptionLink: primaryLink,
           subscriptionLinks,
+          subscriptionLinksWithPlan,
           uuid: firstUuid,
           updatedAt: new Date().toISOString(),
         })
@@ -1490,7 +1526,7 @@ export const dashboardService = {
 
         logger.info('Dashboard', 'Объединённый тариф: клиенты созданы на всех серверах', {
           userId: user.id,
-          serversCount: linkedTariffs.length,
+          serversCount: listToUse.length,
           subscriptionLinksCount: subscriptionLinks.length,
         })
 
@@ -1507,6 +1543,7 @@ export const dashboardService = {
           vpnLink: primaryLink,
           subscriptionLink: primaryLink,
           subscriptionLinks,
+          subscriptionLinksWithPlan,
         }
       }
       
@@ -1761,8 +1798,6 @@ export const dashboardService = {
       })
     }
 
-    // Тестовый период для лимита трафика: явно при testPeriod или при pay_later (оплата позже = тест)
-    const isTestPeriodForTraffic = Boolean(testPeriod || paymentMode === 'pay_later')
     const TEST_PERIOD_TRAFFIC_BYTES = 3 * 1024 * 1024 * 1024 // 3 GB в байтах
 
     // Формируем категоризированные данные для n8n с маркировкой операции

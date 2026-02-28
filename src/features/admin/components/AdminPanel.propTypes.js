@@ -77,7 +77,8 @@ export const AdminPanelPropTypes = {
   }),
   onHandleAppLinkChange: PropTypes.func.isRequired,
   onHandleSeoChange: PropTypes.func,
-  
+  onHandleTariffConditionChange: PropTypes.func,
+
   // Тарифы
   tariffs: PropTypes.arrayOf(PropTypes.object).isRequired,
   editingTariff: PropTypes.object,

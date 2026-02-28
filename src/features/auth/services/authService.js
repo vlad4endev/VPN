@@ -1,12 +1,12 @@
-import { 
+import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
-  updateProfile
+  updateProfile,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore'
-import { auth, db, googleProvider } from '../../../lib/firebase/config.js'
+import { auth, db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
@@ -248,94 +248,6 @@ export const authService = {
   },
 
   /**
-   * Вход через Google
-   * @returns {Promise<Object>} Данные пользователя
-   */
-  async signInWithGoogle() {
-    if (!auth || !db || !googleProvider) {
-      throw new Error('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
-    }
-
-    logger.info('Auth', 'Попытка входа через Google')
-    
-    // Вход через Google
-    const result = await signInWithPopup(auth, googleProvider)
-    const firebaseUser = result.user
-    
-    // Проверяем, есть ли данные пользователя в Firestore по uid
-    let userData = await this.loadUserData(firebaseUser.uid)
-    
-    // Если данных нет - создаем нового пользователя
-    if (!userData) {
-      logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { 
-        uid: firebaseUser.uid, 
-        email: firebaseUser.email 
-      })
-      
-      // Генерируем UUID для нового пользователя
-      const generatedUUID = ThreeXUI.generateUUID()
-      logger.info('Auth', 'UUID сгенерирован для нового пользователя (Google)', { email: firebaseUser.email, uuid: generatedUUID })
-      
-      // Генерируем уникальный subId для нового пользователя
-      const generatedSubId = await generateUniqueSubId(db, APP_ID)
-      logger.info('Auth', 'Уникальный subId сгенерирован для нового пользователя (Google)', { email: firebaseUser.email, subId: generatedSubId })
-      
-      const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
-      const email = (firebaseUser.email || '').toLowerCase()
-      const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'
-      const newUserData = {
-        email,
-        login: email,
-        name: firebaseUser.displayName || '',
-        phone: '',
-        role: 'user',
-        plan: 'free',
-        uuid: generatedUUID,
-        subId: generatedSubId,
-        expiresAt: null,
-        tariffName: '',
-        tariffId: '',
-        photoURL: firebaseUser.photoURL || null,
-        language: uiLang,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      
-      await setDoc(userDocRef, newUserData)
-      userData = { id: firebaseUser.uid, ...newUserData }
-      logger.info('Firestore', 'Данные пользователя созданы в Firestore', { 
-        uid: firebaseUser.uid, 
-        email: firebaseUser.email
-      })
-    } else {
-      // Обновляем photoURL если изменился
-      if (firebaseUser.photoURL && userData.photoURL !== firebaseUser.photoURL) {
-        const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
-        await updateDoc(userDocRef, {
-          photoURL: firebaseUser.photoURL,
-          updatedAt: new Date().toISOString(),
-        })
-        userData.photoURL = firebaseUser.photoURL
-      }
-    }
-
-    // Объединяем данные Firebase Auth и Firestore
-    const currentUserData = {
-      ...userData,
-      email: firebaseUser.email || userData.email,
-      photoURL: firebaseUser.photoURL || userData.photoURL || null,
-      name: firebaseUser.displayName || userData.name || '',
-    }
-    
-    logger.info('Auth', 'Успешный вход через Google', { email: firebaseUser.email, uid: firebaseUser.uid, role: userData.role })
-    
-    return {
-      firebaseUser,
-      userData: currentUserData
-    }
-  },
-
-  /**
    * Выход
    */
   async signOut() {
@@ -401,6 +313,21 @@ export const authService = {
       'unavailable': 'Сервис временно недоступен. Попробуйте позже.',
     }
     return errorMessages[error.code] || error.message || 'Произошла ошибка. Попробуйте еще раз.'
+  },
+
+  /**
+   * Отправить письмо для сброса пароля на указанный email (Firebase Auth).
+   * @param {string} email - Email пользователя
+   * @returns {Promise<void>}
+   */
+  async sendPasswordResetEmail(email) {
+    if (!auth || !email || typeof email !== 'string') {
+      throw new Error('Email обязателен для сброса пароля')
+    }
+    const trimmed = email.trim()
+    if (!trimmed) throw new Error('Email обязателен для сброса пароля')
+    await firebaseSendPasswordResetEmail(auth, trimmed)
+    logger.info('Auth', 'Письмо для сброса пароля отправлено', { email: trimmed })
   },
 }
 

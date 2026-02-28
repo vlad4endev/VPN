@@ -11,6 +11,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
   const { t } = useTranslation()
   const [subscriptionLink, setSubscriptionLink] = useState(null)
   const [subscriptionLinksList, setSubscriptionLinksList] = useState(null)
+  const [subscriptionLinksWithPlan, setSubscriptionLinksWithPlan] = useState(null)
   const [loadingLink, setLoadingLink] = useState(true)
 
   // Проверяем наличие user
@@ -27,7 +28,11 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
   
   const subId = getSubId()
 
-  // Загружаем ссылку подписки: сначала из тарифа, затем из сохраненной, затем дефолтная
+  // Определяем платформу для выбора ссылки: телефон — Super, десктоп/ТВ — MULTI
+  const userPlatformForLink = useMemo(() => detectPlatform(), [])
+  const isMobileDevice = userPlatformForLink === 'android' || userPlatformForLink === 'ios'
+
+  // Загружаем ссылку подписки: subscriptionLinksWithPlan (Super/MULTI по устройству), затем несколько ссылок, тариф, дефолт
   useEffect(() => {
     const loadSubscriptionLink = async () => {
       if (!user || !subId) {
@@ -35,8 +40,25 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         return
       }
 
-      // Объединённый тариф: несколько ссылок на подписку (2+ серверов)
+      // Объединённый тариф со ссылками с планом: выбираем по устройству (телефон — Super, десктоп/ТВ — MULTI)
+      const withPlan = user.subscriptionLinksWithPlan && Array.isArray(user.subscriptionLinksWithPlan) && user.subscriptionLinksWithPlan.length > 0
+      if (withPlan) {
+        const superEntry = user.subscriptionLinksWithPlan.find(p => (p.plan || '').toLowerCase().includes('super'))
+        const multiEntry = user.subscriptionLinksWithPlan.find(p => (p.plan || '').toLowerCase().includes('multi'))
+        const primary = isMobileDevice
+          ? (superEntry?.link || user.subscriptionLinksWithPlan[0]?.link)
+          : (multiEntry?.link || user.subscriptionLinksWithPlan[0]?.link)
+        setSubscriptionLinksWithPlan(user.subscriptionLinksWithPlan)
+        setSubscriptionLinksList(user.subscriptionLinksWithPlan.map(p => p.link))
+        setSubscriptionLink(primary || user.subscriptionLinksWithPlan[0]?.link)
+        setLoadingLink(false)
+        return
+      }
+      setSubscriptionLinksWithPlan(null)
+
+      // Объединённый тариф: несколько ссылок на подписку (2+ серверов) без плана
       if (user.subscriptionLinks && Array.isArray(user.subscriptionLinks) && user.subscriptionLinks.length > 0) {
+        setSubscriptionLinksWithPlan(null)
         setSubscriptionLinksList(user.subscriptionLinks)
         setSubscriptionLink(user.subscriptionLinks[0])
         setLoadingLink(false)
@@ -55,6 +77,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
             if (tariff.subscriptionLink && tariff.subscriptionLink.trim()) {
               const baseLink = tariff.subscriptionLink.trim().replace(/\/$/, '')
               const linkFromTariff = `${baseLink}/${subId}`
+              setSubscriptionLinksWithPlan(null)
               setSubscriptionLinksList(null)
               setSubscriptionLink(linkFromTariff)
               setLoadingLink(false)
@@ -79,6 +102,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
         const savedLink = String(user.subscriptionLink).trim()
         // Проверяем, что ссылка содержит правильный формат
         if (savedLink.includes('subs.skypath.fun') || savedLink.startsWith('https://')) {
+          setSubscriptionLinksWithPlan(null)
           setSubscriptionLinksList(null)
           setSubscriptionLink(savedLink)
           setLoadingLink(false)
@@ -91,6 +115,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       
       // Если ссылка из тарифа и сохраненная не получены, используем дефолтную
       const defaultLink = `https://subs.skypath.fun:3458/vk198/${subId}`
+      setSubscriptionLinksWithPlan(null)
       setSubscriptionLinksList(null)
       setSubscriptionLink(defaultLink)
       setLoadingLink(false)
@@ -100,7 +125,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
     }
     
     loadSubscriptionLink()
-  }, [user?.tariffId, user?.subId, user?.subscriptionLink, user?.subscriptionLinks, subId])
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, subId, isMobileDevice])
 
   // Загружаем настройки для получения ссылок на приложения
   const [appLinks, setAppLinks] = useState(null)
@@ -225,9 +250,40 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
               <span>{userStatus.label}</span>
             </div>
           </div>
+          {/* Счётчик устройств */}
+          {(user?.devices != null || user?.devices === 0) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+              <span><strong className="text-slate-300">{t('keyModal.deviceLimit', 'Лимит устройств')}:</strong> {Number(user.devices) || 1}</span>
+              <span><strong className="text-slate-300">{t('keyModal.connectedDevices', 'Подключено')}:</strong> —</span>
+            </div>
+          )}
           <div className="space-y-2">
             <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">{t('app.subscriptionLinkLabel')}</p>
-            {subscriptionLinksList && subscriptionLinksList.length > 1 ? (
+            {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2 ? (
+              <div className="space-y-3">
+                <p className="text-slate-500 text-xs">{isMobileDevice ? t('keyModal.linkForPhone', 'Ссылка для телефона (Super) — ниже обе') : t('keyModal.linkForDesktop', 'Ссылка для десктопа и ТВ (MULTI) — ниже обе')}</p>
+                {subscriptionLinksWithPlan.map((item, idx) => {
+                  const label = (item.plan || '').toLowerCase().includes('super') ? 'Super (телефон)' : (item.plan || '').toLowerCase().includes('multi') ? 'MULTI (десктоп, ТВ)' : t('keyModal.serverLink', { n: idx + 1 })
+                  const link = item.link || item
+                  return (
+                    <div key={idx} className="space-y-1.5">
+                      <span className="text-slate-500 text-xs font-medium">{label}</span>
+                      <div className="bg-black/40 border border-slate-800 p-3 sm:p-4 rounded-xl break-all font-mono text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] sm:text-xs text-blue-400 word-break break-words">
+                        {link}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onCopy(link)}
+                        className="w-full min-h-[40px] py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 text-white"
+                        aria-label={t('dashboard.copyLinkAria')}
+                      >
+                        <Copy size={16} className="flex-shrink-0" /> {t('app.copyLink')}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : subscriptionLinksList && subscriptionLinksList.length > 1 ? (
               <div className="space-y-3">
                 <p className="text-slate-500 text-xs">{t('keyModal.multipleLinksHint', 'Ссылки на подписку для каждого сервера:')}</p>
                 {subscriptionLinksList.map((link, idx) => (

@@ -116,7 +116,8 @@ export function useAdmin({
     settingsLoading: settingsHook.settingsLoading,
     loadSettings: settingsHook.loadSettings,
     handleSaveSettings: settingsHook.handleSaveSettings,
-    
+    handleTariffConditionChange: settingsHook.handleTariffConditionChange,
+
     // Серверы
     servers: settingsHook.servers,
     editingServer: serversHook.editingServer,
@@ -169,6 +170,10 @@ export function useAdmin({
     handleTariffActiveChange: tariffsHook.handleTariffActiveChange,
     handleTariffSubscriptionLinkChange: tariffsHook.handleTariffSubscriptionLinkChange,
     handleTariffLinkedTariffIdsChange: tariffsHook.handleTariffLinkedTariffIdsChange,
+    handleAddLinkedTariff: tariffsHook.handleAddLinkedTariff,
+    handleRemoveLinkedTariff: tariffsHook.handleRemoveLinkedTariff,
+    handleUpdateLinkedTariffConfig: tariffsHook.handleUpdateLinkedTariffConfig,
+    handleDeduplicateTariffs: tariffsHook.handleDeduplicateTariffs,
 
     // Отзывы пользователей
     reviews: reviewsHook.reviews,

@@ -11,7 +11,6 @@ export function useAuthState() {
     password: '', 
     name: '' 
   })
-  const [googleSignInLoading, setGoogleSignInLoadingState] = useState(false)
   const [error, setErrorState] = useState('')
   const [success, setSuccessState] = useState('')
 
@@ -27,10 +26,6 @@ export function useAuthState() {
     }
   }, [])
 
-  const setGoogleSignInLoading = useCallback((loading) => {
-    setGoogleSignInLoadingState(loading)
-  }, [])
-
   const setError = useCallback((error) => {
     setErrorState(error)
   }, [])
@@ -43,14 +38,12 @@ export function useAuthState() {
     // State
     authMode,
     loginData,
-    googleSignInLoading,
     error,
     success,
     
     // Setters
     setAuthMode,
     setLoginData,
-    setGoogleSignInLoading,
     setError,
     setSuccess,
   }

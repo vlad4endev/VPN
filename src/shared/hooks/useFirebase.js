@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { app, auth, db, realtimeDb, googleProvider, firebaseInitError, envValidation } from '../../lib/firebase/config.js'
+import { app, auth, db, realtimeDb, firebaseInitError, envValidation } from '../../lib/firebase/config.js'
 import { getEnvErrorMessage } from '../utils/envValidation.js'
 import logger from '../utils/logger.js'
 
@@ -62,7 +62,6 @@ export function useFirebase() {
     auth,
     db,
     realtimeDb,
-    googleProvider,
     firebaseInitError,
     configError,
     loading,

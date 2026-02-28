@@ -11,12 +11,15 @@ service cloud.firestore {
     
     // Вспомогательная функция для проверки админа через Firestore (fallback).
     // Проверяем оба возможных appId (skyputh и skypathvpn), чтобы совпадать с бэкендом ensureAdmin().
+    // Роль проверяем как 'admin', так и 'Admin' (на случай разного регистра в данных).
     function isAdminFromFirestore() {
       return request.auth != null && (
         (exists(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'admin') ||
+         (get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/artifacts/skyputh/public/data/users_v4/$(request.auth.uid)).data.role == 'Admin')) ||
         (exists(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'admin')
+         (get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/artifacts/skypathvpn/public/data/users_v4/$(request.auth.uid)).data.role == 'Admin'))
       );
     }
     
@@ -142,14 +145,15 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/tariffs/{tariffId} {
       allow read: if request.auth != null;
       
-      // ВАЛИДАЦИЯ: Проверяем обязательные поля тарифа
+      // ВАЛИДАЦИЯ: обязательные поля — name, price; длительность — durationDays (или duration для совместимости)
       allow create: if request.auth != null && 
         (isAdmin() || isAdminFromFirestore()) &&
-        request.resource.data.keys().hasAll(['name', 'price', 'duration']) &&
+        request.resource.data.keys().hasAll(['name', 'price']) &&
         request.resource.data.name is string &&
         request.resource.data.name.size() > 0 &&
         request.resource.data.price is number &&
-        request.resource.data.duration is number;
+        (request.resource.data.keys().hasAny(['durationDays']) && request.resource.data.durationDays is number ||
+         request.resource.data.keys().hasAny(['duration']) && request.resource.data.duration is number);
       
       allow update: if request.auth != null && 
         (isAdmin() || isAdminFromFirestore()) &&
@@ -157,8 +161,8 @@ service cloud.firestore {
          (request.resource.data.name is string && request.resource.data.name.size() > 0)) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['price']) || 
          request.resource.data.price is number) &&
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['duration']) || 
-         request.resource.data.duration is number);
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['durationDays']) || 
+         request.resource.data.durationDays is number);
       
       allow delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());
     }

@@ -33,6 +33,7 @@ import SidebarNav from '../shared/components/Sidebar.jsx'
 import Footer from '../shared/components/Footer.jsx'
 import WelcomePage from '../shared/components/WelcomePage.jsx'
 import { useAdmin } from '../features/admin/hooks/useAdmin.js'
+import { adminService } from '../features/admin/services/adminService.js'
 import TransactionManager from '../features/vpn/services/TransactionManager.js'
 import { formatDate } from '../shared/utils/formatDate.js'
 import { formatTraffic } from '../shared/utils/formatTraffic.js'
@@ -465,6 +466,8 @@ export default function VPNServiceApp() {
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('')
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
   /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой). Определяется один раз при проверке на /t. */
   const [hasTmaInitData, setHasTmaInitData] = useState(false)
   const isTelegramApp = hasTmaInitData
@@ -875,65 +878,8 @@ export default function VPNServiceApp() {
               logger.debug('App', 'onAuthStateChanged: редирект с экрана входа', { nextView, role: effectiveRole })
             }
           } else {
-            // Данные не найдены — для Google создаём документ (fallback на случай гонки с popup)
-            if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
-              // Пользователь вошёл через Google, но документ не создан. Создаём документ и входим.
-              try {
-                // Повторно получаем Firestore перед операциями (избегаем doc() error при гонке/другом контексте модуля)
-                const dbForFallback = getDb()
-                if (!dbForFallback) {
-                  logger.warn('Auth', 'Firestore недоступен для fallback-создания пользователя после Google', { uid: firebaseUser.uid })
-                  setCurrentUser(null)
-                  return
-                }
-                logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback после Google)', { uid: firebaseUser.uid, email: firebaseUser.email })
-                const generatedUUID = ThreeXUI.generateUUID()
-                const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
-                const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                const newUserData = {
-                  email: firebaseUser.email || '',
-                  name: firebaseUser.displayName || '',
-                  phone: '',
-                  role: 'user',
-                  plan: 'free',
-                  uuid: generatedUUID,
-                  subId: generatedSubId,
-                  expiresAt: null,
-                  tariffName: '',
-                  tariffId: '',
-                  photoURL: firebaseUser.photoURL || null,
-                  language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                }
-                await setDoc(userDocRef, newUserData)
-                let effectiveRole = 'user'
-                const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
-                if (isAdminEmail(normalizedEmail)) {
-                  try {
-                    await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                    effectiveRole = 'admin'
-                  } catch (roleErr) {
-                    logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
-                  }
-                }
-                const currentUserData = {
-                  id: firebaseUser.uid,
-                  ...newUserData,
-                  email: firebaseUser.email || '',
-                  photoURL: firebaseUser.photoURL || null,
-                  name: firebaseUser.displayName || '',
-                  role: effectiveRole,
-                }
-                setCurrentUser(currentUserData)
-                setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-                logger.info('Auth', 'Вход через Google восстановлен в onAuthStateChanged', { uid: firebaseUser.uid, role: effectiveRole })
-              } catch (fallbackErr) {
-                logger.error('Auth', 'Ошибка fallback-создания пользователя после Google', { uid: firebaseUser.uid }, fallbackErr)
-                setCurrentUser(null)
-              }
-            } else {
-              try {
+            // Данные не найдены — пробуем кеш localStorage
+            try {
                 const savedUserStr = localStorage.getItem('vpn_current_user')
                 if (savedUserStr) {
                   const savedUser = JSON.parse(savedUserStr)
@@ -967,7 +913,6 @@ export default function VPNServiceApp() {
                 logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
                 setCurrentUser(null)
               }
-            }
           }
         } catch (err) {
           const isInvalidDb = err?.message?.includes('Expected first argument to collection()') || err?.message?.includes('Expected first argument to doc()')
@@ -1732,246 +1677,45 @@ export default function VPNServiceApp() {
     }
   }, [auth, db, generateUniqueSubId, referralCodePending, getAuthErrorMsg])
 
-  // Общая обработка успешного входа через Google (popup или redirect)
-  const processGoogleSignInUser = useCallback(async (firebaseUser) => {
-    let userData = await loadUserData(firebaseUser.uid)
-      if (!userData) {
-        logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { uid: firebaseUser.uid, email: firebaseUser.email })
-        const refCode = referralCodePending || getReferralCodePending(false)
-        let inviterId = null
-        if (refCode && refCode.trim()) {
-          inviterId = await resolveReferralCode(db, refCode.trim())
-          if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке (Google)', { inviterId })
-        }
-        const generatedUUID = ThreeXUI.generateUUID()
-        const generatedSubId = await generateUniqueSubId(db, appId)
-        const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-        const newUserData = {
-          email: firebaseUser.email || '',
-          name: firebaseUser.displayName || '',
-          phone: '',
-          role: 'user',
-          plan: 'free',
-          uuid: generatedUUID,
-          subId: generatedSubId,
-          expiresAt: null,
-          tariffName: '',
-          tariffId: '',
-          photoURL: firebaseUser.photoURL || null,
-          language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          ...(inviterId ? { referredBy: inviterId } : {}),
-        }
-        await setDoc(userDocRef, newUserData)
-        userData = { id: firebaseUser.uid, ...newUserData }
-        if (inviterId) {
-          try {
-            const idToken = await firebaseUser.getIdToken()
-            const bonusResult = await processReferralBonus(idToken, firebaseUser.uid, inviterId)
-            if (bonusResult.success) logger.info('Auth', 'Реферальный бонус отправлен на начисление (Google)', { inviterId })
-            else logger.warn('Auth', 'Реферальный бонус не начислен', { error: bonusResult.error })
-          } catch (bonusErr) {
-            logger.warn('Auth', 'Ошибка вызова начисления реферального бонуса', { inviterId }, bonusErr)
-          }
-          getReferralCodePending(true)
-          setReferralCodePending('')
-        }
-      } else {
-        if (!userData.subId) {
-          const generatedSubId = await generateUniqueSubId(db, appId)
-          const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-          await updateDoc(userDocRef, { subId: generatedSubId, updatedAt: new Date().toISOString() })
-          userData = { ...userData, subId: generatedSubId }
-        }
-        if (firebaseUser.photoURL && userData.photoURL !== firebaseUser.photoURL) {
-          const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-          await updateDoc(userDocRef, { photoURL: firebaseUser.photoURL, updatedAt: new Date().toISOString() })
-          userData = { ...userData, photoURL: firebaseUser.photoURL }
-        }
-      }
-      let effectiveRole = userData.role || 'user'
-      const normalizedEmail = (firebaseUser.email || userData.email || '').trim().toLowerCase()
-      if (isAdminEmail(normalizedEmail) && effectiveRole !== 'admin') {
-        try {
-          const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-          await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-          effectiveRole = 'admin'
-          logger.info('Auth', 'Пользователю выданы права администратора по email', { email: normalizedEmail })
-        } catch (roleErr) {
-          logger.error('Auth', 'Не удалось обновить роль до admin', { email: normalizedEmail }, roleErr)
-        }
-      }
-      const currentUserData = {
-        ...userData,
-        email: firebaseUser.email || userData.email,
-        photoURL: firebaseUser.photoURL || userData.photoURL || null,
-        name: firebaseUser.displayName || userData.name || '',
-        role: effectiveRole,
-      }
-      
-      // Добавляем задержку 300 мс для стабилизации Firestore-канала перед закрытием сессии
-      logger.debug('Auth', 'Ожидание стабилизации Firestore-канала (300 мс)', { uid: firebaseUser.uid })
-      await new Promise(resolve => setTimeout(resolve, 300))
-      
-      setCurrentUser(currentUserData)
-      applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
-      setSuccess('Вход выполнен успешно')
-      // Сразу переходим в ЛК (popup/redirect), не полагаясь только на onAuthStateChanged
-      setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-      if (effectiveRole !== 'admin') setDashboardTab('subscription')
-      logger.info('Auth', 'Успешный вход через Google, переход в ЛК', {
-        email: firebaseUser.email,
-        uid: firebaseUser.uid,
-        role: effectiveRole,
-      })
-  }, [db, loadUserData, generateUniqueSubId, referralCodePending])
-
-  // Вход через Google (popup): auth и provider создаём из того же firebase/auth (избегаем auth/argument-error при дублировании модуля)
-  const handleGoogleSignIn = useCallback(async () => {
-    if (!app || !db) {
-      setError(i18n.t('app.authUnavailable'))
-      return
-    }
-    if (googleSignInLoading) {
-      logger.warn('Auth', 'Попытка входа через Google, когда уже выполняется вход')
-      return
-    }
+  // Сброс пароля: отправить письмо на email (логин/email резолвится через API)
+  const handleForgotPasswordSubmit = useCallback(async (e) => {
+    e.preventDefault()
     setError('')
     setSuccess('')
-    setGoogleSignInLoading(true)
+    const raw = (forgotPasswordEmail || '').toString().trim()
+    if (!raw) {
+      setError(i18n.t('app.enterLoginOrEmail') || i18n.t('app.forgotPasswordEnterEmail'))
+      return
+    }
+    setForgotPasswordLoading(true)
+    let emailToUse = raw
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+    if (!raw.includes('@')) {
+      try {
+        const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(raw)}`)
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}))
+          if (data.email) emailToUse = data.email
+        }
+      } catch (_) {}
+    }
+    if (!emailToUse.includes('@')) {
+      setForgotPasswordLoading(false)
+      setError(i18n.t('app.forgotPasswordEnterEmail') || 'Введите email или логин, привязанный к аккаунту.')
+      return
+    }
     try {
-      logger.info('Auth', 'Открытие окна входа через Google')
-      const authInstance = getAuth(app)
-      const provider = new GoogleAuthProvider()
-      provider.setCustomParameters({ prompt: 'select_account' })
-      const result = await signInWithPopup(authInstance, provider)
-      await processGoogleSignInUser(result.user)
+      await authService.sendPasswordResetEmail(emailToUse)
+      setSuccess(i18n.t('app.forgotPasswordSent') || 'Ссылка для сброса пароля отправлена на вашу почту. Проверьте письмо.')
+      setForgotPasswordEmail('')
     } catch (err) {
-      const isUserClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request'
-      if (isUserClosed) {
-        // Попап может закрыться после успешного входа (расширения/автозаполнение закрывают окно). Ждём пользователя через onAuthStateChanged с таймаутом.
-        const POPUP_CLOSED_WAIT_MS = 2800
-        const user = await new Promise((resolve) => {
-          let resolved = false
-          const unsub = onAuthStateChanged(auth, (fbUser) => {
-            if (resolved) return
-            if (fbUser?.providerData?.some((p) => p?.providerId === 'google.com')) {
-              resolved = true
-              unsub()
-              resolve(fbUser)
-            }
-          })
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true
-              unsub()
-              resolve(null)
-            }
-          }, POPUP_CLOSED_WAIT_MS)
-        })
-        if (user) {
-          logger.info('Auth', 'Вход через Google завершён (popup закрыт, пользователь авторизован)', { uid: user.uid })
-          try {
-            await processGoogleSignInUser(user)
-          } catch (processErr) {
-            logger.error('Auth', 'Ошибка обработки пользователя после Google', { uid: user.uid }, processErr)
-            setError(i18n.t('app.loginError') || 'Ошибка входа. Попробуйте ещё раз.')
-          }
-        } else {
-          logger.debug('Auth', 'Вход через Google отменён пользователем (popup закрыт)')
-        }
-      } else {
-        logger.error('Auth', 'Ошибка входа через Google', null, err)
-        let errorMessage = 'Ошибка входа через Google. Попробуйте ещё раз.'
-        if (err?.code === 'auth/network-request-failed') {
-          errorMessage = 'Ошибка сети. Проверьте подключение к интернету.'
-        } else if (err?.code === 'auth/operation-not-allowed') {
-          errorMessage = 'Вход через Google не включен. Обратитесь к администратору.'
-        } else if (err?.code === 'auth/argument-error') {
-          errorMessage = 'Ошибка инициализации входа через Google. Обновите страницу и попробуйте снова.'
-        } else if (err?.code === 'auth/unauthorized-domain' || (err?.message && /requested action is invalid|invalid.*action/i.test(err.message))) {
-          const origin = typeof window !== 'undefined' ? window.location.origin : ''
-          errorMessage = `Вход через Google недоступен для этого сайта. Добавьте в Google Cloud Console (OAuth 2.0 → Authorized JavaScript origins) адрес: ${origin || 'ваш домен'}. Или нажмите «Войти через переход» ниже.`
-        } else if (err?.message) {
-          errorMessage = 'Ошибка входа через Google: ' + err.message
-        }
-        setError(errorMessage)
-      }
+      logger.error('Auth', 'Ошибка сброса пароля', { email: emailToUse }, err)
+      const msg = getAuthErrorMsg(err) || err?.message || i18n.t('app.forgotPasswordError')
+      setError(msg)
     } finally {
-      setGoogleSignInLoading(false)
+      setForgotPasswordLoading(false)
     }
-  }, [app, auth, db, processGoogleSignInUser, googleSignInLoading])
-
-  // Вход через Google через переход на страницу (redirect). В WebView (Telegram и др.) sessionStorage часто сбрасывается при редиректе → getRedirectResult даёт "missing initial state", поэтому в WebView используем popup.
-  const handleGoogleSignInRedirect = useCallback(() => {
-    if (!app || !db) {
-      setError(i18n.t('app.authUnavailable'))
-      return
-    }
-    if (googleSignInLoading) return
-    setError('')
-    setSuccess('')
-    setGoogleSignInLoading(true)
-    const authInstance = getAuth(app)
-    const provider = new GoogleAuthProvider()
-    provider.setCustomParameters({ prompt: 'select_account' })
-    signInWithRedirect(authInstance, provider)
-    // Страница перенаправится на Google, после входа вернётся сюда — результат обработает getRedirectResult
-  }, [app, db, googleSignInLoading])
-
-  // В WebView (Telegram.WebApp и др.) redirect часто ломается из‑за sessionStorage → используем popup как основной способ. В обычном браузере — redirect.
-  const handleGoogleSignInPrimary = useCallback(() => {
-    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      return handleGoogleSignIn()
-    }
-    return handleGoogleSignInRedirect()
-  }, [handleGoogleSignIn, handleGoogleSignInRedirect])
-
-  const handleGoogleSignInSecondary = useCallback(() => {
-    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      return handleGoogleSignInRedirect()
-    }
-    return handleGoogleSignIn()
-  }, [handleGoogleSignIn, handleGoogleSignInRedirect])
-
-  // Обработка возврата после входа через Google (redirect) — только на браузерном пути; на /t не трогаем, чтобы не конфликтовать с TMA
-  useEffect(() => {
-    if (!auth || typeof window === 'undefined') return
-    if (!isBrowserAuthPath()) return
-    getRedirectResult(auth)
-      .then(async (result) => {
-        if (!result?.user) return
-        setGoogleSignInLoading(true)
-        try {
-          await processGoogleSignInUser(result.user)
-          setSuccess(i18n.t('app.loginSuccess'))
-        } catch (err) {
-          logger.error('Auth', 'Ошибка после возврата с Google (redirect)', null, err)
-          setError(err?.message || i18n.t('app.loginError'))
-        } finally {
-          setGoogleSignInLoading(false)
-        }
-      })
-      .catch((err) => {
-        if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/unauthorized-domain') return
-        // sessionStorage очищен/недоступен после редиректа (Safari, блокировка third-party, IDP-initiated SAML и т.д.)
-        const isMissingState =
-          err?.code === 'auth/internal' ||
-          (typeof err?.message === 'string' && /missing initial state/i.test(err.message))
-        if (isMissingState) {
-          logger.debug('Auth', 'getRedirectResult: состояние входа потеряно (sessionStorage)', { code: err?.code })
-          setError(
-            typeof i18n.t('app.redirectSignInStateLost') === 'string' && i18n.t('app.redirectSignInStateLost')
-              ? i18n.t('app.redirectSignInStateLost')
-              : 'Сессия входа истекла или недоступна. Нажмите «Войти через Google» снова.'
-          )
-          setGoogleSignInLoading(false)
-          return
-        }
-        logger.error('Auth', 'getRedirectResult', null, err)
-      })
-  }, [auth, processGoogleSignInUser])
+  }, [forgotPasswordEmail, getAuthErrorMsg])
 
   // Обработка выхода
   const handleTelegramSignIn = useCallback(async () => {
@@ -2911,22 +2655,39 @@ export default function VPNServiceApp() {
           logger.info('Tariffs', 'Созданы тарифы по умолчанию', { count: createdTariffs.length })
         }
       } else {
-        // Все активные тарифы (в т.ч. добавленные в админке) отображаются в выборе в личном кабинете
-        const activeTariffs = tariffsList
-          .filter(t => t.active !== false)
+        let list = tariffsList
+        if (currentUser?.role === 'admin') {
+          try {
+            const counts = await adminService.getTariffUsageCounts()
+            list = tariffsList.map(t => {
+              const c = counts[t.id]
+              return { ...t, usersCount: c?.users ?? 0, paymentsCount: c?.payments ?? 0 }
+            })
+          } catch (e) {
+            logger.error('Tariffs', 'Ошибка загрузки счётчиков тарифов', null, e)
+          }
+        }
+        // В админке показываем все тарифы (и активные, и неактивные), чтобы можно было включить Super и др.
+        const sorted = list
           .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        setTariffs(activeTariffs)
+        setTariffs(sorted)
+        const activeCount = sorted.filter(t => t.active !== false).length
+        const nameCounts = sorted.reduce((acc, t) => {
+          const n = (t.name || t.plan || '—').toString()
+          acc[n] = (acc[n] || 0) + 1
+          return acc
+        }, {})
         logger.info('Tariffs', 'Загружены тарифы', {
-          total: tariffsList.length,
-          active: activeTariffs.length,
-          names: activeTariffs.map(t => t.name)
+          total: sorted.length,
+          active: activeCount,
+          byName: nameCounts
         })
       }
     } catch (err) {
       logger.error('Tariffs', 'Ошибка загрузки тарифов', null, err)
       setError('Ошибка загрузки тарифов')
     }
-  }, [db])
+  }, [db, currentUser?.role])
 
   // Загрузка данных при открытии админ-панели или раздела «Финансы»
   // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере
@@ -3041,6 +2802,20 @@ export default function VPNServiceApp() {
         seo: {
           ...(base.seo || DEFAULT_SEO),
           [field]: value,
+        },
+      }
+    })
+  }, [])
+
+  // Условия тарифов (отображаются в личном кабинете под описанием тарифа). Ключи: super, multi, megamix, default
+  const handleTariffConditionChange = useCallback((tariffKey, value) => {
+    setSettings(prev => {
+      const base = prev || {}
+      return {
+        ...base,
+        tariffConditions: {
+          ...(base.tariffConditions || {}),
+          [tariffKey]: value,
         },
       }
     })
@@ -4161,37 +3936,28 @@ export default function VPNServiceApp() {
     }
   }, [db, tariffs, editingTariff])
 
-  // Удаление тарифа (запрещено для SUPER и MULTI)
+  // Полное удаление тарифа (любого, в т.ч. Super/Multi при 0 пользователей и 0 платежей)
   const handleDeleteTariff = useCallback(async (tariffId) => {
     const tariff = tariffs.find(t => t.id === tariffId)
     if (!tariff) return
 
-    // Проверяем, что это не SUPER или MULTI
-    const plan = tariff.plan?.toLowerCase()
-    const name = tariff.name?.toLowerCase()
-    if (plan === 'super' || plan === 'multi' || name === 'super' || name === 'multi') {
-      setError('Нельзя удалить тарифы SUPER и MULTI')
-      setTimeout(() => setError(''), 3000)
-      return
-    }
-
-    if (!db) return
-
-    if (!window.confirm('Вы уверены, что хотите удалить этот тариф?')) {
+    if (!window.confirm(`Удалить тариф «${tariff.name || tariff.plan || tariffId}» полностью? У пользователей и платежей с этим тарифом привязка будет сброшена.`)) {
       return
     }
 
     try {
-      const tariffDoc = doc(db, `artifacts/${appId}/public/data/tariffs`, tariffId)
-      await deleteDoc(tariffDoc)
-      setTariffs(tariffs.filter(t => t.id !== tariffId))
-      setSuccess('Тариф удален')
-      setTimeout(() => setSuccess(''), 3000)
+      const result = await adminService.deleteTariff(tariffId)
+      setTariffs(prev => prev.filter(t => t.id !== tariffId))
+      const msg = result.remappedUsers > 0 || result.remappedPayments > 0
+        ? `Тариф удален. Переназначено пользователей: ${result.remappedUsers}, платежей: ${result.remappedPayments}.`
+        : 'Тариф удален.'
+      setSuccess(msg)
+      setTimeout(() => setSuccess(''), 4000)
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления тарифа', { tariffId }, err)
-      setError('Ошибка удаления тарифа')
+      setError(err?.message || 'Ошибка удаления тарифа')
     }
-  }, [db, tariffs])
+  }, [tariffs, setTariffs, setError, setSuccess])
 
   // Компонент Dashboard вынесен в отдельный файл src/components/Dashboard.jsx
   // Компонент AdminPanel вынесен в отдельный файл src/components/AdminPanel.jsx
@@ -4501,6 +4267,55 @@ export default function VPNServiceApp() {
     )
   }
 
+  // Экран «Забыли пароль»: email/логин → resolve-login при необходимости → sendPasswordResetEmail
+  if (view === 'forgot-password') {
+    return (
+      <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+          <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 shadow-2xl backdrop-blur-xl">
+            <h2 className="text-2xl sm:text-3xl font-black text-white mb-2 tracking-tight italic">{i18n.t('app.forgotPasswordTitle') || 'Восстановление пароля'}</h2>
+            <p className="text-slate-500 text-sm mb-6">{i18n.t('app.forgotPasswordDescription') || 'Введите email или логин — мы отправим ссылку для сброса пароля.'}</p>
+            {error && (
+              <div className="mb-4 p-4 bg-red-900/30 border border-red-800 rounded-2xl text-red-300 text-sm font-medium">{error}</div>
+            )}
+            {success && (
+              <div className="mb-4 p-4 bg-green-900/30 border border-green-800 rounded-2xl text-green-300 text-sm font-medium">{success}</div>
+            )}
+            <form onSubmit={handleForgotPasswordSubmit}>
+              <label htmlFor="forgot-email" className="block text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest mb-2">{i18n.t('app.forgotPasswordEmailLabel') || 'Email или логин'}</label>
+              <input
+                id="forgot-email"
+                type="text"
+                autoComplete="username email"
+                value={forgotPasswordEmail}
+                onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base mb-4"
+                placeholder={i18n.t('app.loginOrEmailPlaceholder') || 'логин, email или ID'}
+              />
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  type="submit"
+                  disabled={forgotPasswordLoading}
+                  className="flex-1 min-h-[48px] bg-blue-600 hover:bg-blue-500 disabled:opacity-60 py-3 rounded-2xl font-black text-white transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  {forgotPasswordLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+                  {i18n.t('app.forgotPasswordSubmit') || 'Отправить ссылку'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setView('login'); setError(''); setSuccess(''); setForgotPasswordEmail(''); }}
+                  className="min-h-[48px] px-4 py-3 rounded-2xl font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition-all border border-slate-700"
+                >
+                  {i18n.t('auth.backToLogin') || 'Назад к входу'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Если view === login или register
   if (view === 'login' || view === 'register') {
     // В Telegram Mini App: пока ждём авто-вход (до 6 с), показываем загрузку вместо формы
@@ -4528,11 +4343,13 @@ export default function VPNServiceApp() {
           onAuthModeRegister={handleAuthModeRegister}
           onLogin={handleLogin}
           onRegister={handleRegister}
-          onGoogleSignIn={handleGoogleSignInPrimary}
-          onGoogleSignInRedirect={handleGoogleSignInSecondary}
-          googleSecondaryLabelKey="auth.googlePopup"
-          googleSignInLoading={googleSignInLoading}
           onSetView={setView}
+          onForgotPassword={() => {
+            setForgotPasswordEmail(loginData.email || '')
+            setView('forgot-password')
+            setError('')
+            setSuccess('')
+          }}
           onTelegramSignIn={undefined}
           onTelegramWidgetAuth={undefined}
           onTelegramWidgetError={undefined}
@@ -4691,6 +4508,7 @@ export default function VPNServiceApp() {
           settings={settings}
           onHandleAppLinkChange={handleAppLinkChange}
           onHandleSeoChange={handleSeoChange}
+          onHandleTariffConditionChange={handleTariffConditionChange}
         />
       </AdminViewWithContext>
       </Suspense>
@@ -4794,6 +4612,7 @@ export default function VPNServiceApp() {
           settings={settings}
           onHandleAppLinkChange={handleAppLinkChange}
           onHandleSeoChange={handleSeoChange}
+          onHandleTariffConditionChange={handleTariffConditionChange}
         />
       </AdminViewWithContext>
       </Suspense>

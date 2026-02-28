@@ -8,6 +8,7 @@ import { detectPlatform, getPlatformInfo } from '../../../shared/utils/detectPla
 const SubscriptionSuccessModal = ({ 
   vpnLink, 
   subscriptionLinks: subscriptionLinksProp = null,
+  subscriptionLinksWithPlan: subscriptionLinksWithPlanProp = null,
   onClose, 
   onCopy,
   tariffName = '',
@@ -29,28 +30,51 @@ const SubscriptionSuccessModal = ({
   const [copied, setCopied] = useState(false)
   const [subscriptionLink, setSubscriptionLink] = useState(vpnLink || null)
   const [subscriptionLinksList, setSubscriptionLinksList] = useState(subscriptionLinksProp && Array.isArray(subscriptionLinksProp) ? subscriptionLinksProp : null)
+  const [subscriptionLinksWithPlan, setSubscriptionLinksWithPlan] = useState(subscriptionLinksWithPlanProp && Array.isArray(subscriptionLinksWithPlanProp) ? subscriptionLinksWithPlanProp : null)
   const [checkingPayment, setCheckingPayment] = useState(false)
   const [checkPaymentMessage, setCheckPaymentMessage] = useState('')
 
-  // Объединённый тариф: несколько ссылок из пропса или user
+  // Определяем платформу для выбора ссылки: телефон — Super, десктоп/ТВ — MULTI
+  const userPlatform = useMemo(() => detectPlatform(), [])
+  const isMobileDevice = userPlatform === 'android' || userPlatform === 'ios'
+
+  // Объединённый тариф: subscriptionLinksWithPlan (с планом) или несколько ссылок из пропса/user
   useEffect(() => {
+    const withPlan = subscriptionLinksWithPlanProp && Array.isArray(subscriptionLinksWithPlanProp) && subscriptionLinksWithPlanProp.length > 0
+      ? subscriptionLinksWithPlanProp
+      : (user?.subscriptionLinksWithPlan && Array.isArray(user.subscriptionLinksWithPlan) && user.subscriptionLinksWithPlan.length > 0 ? user.subscriptionLinksWithPlan : null)
+    if (withPlan && withPlan.length > 0) {
+      setSubscriptionLinksWithPlan(withPlan)
+      const superEntry = withPlan.find(p => (p.plan || '').toLowerCase().includes('super'))
+      const multiEntry = withPlan.find(p => (p.plan || '').toLowerCase().includes('multi'))
+      const primary = isMobileDevice
+        ? (superEntry?.link || withPlan[0]?.link)
+        : (multiEntry?.link || withPlan[0]?.link)
+      setSubscriptionLink(primary || null)
+      setSubscriptionLinksList(withPlan.map(p => p.link))
+      return
+    }
     if (subscriptionLinksProp && Array.isArray(subscriptionLinksProp) && subscriptionLinksProp.length > 0) {
+      setSubscriptionLinksWithPlan(null)
       setSubscriptionLinksList(subscriptionLinksProp)
       setSubscriptionLink(subscriptionLinksProp[0])
       return
     }
     if (user?.subscriptionLinks && Array.isArray(user.subscriptionLinks) && user.subscriptionLinks.length > 0) {
+      setSubscriptionLinksWithPlan(null)
       setSubscriptionLinksList(user.subscriptionLinks)
       setSubscriptionLink(user.subscriptionLinks[0])
       return
     }
+    setSubscriptionLinksWithPlan(null)
     setSubscriptionLinksList(null)
-  }, [subscriptionLinksProp, user?.subscriptionLinks])
+  }, [subscriptionLinksWithPlanProp, subscriptionLinksProp, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, isMobileDevice])
 
-  // Загружаем правильную ссылку на подписку с учетом тарифа
+  // Загружаем правильную ссылку на подписку с учетом тарифа (не перезаписываем, если уже есть subscriptionLinksWithPlan)
   useEffect(() => {
     const loadSubscriptionLink = async () => {
       if (subscriptionLinksList?.length > 0) return
+      if (subscriptionLinksWithPlan?.length > 0) return
       if (!user) {
         setSubscriptionLink(vpnLink || null)
         return
@@ -118,7 +142,7 @@ const SubscriptionSuccessModal = ({
     }
 
     loadSubscriptionLink()
-  }, [user?.tariffId, user?.subId, user?.subscriptionLink, vpnLink, user, subscriptionLinksList?.length])
+  }, [user?.tariffId, user?.subId, user?.subscriptionLink, vpnLink, user, subscriptionLinksList?.length, subscriptionLinksWithPlan?.length])
 
   const handleCopy = () => {
     if (onCopy && subscriptionLink) {
@@ -208,8 +232,7 @@ const SubscriptionSuccessModal = ({
     loadAppLinks()
   }, [])
 
-  // Определяем платформу пользователя
-  const userPlatform = useMemo(() => detectPlatform(), [])
+  // Информация о платформе для кнопок скачивания (userPlatform уже определён выше)
   const platformInfo = useMemo(() => getPlatformInfo(userPlatform), [userPlatform])
 
   // Функция для получения ссылки на приложение для конкретной платформы
@@ -454,13 +477,49 @@ const SubscriptionSuccessModal = ({
           </div>
           )}
 
-          {/* Ссылка на подписку - одна или несколько (объединённый тариф) */}
+          {/* Счётчик устройств (лимит и подключено) */}
+          {!requiresPayment && devices != null && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
+              <span><strong className="text-slate-300">Лимит устройств:</strong> {Number(devices) || 1}</span>
+              <span><strong className="text-slate-300">Подключено:</strong> —</span>
+            </div>
+          )}
+
+          {/* Ссылка на подписку - одна или две с подписью Super/MULTI (объединённый тариф) */}
           {!requiresPayment && subscriptionLink && (
             <div className="space-y-2">
             <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium">
-              {subscriptionLinksList && subscriptionLinksList.length > 1 ? 'Ссылки на подписку (по одной на каждый сервер):' : 'Ваша ссылка на подписку (скопируйте ссылку):'}
+              {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2
+                ? (isMobileDevice ? 'Ссылка для телефона (Super)' : 'Ссылка для десктопа и ТВ (MULTI)') + ' — ниже обе:'
+                : subscriptionLinksList && subscriptionLinksList.length > 1
+                  ? 'Ссылки на подписку (по одной на каждый сервер):'
+                  : 'Ваша ссылка на подписку (скопируйте ссылку):'}
             </label>
-            {subscriptionLinksList && subscriptionLinksList.length > 1 ? (
+            {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2 ? (
+              <div className="space-y-3">
+                {subscriptionLinksWithPlan.map((item, idx) => {
+                  const label = (item.plan || '').toLowerCase().includes('super') ? 'Super (телефон)' : (item.plan || '').toLowerCase().includes('multi') ? 'MULTI (десктоп, ТВ)' : `Сервер ${idx + 1}`
+                  const link = item.link || item
+                  return (
+                    <div key={idx} className="flex flex-col gap-1.5">
+                      <span className="text-slate-500 text-xs font-medium">{label}</span>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 rounded-lg overflow-x-auto">
+                          <code className="text-blue-400 text-xs font-mono break-all">{link}</code>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { onCopy(link); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                          className="min-h-[40px] px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2"
+                        >
+                          <Copy size={16} /> Копировать
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : subscriptionLinksList && subscriptionLinksList.length > 1 ? (
               <div className="space-y-3">
                 {subscriptionLinksList.map((link, idx) => (
                   <div key={idx} className="flex flex-col gap-1.5">
