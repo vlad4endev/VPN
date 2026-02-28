@@ -4467,6 +4467,67 @@ app.get('/api/admin/errors', async (req, res) => {
 })
 
 /**
+ * POST /api/admin/auth/unlink-google — отвязать вход через Google у всех пользователей Firebase Auth (только админ).
+ * Для пользователей с несколькими провайдерами отвязывается только Google.
+ * Для пользователей только с Google: задаётся временный пароль, затем отвязывается Google; в ответе — ссылки для сброса пароля (отправьте пользователям).
+ */
+app.post('/api/admin/auth/unlink-google', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!admin) return res.status(503).json({ success: false, error: 'Firebase Admin недоступен' })
+
+  const dryRun = req.body?.dryRun === true
+  const results = { unlinked: 0, onlyGoogle: [], errors: [] }
+  let pageToken = undefined
+
+  try {
+    do {
+      const listResult = await admin.auth().listUsers(1000, pageToken)
+      pageToken = listResult.pageToken
+
+      for (const userRecord of listResult.users) {
+        const uid = userRecord.uid
+        const email = userRecord.email || ''
+        const providers = (userRecord.providerData || []).map((p) => p.providerId)
+        if (!providers.includes('google.com')) continue
+
+        const onlyGoogle = providers.length === 1
+        try {
+          if (onlyGoogle) {
+            const tempPassword = crypto.randomBytes(12).toString('hex')
+            if (!dryRun) {
+              await admin.auth().updateUser(uid, { password: tempPassword })
+              await admin.auth().updateUser(uid, { providersToUnlink: ['google.com'] })
+              const resetLink = await admin.auth().generatePasswordResetLink(email, { url: (req.body?.continueUrl || process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').trim() || undefined })
+              results.onlyGoogle.push({ uid, email, temporaryPassword: tempPassword, resetLink })
+            } else {
+              results.onlyGoogle.push({ uid, email, dryRun: true })
+            }
+          } else {
+            if (!dryRun) await admin.auth().updateUser(uid, { providersToUnlink: ['google.com'] })
+          }
+          results.unlinked++
+        } catch (err) {
+          results.errors.push({ uid, email, error: err.message })
+        }
+      }
+    } while (pageToken)
+
+    return res.json({
+      success: true,
+      dryRun,
+      unlinked: results.unlinked,
+      onlyGoogleCount: results.onlyGoogle.length,
+      onlyGoogle: results.onlyGoogle,
+      errors: results.errors,
+    })
+  } catch (err) {
+    console.error('❌ POST /api/admin/auth/unlink-google:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
  * Внутренняя функция: уведомить пользователя об ответе поддержки (Telegram + Web Push).
  * baseUrl — корень приложения для ссылки в уведомлении (опционально).
  */

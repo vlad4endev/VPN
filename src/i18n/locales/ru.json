@@ -265,7 +265,7 @@
     "forgotPasswordSent": "Ссылка для сброса пароля отправлена на вашу почту. Проверьте письмо.",
     "forgotPasswordEnterEmail": "Введите email или логин, привязанный к аккаунту.",
     "forgotPasswordError": "Не удалось отправить письмо. Проверьте email или попробуйте позже.",
-    "invalidCredentialEmail": "Неверный пароль или этот email привязан к входу через Google. Войдите через кнопку «Google».",
+    "invalidCredentialEmail": "Неверный пароль или этот email привязан к Google. Войдите через кнопку «Google» или восстановите пароль ниже.",
     "telegramSignInTimeout": "Превышено время ожидания. Откройте снова из бота.",
     "telegramMiniTitle": "Личный кабинет в Telegram",
     "telegramMiniOpenInBot": "Откройте эту ссылку из меню бота в Telegram — тогда вы войдёте в кабинет по своему Telegram ID автоматически.",

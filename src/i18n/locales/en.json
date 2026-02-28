@@ -264,7 +264,7 @@
     "forgotPasswordSent": "A password reset link has been sent to your email. Check your inbox.",
     "forgotPasswordEnterEmail": "Enter the email or login linked to your account.",
     "forgotPasswordError": "Could not send the email. Check the address or try again later.",
-    "invalidCredentialEmail": "Wrong password or this email uses Google sign-in. Use the Google button to sign in.",
+    "invalidCredentialEmail": "Wrong password or this email uses Google sign-in. Use the Google button or reset your password below.",
     "telegramSignInTimeout": "Request timed out. Open again from the bot.",
     "telegramMiniTitle": "Personal cabinet in Telegram",
     "telegramMiniOpenInBot": "Open this link from the bot menu in Telegram to sign in automatically with your Telegram ID.",

@@ -1258,8 +1258,9 @@ export default function VPNServiceApp() {
         ? i18n.t('app.invalidCredentialEmail')
         : getAuthErrorMsg(err)
       if (msg) setError(msg)
+      if (err?.code === 'auth/invalid-credential' && (loginData?.email || loginOrEmail)) setForgotPasswordEmail(loginData?.email || loginOrEmail)
     }
-  }, [auth, db, getAuthErrorMsg])
+  }, [auth, db, getAuthErrorMsg, loginData?.email])
 
   // Обработка регистрации через Firebase Auth
   const handleRegister = useCallback(async (e) => {
