@@ -7,6 +7,10 @@ import {
   onAuthStateChanged,
   updateProfile,
   getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
 } from 'firebase/auth'
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc, setDoc, getDoc, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'
 import { Shield, LogOut, Copy, Trash2, Globe, CheckCircle2, XCircle, AlertCircle, Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, Zap, Check, PlusCircle, Smartphone, Cpu, Database, Activity, ChevronRight, User, CreditCard, History, Phone, Network, Link2, TestTube, Loader2, Star, Quote, Lock, Gauge, MessageCircle, FileCheck, ShieldCheck, Sparkles } from 'lucide-react'
@@ -463,6 +467,7 @@ export default function VPNServiceApp() {
   const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
   const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
+  const [googleSignInLoading, setGoogleSignInLoading] = useState(false)
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('')
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
   /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой). Определяется один раз при проверке на /t. */
@@ -1426,6 +1431,154 @@ export default function VPNServiceApp() {
       setError(msg || i18n.t('app.registerError'))
     }
   }, [auth, db, generateUniqueSubId, referralCodePending, getAuthErrorMsg])
+
+  // Вход через Google: общая обработка пользователя (загрузка/создание в Firestore, setCurrentUser, переход в ЛК)
+  const processGoogleSignInUser = useCallback(async (firebaseUser) => {
+    let userData = await loadUserData(firebaseUser.uid)
+    if (!userData) {
+      logger.info('Auth', 'Создание нового пользователя в Firestore после Google Sign-In', { uid: firebaseUser.uid, email: firebaseUser.email })
+      const refCode = referralCodePending || getReferralCodePending(false)
+      let inviterId = null
+      if (refCode?.trim()) {
+        inviterId = await resolveReferralCode(db, refCode.trim())
+        if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке (Google)', { inviterId })
+      }
+      const generatedUUID = ThreeXUI.generateUUID()
+      const generatedSubId = await generateUniqueSubId(db, appId)
+      const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+      const newUserData = {
+        email: firebaseUser.email || '',
+        name: firebaseUser.displayName || '',
+        phone: '',
+        role: 'user',
+        plan: 'free',
+        uuid: generatedUUID,
+        subId: generatedSubId,
+        expiresAt: null,
+        tariffName: '',
+        tariffId: '',
+        photoURL: firebaseUser.photoURL || null,
+        language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        ...(inviterId ? { referredBy: inviterId } : {}),
+      }
+      await setDoc(userDocRef, newUserData)
+      userData = { id: firebaseUser.uid, ...newUserData }
+      if (inviterId) {
+        try {
+          const idToken = await firebaseUser.getIdToken()
+          const bonusResult = await processReferralBonus(idToken, firebaseUser.uid, inviterId)
+          if (bonusResult.success) logger.info('Auth', 'Реферальный бонус отправлен (Google)', { inviterId })
+        } catch (bonusErr) {
+          logger.warn('Auth', 'Ошибка начисления реферального бонуса (Google)', { inviterId }, bonusErr)
+        }
+        getReferralCodePending(true)
+        setReferralCodePending('')
+      }
+    } else {
+      if (!userData.subId) {
+        const generatedSubId = await generateUniqueSubId(db, appId)
+        const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+        await updateDoc(userDocRef, { subId: generatedSubId, updatedAt: new Date().toISOString() })
+        userData = { ...userData, subId: generatedSubId }
+      }
+      if (firebaseUser.photoURL && userData.photoURL !== firebaseUser.photoURL) {
+        const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+        await updateDoc(userDocRef, { photoURL: firebaseUser.photoURL, updatedAt: new Date().toISOString() })
+        userData = { ...userData, photoURL: firebaseUser.photoURL }
+      }
+    }
+    let effectiveRole = userData.role || 'user'
+    const normalizedEmail = (firebaseUser.email || userData.email || '').trim().toLowerCase()
+    if (isAdminEmail(normalizedEmail) && effectiveRole !== 'admin') {
+      try {
+        const userDocRef = doc(db, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+        await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
+        effectiveRole = 'admin'
+      } catch (roleErr) {
+        logger.error('Auth', 'Не удалось выдать admin по email (Google)', { email: normalizedEmail }, roleErr)
+      }
+    }
+    const currentUserData = {
+      ...userData,
+      email: firebaseUser.email || userData.email,
+      photoURL: firebaseUser.photoURL || userData.photoURL || null,
+      name: firebaseUser.displayName || userData.name || '',
+      role: effectiveRole,
+    }
+    await new Promise(r => setTimeout(r, 300))
+    setCurrentUser(currentUserData)
+    applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
+    setSuccess(i18n.t('app.loginSuccess'))
+    setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+    if (effectiveRole !== 'admin') setDashboardTab('subscription')
+    logger.info('Auth', 'Успешный вход через Google', { uid: firebaseUser.uid, role: effectiveRole })
+  }, [db, loadUserData, generateUniqueSubId, referralCodePending])
+
+  const handleGoogleSignInRedirect = useCallback(() => {
+    if (!auth || !db) {
+      setError(i18n.t('app.authUnavailable'))
+      return
+    }
+    if (googleSignInLoading) return
+    setError('')
+    setSuccess('')
+    setGoogleSignInLoading(true)
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
+    signInWithRedirect(auth, provider)
+  }, [auth, db, googleSignInLoading])
+
+  const handleGoogleSignIn = useCallback(async () => {
+    if (!auth || !db) {
+      setError(i18n.t('app.authUnavailable'))
+      return
+    }
+    if (googleSignInLoading) return
+    setError('')
+    setSuccess('')
+    setGoogleSignInLoading(true)
+    try {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const result = await signInWithPopup(auth, provider)
+      await processGoogleSignInUser(result.user)
+    } catch (err) {
+      const isUserClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request'
+      if (!isUserClosed) {
+        logger.error('Auth', 'Ошибка входа через Google', null, err)
+        const msg = err?.code === 'auth/unauthorized-domain'
+          ? (i18n.t('app.unauthorizedDomain') || 'Домен не добавлен в настройки Google OAuth.')
+          : (err?.message || i18n.t('app.loginError'))
+        setError(msg)
+      }
+    } finally {
+      setGoogleSignInLoading(false)
+    }
+  }, [auth, db, processGoogleSignInUser, googleSignInLoading])
+
+  useEffect(() => {
+    if (!auth) return
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!result?.user) return
+        setGoogleSignInLoading(true)
+        try {
+          await processGoogleSignInUser(result.user)
+          setSuccess(i18n.t('app.loginSuccess'))
+        } catch (err) {
+          logger.error('Auth', 'Ошибка после возврата с Google (redirect)', null, err)
+          setError(err?.message || i18n.t('app.loginError'))
+        } finally {
+          setGoogleSignInLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/unauthorized-domain') return
+        logger.error('Auth', 'getRedirectResult', null, err)
+      })
+  }, [auth, processGoogleSignInUser])
 
   // Сброс пароля: отправить письмо на email (логин/email резолвится через API)
   const handleForgotPasswordSubmit = useCallback(async (e) => {
@@ -3893,6 +4046,10 @@ export default function VPNServiceApp() {
             setError('')
             setSuccess('')
           }}
+          onGoogleSignIn={handleGoogleSignInRedirect}
+          onGoogleSignInRedirect={handleGoogleSignIn}
+          googleSecondaryLabelKey="auth.googlePopup"
+          googleSignInLoading={googleSignInLoading}
           onTelegramSignIn={undefined}
           onTelegramWidgetAuth={undefined}
           onTelegramWidgetError={undefined}
