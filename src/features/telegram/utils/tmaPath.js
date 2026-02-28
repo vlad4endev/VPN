@@ -30,18 +30,16 @@ export function isTmaPath(path) {
 
 /**
  * Есть ли признаки того, что страница открыта внутри Telegram (Mini App / WebView),
- * а не в обычном браузере по прямой ссылке. Используется, чтобы не запускать авто-вход TMA
- * и не крутить «ожидание initData», когда пользователь зашёл на /t из Chrome/Safari.
+ * а не в обычном браузере. Используется, чтобы не запускать авто-вход TMA и не крутить
+ * «ожидание initData», когда пользователь зашёл на /t из Chrome/Safari (в т.ч. по ссылке с t.me).
+ * Не используем referrer — ссылка с t.me, открытая в браузере, даёт referrer t.me, но это не Mini App.
  * @returns {boolean}
  */
 export function isLikelyInTelegramContext() {
   if (typeof window === 'undefined') return false
-  // Страница в iframe — типично для Mini App внутри клиента Telegram
+  // Страница в iframe — Mini App внутри клиента Telegram всегда в iframe/WebView
   if (window.self !== window.top) return true
-  // Переход с t.me или telegram.org — открыли из бота/клиента
-  const ref = (typeof document !== 'undefined' && document.referrer) ? document.referrer : ''
-  if (/^https?:\/\/(.*\.)?(t\.me|telegram\.org)(\?|\/|$)/i.test(ref)) return true
-  // initData уже есть — точно из Telegram
+  // initData уже есть — точно из Telegram (SDK уже передал данные)
   const fromWebApp = window.Telegram?.WebApp?.initData
   const fromGlobal = window.__TELEGRAM_INIT_DATA
   if (typeof fromWebApp === 'string' && fromWebApp.trim()) return true

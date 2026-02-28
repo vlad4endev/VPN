@@ -180,9 +180,8 @@ try {
       } catch (rtdbErr) {
         logger.warn('Firebase', 'Не удалось инициализировать Realtime Database', null, rtdbErr)
       }
-    } else {
-      logger.debug('Firebase', 'Realtime Database не настроен (VITE_FIREBASE_DATABASE_URL не задан)', null)
     }
+    // Если VITE_FIREBASE_DATABASE_URL не задан — Realtime Database не используется (опционально; не логируем, чтобы не засорять консоль)
 
     logger.info('Firebase', 'Firebase инициализирован', {
       projectId: firebaseConfig.projectId,

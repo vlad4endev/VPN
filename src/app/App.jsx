@@ -463,6 +463,8 @@ export default function VPNServiceApp() {
   const welcomeReviewsLoadedRef = useRef(false)
   const tmaAttemptStartRef = useRef(0)
   const authInProgressRef = useRef(false)
+  /** Один запуск авто-входа TMA за сессию — защита от повторных срабатываний эффекта (authChecking и т.д.) */
+  const tmaFlowStartedThisSessionRef = useRef(false)
   const signInInProgressRef = useRef(false)
   /** User из ответа POST /api/telegram/auth — используется в onAuthStateChanged чтобы не блокировать рендер на loadUserData. */
   const tmaUserFromAuthRef = useRef(null)
@@ -1112,6 +1114,11 @@ export default function VPNServiceApp() {
       tmaLog('info', 'auth_skip', 'TMA авто-вход уже выполняется', { reason: 'auth_in_progress' })
       return
     }
+    if (tmaFlowStartedThisSessionRef.current) {
+      tmaLog('info', 'auth_skip', 'TMA авто-вход уже был запущен в этой сессии', { reason: 'already_started' })
+      return
+    }
+    tmaFlowStartedThisSessionRef.current = true
     authInProgressRef.current = true
 
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
