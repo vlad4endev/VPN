@@ -4164,7 +4164,7 @@ app.post('/api/admin/telegram/set-webhook', async (req, res) => {
     const result = await setTelegramWebhook(botToken, webhookUrl, opts)
     if (!result.ok) return res.status(400).json({ success: false, error: result.error || 'Ошибка Telegram API' })
     const appBase = getBaseUrlForTelegram() || baseUrl.replace(/\/+$/, '')
-    const menuUrl = appBase ? `${appBase}/t` : ''
+    const menuUrl = appBase ? `${appBase.replace(/\/+$/, '')}/` : ''
     let menuButtonSet = false
     if (menuUrl) {
       const menuResult = await setTelegramMenuButton(botToken, menuUrl, 'Открыть приложение')
@@ -4194,7 +4194,7 @@ app.get('/api/admin/telegram/webhook-status', async (req, res) => {
   }
 })
 
-/** POST /api/admin/telegram/set-menu-button — установить кнопку меню бота «Открыть приложение» (Mini App /t) (только админ) */
+/** POST /api/admin/telegram/set-menu-button — установить кнопку меню бота «Открыть приложение» (только админ) */
 app.post('/api/admin/telegram/set-menu-button', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
@@ -4202,7 +4202,7 @@ app.post('/api/admin/telegram/set-menu-button', async (req, res) => {
   if (!botToken) return res.status(400).json({ success: false, error: 'Токен бота не настроен' })
   const appBase = getBaseUrlForTelegram() || (process.env.TELEGRAM_WEBHOOK_BASE_URL || '').toString().trim().replace(/\/+$/, '')
   if (!appBase) return res.status(400).json({ success: false, error: 'Не задан PUBLIC_URL / FRONTEND_URL / TELEGRAM_WEBHOOK_BASE_URL' })
-  const menuUrl = `${appBase}/t`
+  const menuUrl = `${appBase.replace(/\/+$/, '')}/`
   try {
     const result = await setTelegramMenuButton(botToken, menuUrl, 'Открыть приложение')
     if (!result.ok) return res.status(400).json({ success: false, error: result.error })
@@ -7538,7 +7538,15 @@ if (fs.existsSync(faviconSvg)) {
   })
 }
 
-// ========== SPA / Frontend (для Mini App /t и остальных путей) ==========
+// ========== Редирект бывших путей Mini App (/t отключён) ==========
+app.get(['/t', '/t/', '/telegram', '/telegram/'], (req, res) => {
+  const base = (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'])
+    ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}`
+    : (req.headers.host ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3001')
+  res.redirect(302, base.replace(/\/+$/, '') + '/' + (req.url && req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''))
+})
+
+// ========== SPA / Frontend ==========
 // Если есть собранный frontend (dist), отдаём его; GET-запросы не к /api отдают index.html
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath, { index: false, maxAge: process.env.NODE_ENV === 'production' ? '1y' : '0' }))
@@ -7546,7 +7554,7 @@ if (fs.existsSync(distPath)) {
     if (req.path.startsWith('/api/')) return next()
     res.sendFile(path.join(distPath, 'index.html'), (err) => { if (err) next(err) })
   })
-  console.log('📁 SPA fallback: frontend из dist (в т.ч. /t для Telegram Mini App)')
+  console.log('📁 SPA fallback: frontend из dist')
 }
 
 // ========== Error Handling ==========

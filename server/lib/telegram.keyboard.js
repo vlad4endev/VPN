@@ -32,8 +32,8 @@ function buildButton(btn, baseUrl) {
  * @param {Object} [scenario] — сценарий из Firestore: { menuButtons?: Array<Array<{ type, text, url?, callback_data? }>> }
  * @returns {{ inline_keyboard: Array<Array<{ text: string, web_app?: { url: string }, callback_data?: string, url?: string }>> }}
  */
-/** Путь Mini App в приложении (открывается по кнопке в боте). */
-const TMA_PATH = '/t'
+/** URL приложения для кнопки в боте (Mini App отключён — открываем главную). */
+const TMA_PATH = '/'
 
 export function buildMainKeyboard(appUrl, scenario) {
   const baseUrl = (appUrl || DEFAULT_KEYBOARD_BASE_URL()).toString().trim().replace(/\/+$/, '') || DEFAULT_KEYBOARD_BASE_URL()

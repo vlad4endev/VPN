@@ -139,7 +139,7 @@ const TelegramPanel = () => {
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : ''
   const webhookUrl = baseUrl ? `${baseUrl}/api/telegram/webhook` : ''
-  const miniAppUrl = baseUrl ? `${baseUrl}/t` : ''
+  const miniAppUrl = baseUrl ? `${baseUrl}/` : ''
 
   const handleCopyWebhook = () => {
     if (webhookUrl && navigator.clipboard) {

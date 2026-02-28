@@ -88,114 +88,17 @@
     </script>
   </head>
   <body class="min-h-screen min-w-[320px] bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30">
-    <!-- Telegram Mini App: SDK загружается асинхронно (не блокирует открытие). initData + перехват fetch. -->
+    <!-- Редирект бывших путей Mini App (/t) на главную. TMA отключён. -->
     <script>
     (function() {
       var p = (window.location.pathname || '').replace(/\/+$/, '');
-      window.__IS_TMA_PATH__ = p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3);
+      if (p === '/t' || p === '/telegram' || p === 't' || (p.indexOf('/t/') === 0 && p.length > 3)) {
+        window.location.replace(window.location.origin + '/' + (window.location.search || '') + (window.location.hash || ''));
+        return;
+      }
+      window.__IS_TMA_PATH__ = false;
       window.__TELEGRAM_INIT_DATA = null;
-      /** true = opened inside Telegram WebView (Mini App); false = opened in regular browser. Set before any auth attempt. */
       window.__TMA_OPENED_IN_TELEGRAM__ = false;
-      function applyTmaInit(reason) {
-        var tg = window.Telegram && window.Telegram.WebApp;
-        if (tg) {
-          try { tg.ready(); } catch (e) {}
-          try { if (tg.expand) tg.expand(); } catch (e) {}
-          try {
-            var v = tg.version ? parseFloat(tg.version) : NaN;
-            if (tg.enableClosingConfirmation && (isNaN(v) || v >= 6.1)) tg.enableClosingConfirmation(false);
-          } catch (e) {}
-        }
-
-        // 1) Обычный путь: initData от Telegram WebApp
-        if (tg && typeof tg.initData === 'string' && tg.initData.length > 0) {
-          window.__TELEGRAM_INIT_DATA = tg.initData;
-          try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
-          try {
-            var uid = tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id;
-            console.log('TMA detected (initData ok)', { reason: reason || 'direct', userId: uid || null, initDataLength: tg.initData.length });
-          } catch (e) {}
-          return;
-        }
-
-        // Диагностика: Telegram WebApp есть, но initData пустой
-        if (tg && (!tg.initData || tg.initData.length === 0)) {
-          try {
-            console.log('TMA WebApp present, but initData empty', {
-              reason: reason || 'direct',
-              platform: tg.platform,
-              version: tg.version,
-              initDataLength: (tg.initData && tg.initData.length) ? tg.initData.length : 0
-            });
-          } catch (e) {}
-        }
-
-        // 2) Fallback: восстановление initData из hash (Telegram иногда отдаёт #tgWebAppData=<url-encoded query>)
-        var hash = window.location.hash || '';
-        if (hash.indexOf('tgWebAppData=') !== -1) {
-          try {
-            var start = hash.indexOf('tgWebAppData=') + 13;
-            var end = hash.indexOf('&tgWebAppVersion');
-            if (end === -1) end = hash.indexOf('&eventId');
-            if (end === -1) end = hash.length;
-            var encoded = hash.substring(start, end);
-            if (encoded) {
-              var raw = encoded;
-              try { raw = decodeURIComponent(encoded); } catch (e) {}
-              if (raw && raw.indexOf('hash=') !== -1) {
-                window.__TELEGRAM_INIT_DATA = raw;
-                try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e2) {}
-                try { console.log('TMA initData restored from hash', { reason: reason || 'hash', length: window.__TELEGRAM_INIT_DATA.length }); } catch (e3) {}
-              }
-            }
-          } catch (e) {}
-        }
-        if (!window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
-          var ref = typeof document !== 'undefined' ? (document.referrer || '') : '';
-          if (ref.indexOf('t.me') !== -1 || ref.indexOf('telegram.org') !== -1 || ref.indexOf('telegram') !== -1) {
-            try {
-              var stored = sessionStorage.getItem('tg_init_data');
-              if (stored) window.__TELEGRAM_INIT_DATA = stored;
-            } catch (e) {}
-          }
-        }
-        if (window.__TELEGRAM_INIT_DATA && typeof sessionStorage !== 'undefined') {
-          try { sessionStorage.setItem('tg_init_data', window.__TELEGRAM_INIT_DATA); } catch (e) {}
-        }
-        window.__TMA_OPENED_IN_TELEGRAM__ = (window.self !== window.top) || !!(window.__TELEGRAM_INIT_DATA && String(window.__TELEGRAM_INIT_DATA).trim());
-      }
-      applyTmaInit('boot');
-      if (window.Telegram && window.Telegram.WebApp) {
-        try { window.Telegram.WebApp.expand(); } catch (e) {}
-      }
-      var originalFetch = window.fetch;
-      window.fetch = function(url, options) {
-        options = options || {};
-        options.headers = options.headers || {};
-        var isAuthUrl = typeof url === 'string' && url.indexOf('/api/telegram/auth') !== -1;
-        if (window.__TELEGRAM_INIT_DATA && !isAuthUrl) {
-          if (options.headers instanceof Headers) {
-            options.headers.append('X-Telegram-InitData', window.__TELEGRAM_INIT_DATA);
-          } else if (typeof options.headers === 'object' && !Array.isArray(options.headers)) {
-            options.headers['X-Telegram-InitData'] = window.__TELEGRAM_INIT_DATA;
-          }
-        }
-        return originalFetch.call(this, url, options);
-      };
-      // На /t откладываем загрузку SDK, чтобы сначала сработало внедрение Telegram (иначе наш скрипт может перезаписать объект без initData)
-      function loadSdk() {
-        if (window.Telegram && window.Telegram.WebApp) return;
-        var s = document.createElement('script');
-        s.async = true;
-        s.src = 'https://telegram.org/js/telegram-web-app.js';
-        s.onload = function() { applyTmaInit('sdk:onload'); };
-        document.head.appendChild(s);
-      }
-      if (window.__IS_TMA_PATH__) {
-        setTimeout(loadSdk, 700);
-      } else {
-        loadSdk();
-      }
     })();
     </script>
     <script>
@@ -207,30 +110,14 @@
       })();
     </script>
     <div id="root">
-      <!-- Boot-разметка для /t перенесена в SPA (BootstrapScreen в main.jsx). Лог html_boot для отладки. -->
-      <script>
-        (function() {
-          if (window.__IS_TMA_PATH__) {
-            window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
-            window.__TMA_BOOT_LOGS.unshift({
-              ts: new Date().toISOString(),
-              level: 'info',
-              event: 'html_boot',
-              message: 'Страница /t загружена (до React)',
-              data: { path: (window.location.pathname || '').replace(/\/+$/, '') }
-            });
-          }
-        })();
-      </script>
       <noscript>
         <h1 class="text-2xl font-bold text-white p-8">SKYFLOW</h1>
         <p class="text-slate-400 p-8">Включите JavaScript для входа в личный кабинет.</p>
       </noscript>
     </div>
-    <!-- Yandex.Metrika counter (не грузим на /t — Mini App, чтобы не слать данные в Метрику из Telegram) -->
+    <!-- Yandex.Metrika counter -->
     <script type="text/javascript">
       (function() {
-        if (window.__IS_TMA_PATH__) return;
         (function (m, e, t, r, i, k, a) {
           m[i] = m[i] || function () { (m[i].a = m[i].a || []).push(arguments); };
           m[i].l = 1 * new Date();
@@ -249,35 +136,6 @@
       </div>
     </noscript>
     <!-- /Yandex.Metrika counter -->
-    <script>
-      (function() {
-        if (!window.__IS_TMA_PATH__) return;
-        window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
-        window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'info', event: 'main_loading', message: 'Загрузка main.jsx (React)', data: {} });
-        window.__TMA_MAIN_LOADED = false;
-        var deployMsg = 'Сейчас отдаётся <strong>исходный</strong> index.html (в нём ссылка на /src/app/main.jsx — такого файла на сервере нет).';
-        var fixMsg = 'Что сделать: на сервере выполните <code style="background:#1e293b;padding:0.2em 0.4em;border-radius:4px">npm run build</code>, затем отдавайте содержимое папки <strong>dist/</strong> (в nginx укажите root на dist/ или проксируйте весь трафик на Node, который раздаёт dist/).';
-        function showNotProductionBuild(reason) {
-          window.__TMA_BOOT_LOGS = window.__TMA_BOOT_LOGS || [];
-          window.__TMA_BOOT_LOGS.unshift({ ts: new Date().toISOString(), level: 'warn', event: 'main_timeout', message: reason, data: {} });
-          var root = document.getElementById('root');
-          if (root) {
-            root.innerHTML = '<div id="tma-boot-wrap" style="min-height:100dvh;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020617;color:#94a3b8;padding:1rem;font-family:system-ui,sans-serif"><p style="margin:0;font-size:1rem;color:#f87171">Скрипт приложения не загрузился</p><p style="margin:0.75rem 0 0;font-size:0.8125rem;color:#94a3b8;max-width:320px;text-align:center">' + deployMsg + '</p><p style="margin:0.75rem 0 0;font-size:0.8125rem;color:#cbd5e1">' + fixMsg + '</p><details style="margin-top:1.5rem;font-size:0.75rem;color:#64748b"><summary style="cursor:pointer">Логи (отладка)</summary><pre id="tma-boot-log" style="margin-top:0.5rem;text-align:left;max-height:120px;overflow:auto;background:#0f172a;padding:0.5rem;border-radius:4px"></pre></details></div>';
-            var pre = document.getElementById('tma-boot-log');
-            if (pre && window.__TMA_BOOT_LOGS.length) pre.textContent = window.__TMA_BOOT_LOGS.slice().reverse().map(function(e) { return e.ts + ' [' + (e.event || '') + '] ' + (e.message || ''); }).join('\n');
-          }
-        }
-        if (document.querySelector && document.querySelector('script[src*="/src/"]')) {
-          showNotProductionBuild('Отдаётся исходный index.html (путь /src/ в скрипте — не production-сборка). Решение: npm run build и деплой папки dist/.');
-          return;
-        }
-        setTimeout(function() {
-          if (!window.__TMA_MAIN_LOADED) {
-            showNotProductionBuild('Скрипт приложения не загрузился за 3 с. Возможно отдаётся исходный index.html или сеть недоступна. Решение: npm run build и деплой папки dist/.');
-          }
-        }, 3000);
-      })();
-    </script>
     <script type="module" src="/src/app/main.jsx"></script>
   </body>
 </html>

@@ -26,19 +26,31 @@
 
 ---
 
-## Если фронт на **Vercel**
+## Если фронт на **Vercel** (ваш случай — www.skypath.fun не открывается)
 
-Тогда 403 чаще всего даёт **Vercel Firewall** (WAF), а не наш код.
+403 отдаёт **Vercel Firewall (WAF)**. Нужно явно разрешить путь `/assets/*`.
 
-Что сделать:
+### Шаги в Vercel (обязательно)
 
-1. **Vercel Dashboard** → ваш проект → **Settings** → **Firewall** (или **Security**).
-2. Проверить:
-   - **Attack Challenge Mode** — при блокировке Telegram WebView можно отключить или добавить исключение для путей `/assets/*`.
-   - **Bot Protection** — если включена агрессивная защита, запросы из Telegram (другой User-Agent) могут получать 403. Добавьте правило, разрешающее путь `/assets/*` или User-Agent с `Telegram`.
-3. Убедиться, что в деплое есть папка `dist/` с `index.html` и папкой `assets/` (т.е. в настройках сборки указан output directory `dist` для Vite).
+1. Зайдите в **[Vercel Dashboard](https://vercel.com)** → выберите проект (skypath.fun / skyflow).
+2. **Settings** → в левом меню **Firewall** (или **Security** → **Firewall**).
+3. Найдите блок **Custom Rules** (или **WAF Custom Rules**) и нажмите **Add Rule** / **Create Rule**.
+4. Создайте правило:
+   - **Name:** `Allow assets for Telegram`
+   - **Condition:** `Path` → `starts with` или `matches` → значение **`/assets/`** (или `^/assets/`).
+   - **Action:** **Bypass** (или **Allow**), чтобы не блокировать и не показывать challenge.
+5. Сохраните правило и подождите 1–2 минуты (распространение правил).
 
-После изменений в Firewall сделайте повторный деплой или подождите пару минут и откройте Mini App снова.
+Дополнительно можно ослабить защиту для ботов (если правило по пути не поможет):
+
+- В том же разделе Firewall отключите **Attack Challenge Mode** для этого проекта или добавьте в исключения путь `/assets/*`.
+- Либо временно отключите **Bot Protection**, если она включена, и проверьте открытие Mini App.
+
+### Сборка на Vercel
+
+В `vercel.json` указаны `outputDirectory: "dist"` и `buildCommand: "npm run build"`. Убедитесь, что в деплое действительно появляется папка `dist/` с `index.html` и `assets/` (файлы с хешами в имени). Если в логе сборки нет папки `dist` или в деплое нет `assets/`, проверьте настройки **Build & Development Settings** в проекте (Root Directory, Build Command, Output Directory).
+
+После добавления правила обхода для `/assets/` сделайте повторный деплой или просто откройте Mini App снова через 1–2 минуты.
 
 ---
 
