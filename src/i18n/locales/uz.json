@@ -153,6 +153,7 @@
     "registerGoogle": "Google orqali ro'yxatdan o'tish",
     "googleSigningIn": "Kirilmoqda...",
     "googleRedirect": "Oyna ochilmayaptimi? Google sahifasiga o'tish orqali kiring",
+    "googlePopup": "O'tish ishlamayaptimi? Alohida oynada kiring",
     "backToHome": "Bosh sahifaga qaytish"
   },
   "footer": {
@@ -236,6 +237,7 @@
     "userNotFound": "Bu email bilan foydalanuvchi topilmadi.",
     "wrongPassword": "Noto'g'ri parol.",
     "invalidEmailFormat": "Noto'g'ri email formati.",
+    "loginEmailOrLoginOnly": "Email yoki login kiriting. Telefon raqami yoki ID ni bu yerga kiritmang.",
     "accountBlocked": "Hisob bloklangan. Qo'llab-quvvatlashga murojaat qiling.",
     "tooManyAttempts": "Juda ko'p kirish urinishi. Keyinroq urinib ko'ring.",
     "networkError": "Tarmoq xatosi.",

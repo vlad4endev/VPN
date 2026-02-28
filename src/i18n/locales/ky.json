@@ -153,6 +153,7 @@
     "registerGoogle": "Google аркылуу каттоодон өтүү",
     "googleSigningIn": "Кирүүдө...",
     "googleRedirect": "Терезе ачылбайбы? Google бетине өтүү аркылуу кириңиз",
+    "googlePopup": "Өтүү иштейби? Айрым терезеде кириңиз",
     "backToHome": "Башкы бетке кайтуу"
   },
   "footer": {
@@ -236,6 +237,7 @@
     "userNotFound": "Бул email менен колдонуучу табылган жок.",
     "wrongPassword": "Туура эмес сыр сөз.",
     "invalidEmailFormat": "Туура эмес email форматы.",
+    "loginEmailOrLoginOnly": "Email же логин киргизиңиз. Телефон номери же ID бу талаага киргизилбейт.",
     "accountBlocked": "Каттоо бөгөттөлгөн. Колдоого кайрылыңыз.",
     "tooManyAttempts": "Кирүү аракеттери көп. Кийинчерээк көрүңүз.",
     "networkError": "Тармак катасы.",

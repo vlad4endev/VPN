@@ -153,6 +153,7 @@
     "registerGoogle": "Google арқылы тіркелу",
     "googleSigningIn": "Кіруде...",
     "googleRedirect": "Терезе ашылмай ма? Google бетіне өту арқылы кіріңіз",
+    "googlePopup": "Өту жұмыс істемей ме? Жеке терезеде кіріңіз",
     "backToHome": "Басты бетке оралу"
   },
   "footer": {
@@ -236,6 +237,7 @@
     "userNotFound": "Осы email-ді пайдаланушы табылмады.",
     "wrongPassword": "Қате пароль.",
     "invalidEmailFormat": "Қате email форматы.",
+    "loginEmailOrLoginOnly": "Email немесе логин енгізіңіз. Телефон нөмірі немесе ID осы өріске енгізілмейді.",
     "accountBlocked": "Есептік жазба бұғатталған. Қолдауға хабарласыңыз.",
     "tooManyAttempts": "Кіру әрекеттері көп. Кейінірек көріңіз.",
     "networkError": "Желі қатесі.",

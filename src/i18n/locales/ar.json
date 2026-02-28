@@ -153,6 +153,7 @@
     "registerGoogle": "التسجيل عبر Google",
     "googleSigningIn": "جاري الدخول...",
     "googleRedirect": "النافذة لا تفتح؟ الدخول عبر الانتقال لصفحة Google",
+    "googlePopup": "الانتقال لا يعمل؟ الدخول في نافذة منفصلة",
     "backToHome": "العودة للرئيسية"
   },
   "footer": {
@@ -236,6 +237,7 @@
     "userNotFound": "لم يتم العثور على مستخدم بهذا البريد.",
     "wrongPassword": "كلمة مرور خاطئة.",
     "invalidEmailFormat": "صيغة بريد غير صالحة.",
+    "loginEmailOrLoginOnly": "أدخل البريد الإلكتروني أو اسم المستخدم. لا تدخل رقم الهاتف أو المعرّف في هذا الحقل.",
     "accountBlocked": "الحساب محظور. تواصل مع الدعم.",
     "tooManyAttempts": "محاولات دخول كثيرة. حاول لاحقاً.",
     "networkError": "خطأ في الشبكة.",

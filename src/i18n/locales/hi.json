@@ -153,6 +153,7 @@
     "registerGoogle": "Google से रजिस्टर करें",
     "googleSigningIn": "साइन इन हो रहा है...",
     "googleRedirect": "पॉपअप ब्लॉक? Google पर रीडायरेक्ट से साइन इन करें",
+    "googlePopup": "रीडायरेक्ट काम नहीं कर रहा? अलग विंडो में साइन इन करें",
     "backToHome": "होम पर वापस"
   },
   "footer": {
@@ -241,6 +242,7 @@
     "userNotFound": "इस ईमेल के साथ उपयोगकर्ता नहीं मिला।",
     "wrongPassword": "गलत पासवर्ड।",
     "invalidEmailFormat": "अमान्य ईमेल प्रारूप।",
+    "loginEmailOrLoginOnly": "ईमेल या लॉगिन दर्ज करें। इस फ़ील्ड में फ़ोन नंबर या ID न दर्ज करें।",
     "accountBlocked": "खाता अवरुद्ध। सहायता से संपर्क करें।",
     "tooManyAttempts": "बहुत अधिक साइन इन प्रयास। बाद में कोशिश करें।",
     "networkError": "नेटवर्क त्रुटि।",

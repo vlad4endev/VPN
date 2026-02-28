@@ -1860,12 +1860,13 @@ export default function VPNServiceApp() {
       setCurrentUser(currentUserData)
       applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
       setSuccess('Вход выполнен успешно')
-      
-      // Не устанавливаем view сразу - ждём onAuthStateChanged для перенаправления
-      logger.info('Auth', 'Успешный вход через Google, ожидание onAuthStateChanged для перенаправления', { 
-        email: firebaseUser.email, 
-        uid: firebaseUser.uid, 
-        role: effectiveRole 
+      // Сразу переходим в ЛК (popup/redirect), не полагаясь только на onAuthStateChanged
+      setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+      if (effectiveRole !== 'admin') setDashboardTab('subscription')
+      logger.info('Auth', 'Успешный вход через Google, переход в ЛК', {
+        email: firebaseUser.email,
+        uid: firebaseUser.uid,
+        role: effectiveRole,
       })
   }, [db, loadUserData, generateUniqueSubId, referralCodePending])
 
@@ -4523,8 +4524,9 @@ export default function VPNServiceApp() {
           onAuthModeRegister={handleAuthModeRegister}
           onLogin={handleLogin}
           onRegister={handleRegister}
-          onGoogleSignIn={handleGoogleSignIn}
-          onGoogleSignInRedirect={handleGoogleSignInRedirect}
+          onGoogleSignIn={handleGoogleSignInRedirect}
+          onGoogleSignInRedirect={handleGoogleSignIn}
+          googleSecondaryLabelKey="auth.googlePopup"
           googleSignInLoading={googleSignInLoading}
           onSetView={setView}
           onTelegramSignIn={undefined}

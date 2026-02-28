@@ -153,6 +153,7 @@
     "registerGoogle": "Бақайдгирӣ тавассути Google",
     "googleSigningIn": "Ворид шуда истодааст...",
     "googleRedirect": "Оина намекушад? Ворид шавед тавассути Google",
+    "googlePopup": "Гузариш кор намешавад? Дар равзанаи ҷудогона ворид шавед",
     "backToHome": "Бозгашт ба асосӣ"
   },
   "footer": {
@@ -236,6 +237,7 @@
     "userNotFound": "Корбар бо ин email ёфт нашуд.",
     "wrongPassword": "Рамзи нодуруст.",
     "invalidEmailFormat": "Формати email нодуруст.",
+    "loginEmailOrLoginOnly": "Email ё логин ворид кунед. Рақами телефон ё ID-ро дар ин ҷо нанависед.",
     "accountBlocked": "Ҳисоб баста шудааст. Ба дастгирӣ муроҷиат кунед.",
     "tooManyAttempts": "Теъдоди зиёди кӯшиш. Баъдтар кӯшиш кунед.",
     "networkError": "Хатои шабака.",

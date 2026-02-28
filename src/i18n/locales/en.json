@@ -153,6 +153,7 @@
     "registerGoogle": "Sign up with Google",
     "googleSigningIn": "Signing in...",
     "googleRedirect": "Popup blocked? Sign in by redirect to Google",
+    "googlePopup": "Redirect not working? Sign in in a separate window",
     "backToHome": "Back to home"
   },
   "footer": {
@@ -239,6 +240,7 @@
     "userNotFound": "User with this email not found.",
     "wrongPassword": "Wrong password.",
     "invalidEmailFormat": "Invalid email format.",
+    "loginEmailOrLoginOnly": "Enter email or login. Do not enter a phone number or ID in this field.",
     "accountBlocked": "Account blocked. Contact support.",
     "tooManyAttempts": "Too many sign-in attempts. Try again later.",
     "networkError": "Network error.",

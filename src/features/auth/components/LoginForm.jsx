@@ -57,6 +57,7 @@ const LoginForm = ({
   onRegister,
   onGoogleSignIn,
   onGoogleSignInRedirect,
+  googleSecondaryLabelKey = 'auth.googleRedirect',
   googleSignInLoading,
   onSetView,
   onTelegramSignIn,
@@ -359,7 +360,7 @@ const LoginForm = ({
             disabled={googleSignInLoading}
             className="w-full mt-2 text-slate-500 hover:text-sky-400 text-sm font-medium transition-colors disabled:opacity-50"
           >
-            {t('auth.googleRedirect')}
+            {t(googleSecondaryLabelKey)}
           </button>
         )}
       </div>

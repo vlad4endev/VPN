@@ -153,6 +153,7 @@
     "registerGoogle": "Зарегистрироваться через Google",
     "googleSigningIn": "Вход...",
     "googleRedirect": "Не открывается окно? Войти через переход на страницу Google",
+    "googlePopup": "Не открывается переход? Войти в отдельном окне",
     "backToHome": "Вернуться на главную"
   },
   "footer": {
