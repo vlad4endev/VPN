@@ -54,6 +54,7 @@ function isWebhookPath(path) {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const distPath = path.join(__dirname, '..', 'dist')
 
 // Firebase Admin SDK для доступа к Firestore
 let admin = null
@@ -167,6 +168,21 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }))
 
+// Serve /assets/* and favicon BEFORE CORS so static resources are never blocked (avoids 403 + application/json for JS/CSS)
+if (fs.existsSync(distPath)) {
+  const assetsDir = path.join(distPath, 'assets')
+  if (fs.existsSync(assetsDir)) {
+    app.use('/assets', express.static(assetsDir, { index: false, maxAge: process.env.NODE_ENV === 'production' ? '1y' : '0' }))
+  }
+  const faviconSvgPath = path.join(distPath, 'favicon.svg')
+  if (fs.existsSync(faviconSvgPath)) {
+    app.get('/favicon.ico', (req, res) => {
+      res.type('image/svg+xml')
+      res.sendFile(faviconSvgPath, (err) => { if (err) res.status(404).end() })
+    })
+  }
+}
+
 // CORS - настройка для безопасности
 // Разрешаем только определенные домены для frontend
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -198,15 +214,20 @@ function isLocalOrigin(origin) {
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Запросы без Origin (Postman, curl, SSR, часть мобильных клиентов)
-    if (!origin) {
-      if (isDev) {
-        return callback(null, true)
-      }
+    // Запросы без Origin (Postman, curl, SSR, Telegram WebView и др.)
+    if (!origin || origin === 'null') {
       return callback(null, true)
     }
     // Явно разрешённые origins
     if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+    // Домен сайта в любом поддомене (skypath.fun, www, admin и т.д.)
+    if (origin.includes('skypath.fun')) {
+      return callback(null, true)
+    }
+    // Telegram WebView / Mini App (иногда приходит web.telegram.org или t.me)
+    if (origin.includes('telegram.org') || origin.includes('t.me')) {
       return callback(null, true)
     }
     // В development разрешаем любой localhost/127.0.0.1
@@ -7508,8 +7529,7 @@ app.post('/admin/sync-payment', async (req, res) => {
   }
 })
 
-// ========== Favicon (избегаем 502 при запросе /favicon.ico) ==========
-const distPath = path.join(__dirname, '..', 'dist')
+// ========== Favicon (избегаем 502 при запросе /favicon.ico) — дублируем для fallback, основной раздача выше (до CORS) ==========
 const faviconSvg = path.join(distPath, 'favicon.svg')
 if (fs.existsSync(faviconSvg)) {
   app.get('/favicon.ico', (req, res) => {
