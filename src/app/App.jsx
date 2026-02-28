@@ -974,21 +974,13 @@ export default function VPNServiceApp() {
   }, [auth, db, loadUserData, generateUniqueSubId])
 
   const TMA_SESSION_KEY = 'tma_session_token'
-  const storeTmaSession = useCallback((token, expiresAt) => {
-    try {
-      if (typeof localStorage !== 'undefined' && token) {
-        localStorage.setItem(TMA_SESSION_KEY, token)
-        if (expiresAt) localStorage.setItem('tma_session_expires', String(expiresAt))
-      }
-    } catch (_) {}
-  }, [])
   const clearTmaSession = useCallback(() => {
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem(TMA_SESSION_KEY)
         localStorage.removeItem('tma_session_expires')
       }
-    } catch (_) {}
+    } catch (_) {    }
   }, [])
 
   // На /t: одна проверка (один раз за сессию). Без setInterval/retry. isTelegram = WebApp + непустой initData.

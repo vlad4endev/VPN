@@ -31,13 +31,22 @@ if [ -f ".frontend.pid" ]; then
     FRONTEND_PID=$(cat .frontend.pid)
     if kill -0 $FRONTEND_PID 2>/dev/null; then
         kill $FRONTEND_PID 2>/dev/null || true
-        echo -e "${GREEN}✅ Frontend остановлен (PID: $FRONTEND_PID)${NC}"
+        echo -e "${GREEN}✅ Frontend (dev) остановлен (PID: $FRONTEND_PID)${NC}"
     fi
     rm -f .frontend.pid
 fi
 
+if [ -f ".frontend-preview.pid" ]; then
+    PREVIEW_PID=$(cat .frontend-preview.pid)
+    if kill -0 $PREVIEW_PID 2>/dev/null; then
+        kill $PREVIEW_PID 2>/dev/null || true
+        echo -e "${GREEN}✅ Frontend (production) остановлен (PID: $PREVIEW_PID)${NC}"
+    fi
+    rm -f .frontend-preview.pid
+fi
+
 # Остановка по портам
-for PORT in 3001 5173; do
+for PORT in 3001 5173 4173; do
     PID=$(lsof -ti:$PORT 2>/dev/null || ss -tlnp 2>/dev/null | grep ":$PORT " | awk '{print $6}' | cut -d',' -f2 | head -1)
     if [ ! -z "$PID" ]; then
         kill -9 $PID 2>/dev/null || true
@@ -47,6 +56,7 @@ done
 
 # Остановка по имени процесса
 pkill -f "n8n-webhook-proxy.js" 2>/dev/null && echo -e "${GREEN}✅ Backend процессы остановлены${NC}" || true
-pkill -f "vite.*5173" 2>/dev/null && echo -e "${GREEN}✅ Frontend процессы остановлены${NC}" || true
+pkill -f "vite.*5173" 2>/dev/null && echo -e "${GREEN}✅ Frontend (dev) процессы остановлены${NC}" || true
+pkill -f "vite preview" 2>/dev/null && echo -e "${GREEN}✅ Frontend (production) процессы остановлены${NC}" || true
 
 echo -e "${GREEN}✅ Все службы остановлены${NC}"

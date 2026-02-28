@@ -81,6 +81,7 @@ frontend.log
 .DS_Store
 .vscode
 .idea
+.cursor
 *.swp
 *.swo
 *~

@@ -23,14 +23,20 @@ cleanup() {
         echo -e "${GREEN}✅ Backend Proxy остановлен${NC}"
     fi
     
-    # Остановка Frontend
+    # Остановка Frontend (dev)
     if [ ! -z "$FRONTEND_PID" ]; then
         kill $FRONTEND_PID 2>/dev/null
-        echo -e "${GREEN}✅ Frontend остановлен${NC}"
+        echo -e "${GREEN}✅ Frontend (dev) остановлен${NC}"
+    fi
+    
+    # Остановка Frontend (production preview)
+    if [ ! -z "$PREVIEW_PID" ]; then
+        kill $PREVIEW_PID 2>/dev/null
+        echo -e "${GREEN}✅ Frontend (production) остановлен${NC}"
     fi
     
     # Удаление PID файлов
-    rm -f .backend.pid .frontend.pid
+    rm -f .backend.pid .frontend.pid .frontend-preview.pid
     
     exit 0
 }
@@ -158,6 +164,22 @@ if [ "$MODE" = "production" ] && [ ! -d "dist" ]; then
     echo -e "${GREEN}✅ Сборка завершена${NC}"
 fi
 
+if check_port 4173; then
+    echo -e "${YELLOW}⚠️  Порт 4173 уже занят. Останавливаю процесс...${NC}"
+    free_port 4173
+    sleep 2
+fi
+
+# Сборка production-версии фронтенда
+echo ""
+echo -e "${GREEN}📦 Сборка production-версии фронтенда...${NC}"
+npm run build
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Ошибка сборки фронтенда${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Production-сборка готова${NC}"
+
 # Запуск n8n Webhook Proxy в фоне
 echo ""
 echo -e "${GREEN}🚀 Запуск n8n Webhook Proxy сервера...${NC}"
@@ -189,6 +211,11 @@ if [ "$MODE" = "development" ]; then
     echo -e "${BLUE}⏳ Ожидание запуска frontend (5 секунд)...${NC}"
     sleep 5
 fi
+
+# Запуск Frontend (production preview) в фоне
+echo -e "${GREEN}🚀 Запуск Frontend (production)...${NC}"
+nohup npx vite preview --port 4173 --host 0.0.0.0 > frontend-preview.log 2>&1 &
+PREVIEW_PID=$!
 
 # Сохранение PIDs в файл для удобной остановки
 echo "$BACKEND_PID" > .backend.pid
