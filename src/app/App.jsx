@@ -52,6 +52,7 @@ import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 import { authService } from '../features/auth/services/authService.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
+import { isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
