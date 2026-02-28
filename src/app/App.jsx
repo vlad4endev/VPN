@@ -1511,6 +1511,12 @@ export default function VPNServiceApp() {
       }
     } catch (_) {}
 
+    // Firebase принимает только email; если resolve-login не вернул email — проверяем формат
+    if (!emailToUse.includes('@')) {
+      setError(i18n.t('app.loginEmailOrLoginOnly') || i18n.t('app.invalidEmailFormat'))
+      return
+    }
+
     try {
       logger.info('Auth', 'Попытка входа через Firebase Auth', { loginOrEmail, emailToUse })
       const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password)

@@ -239,6 +239,7 @@
     "userNotFound": "Пользователь с таким email не найден.",
     "wrongPassword": "Неверный пароль.",
     "invalidEmailFormat": "Неверный формат email.",
+    "loginEmailOrLoginOnly": "Введите email или логин. Номер телефона или ID в это поле вводить нельзя.",
     "accountBlocked": "Аккаунт заблокирован. Обратитесь в поддержку.",
     "tooManyAttempts": "Слишком много попыток входа. Попробуйте позже.",
     "networkError": "Ошибка сети.",
