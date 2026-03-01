@@ -110,12 +110,20 @@ async function initFirebaseAdmin() {
       }
       if (serviceAccount) {
         try {
-          if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+          if (serviceAccount.private_key) {
+            // Нормализация PEM: literal \n → перенос строки (разные способы экранирования в env)
+            let pk = serviceAccount.private_key
+            if (typeof pk === 'string') {
+              pk = pk.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n')
+              serviceAccount.private_key = pk
+            }
+          }
           credential = firebaseAdmin.credential.cert(serviceAccount)
           if (serviceAccount.project_id) projectId = projectId || serviceAccount.project_id
           console.log('📝 Используется FIREBASE_SERVICE_ACCOUNT_KEY')
         } catch (err) {
           console.log('⚠️ Ошибка инициализации credential из FIREBASE_SERVICE_ACCOUNT_KEY:', err.message)
+          console.log('   Рекомендация: положите JSON в server/firebase-service-account.json — экранирование в .env часто ломает private_key')
         }
       }
     }
