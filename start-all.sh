@@ -188,12 +188,17 @@ nohup npm start > ../backend.log 2>&1 &
 BACKEND_PID=$!
 cd ..
 
-# Ожидание запуска n8n Webhook Proxy
-echo -e "${BLUE}⏳ Ожидание запуска n8n Webhook Proxy (5 секунд)...${NC}"
-sleep 5
-
-# Проверка работоспособности n8n Webhook Proxy
-if curl -s http://localhost:3001/api/vpn/health > /dev/null 2>&1; then
+# Ожидание и проверка n8n Webhook Proxy (до 15 секунд с повторами)
+echo -e "${BLUE}⏳ Ожидание запуска n8n Webhook Proxy...${NC}"
+HEALTH_OK=0
+for i in 1 2 3 4 5 6; do
+    sleep 2
+    if curl -s -f http://localhost:3001/api/vpn/health > /dev/null 2>&1; then
+        HEALTH_OK=1
+        break
+    fi
+done
+if [ "$HEALTH_OK" = "1" ]; then
     echo -e "${GREEN}✅ n8n Webhook Proxy запущен на http://localhost:3001${NC}"
 else
     echo -e "${YELLOW}⚠️  n8n Webhook Proxy не отвечает на health check${NC}"

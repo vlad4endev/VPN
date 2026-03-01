@@ -601,7 +601,7 @@ app.post('/api/auth/ensure-firestore-user', express.json(), async (req, res) => 
       phone: '',
       role: 'user',
       plan: 'free',
-      uuid: crypto.randomUUID ? crypto.randomUUID() : randomUUID(),
+      uuid: crypto.randomUUID ? crypto.randomUUID() : randomUUIDFallback(),
       subId,
       expiresAt: null,
       tariffName: '',
@@ -620,7 +620,7 @@ app.post('/api/auth/ensure-firestore-user', express.json(), async (req, res) => 
   }
 })
 
-function randomUUID() {
+function randomUUIDFallback() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
     const v = c === 'x' ? r : (r & 0x3) | 0x8
