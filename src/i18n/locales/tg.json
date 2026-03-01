@@ -237,6 +237,7 @@
     "loginError": "Хатои воридшавӣ",
     "userNotFound": "Корбар бо ин email ёфт нашуд.",
     "wrongPassword": "Рамзи нодуруст.",
+    "wrongLoginOrPassword": "Email ё рамзи нодуруст.",
     "invalidEmailFormat": "Формати email нодуруст.",
     "loginEmailOrLoginOnly": "Email, логин ё Telegram ID ворид кунед.",
     "accountBlocked": "Ҳисоб баста шудааст. Ба дастгирӣ муроҷиат кунед.",

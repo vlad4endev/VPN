@@ -242,6 +242,7 @@
     "loginError": "साइन इन त्रुटि",
     "userNotFound": "इस ईमेल के साथ उपयोगकर्ता नहीं मिला।",
     "wrongPassword": "गलत पासवर्ड।",
+    "wrongLoginOrPassword": "गलत ईमेल या पासवर्ड।",
     "invalidEmailFormat": "अमान्य ईमेल प्रारूप।",
     "loginEmailOrLoginOnly": "ईमेल, लॉगिन या Telegram ID दर्ज करें।",
     "accountBlocked": "खाता अवरुद्ध। सहायता से संपर्क करें।",

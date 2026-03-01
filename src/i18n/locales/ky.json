@@ -237,6 +237,7 @@
     "loginError": "Кирүү катасы",
     "userNotFound": "Бул email менен колдонуучу табылган жок.",
     "wrongPassword": "Туура эмес сыр сөз.",
+    "wrongLoginOrPassword": "Туура эмес email же сыр сөз.",
     "invalidEmailFormat": "Туура эмес email форматы.",
     "loginEmailOrLoginOnly": "Email, логин же Telegram ID киргизиңиз.",
     "accountBlocked": "Каттоо бөгөттөлгөн. Колдоого кайрылыңыз.",

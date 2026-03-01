@@ -237,6 +237,7 @@
     "loginError": "Кіру қатесі",
     "userNotFound": "Осы email-ді пайдаланушы табылмады.",
     "wrongPassword": "Қате пароль.",
+    "wrongLoginOrPassword": "Қате email немесе пароль.",
     "invalidEmailFormat": "Қате email форматы.",
     "loginEmailOrLoginOnly": "Email, логин немесе Telegram ID енгізіңіз.",
     "accountBlocked": "Есептік жазба бұғатталған. Қолдауға хабарласыңыз.",

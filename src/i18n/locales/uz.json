@@ -237,6 +237,7 @@
     "loginError": "Kirish xatosi",
     "userNotFound": "Bu email bilan foydalanuvchi topilmadi.",
     "wrongPassword": "Noto'g'ri parol.",
+    "wrongLoginOrPassword": "Noto'g'ri email yoki parol.",
     "invalidEmailFormat": "Noto'g'ri email formati.",
     "loginEmailOrLoginOnly": "Email, login yoki Telegram ID kiriting.",
     "accountBlocked": "Hisob bloklangan. Qo'llab-quvvatlashga murojaat qiling.",

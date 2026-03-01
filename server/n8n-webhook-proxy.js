@@ -556,6 +556,35 @@ app.post('/api/auth/set-password-by-login', express.json(), async (req, res) => 
   }
 })
 
+/**
+ * Установка пароля для текущего пользователя (в т.ч. привязанного к Google).
+ * Позволяет потом входить по email и паролю.
+ * POST /api/auth/set-password
+ * Body: { idToken: string, newPassword: string }
+ */
+app.post('/api/auth/set-password', express.json(), async (req, res) => {
+  const idToken = (req.body.idToken || '').toString().trim()
+  const newPassword = (req.body.newPassword || '').toString()
+  if (!idToken) return res.status(400).json({ error: 'Укажите idToken' })
+  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' })
+  if (newPassword.length > 128) return res.status(400).json({ error: 'Пароль слишком длинный' })
+  if (!admin) {
+    try { await initFirebaseAdmin() } catch (_) {}
+    if (!admin) return res.status(503).json({ error: 'Сервис недоступен' })
+  }
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    const uid = decoded.uid
+    await admin.auth().updateUser(uid, { password: newPassword })
+    return res.json({ success: true, message: 'Пароль успешно установлен. Теперь вы можете входить по email и паролю.' })
+  } catch (err) {
+    if (err.code === 'auth/weak-password') return res.status(400).json({ error: 'Пароль слишком простой' })
+    if (err.code === 'auth/id-token-expired') return res.status(401).json({ error: 'Сессия истекла. Войдите снова.' })
+    console.error('❌ POST /api/auth/set-password:', err.message)
+    return res.status(500).json({ error: err.message || 'Ошибка установки пароля' })
+  }
+})
+
 // ========== Конфигурация n8n ==========
 
 const N8N_BASE_URL = process.env.N8N_BASE_URL || 'https://n8n.skypath.fun'

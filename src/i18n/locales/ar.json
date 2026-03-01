@@ -237,6 +237,7 @@
     "loginError": "خطأ في تسجيل الدخول",
     "userNotFound": "لم يتم العثور على مستخدم بهذا البريد.",
     "wrongPassword": "كلمة مرور خاطئة.",
+    "wrongLoginOrPassword": "بريد أو كلمة مرور خاطئة.",
     "invalidEmailFormat": "صيغة بريد غير صالحة.",
     "loginEmailOrLoginOnly": "أدخل البريد الإلكتروني أو اسم المستخدم أو معرف Telegram.",
     "accountBlocked": "الحساب محظور. تواصل مع الدعم.",

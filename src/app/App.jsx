@@ -1346,7 +1346,7 @@ export default function VPNServiceApp() {
     } catch (err) {
       logger.error('Auth', 'Ошибка входа', { loginOrEmail }, err)
       const msg = err?.code === 'auth/invalid-credential'
-        ? i18n.t('app.invalidCredentialEmail')
+        ? (i18n.t('app.wrongLoginOrPassword') || i18n.t('app.wrongPassword'))
         : getAuthErrorMsg(err)
       if (msg) setError(msg)
       if (err?.code === 'auth/invalid-credential' && (loginData?.email || loginOrEmail)) setForgotPasswordEmail(loginData?.email || loginOrEmail)
@@ -1853,6 +1853,25 @@ export default function VPNServiceApp() {
     window.history.replaceState(null, '', window.location.pathname + (window.location.hash || ''))
     handleTelegramWidgetAuth(widgetUser)
   }, [auth, firebaseUser, authChecking, handleTelegramWidgetAuth])
+
+  const handleSetPasswordForEmail = useCallback(async (newPassword) => {
+    if (!firebaseUser) return { error: i18n.t('app.authUnavailable') || 'Сессия истекла. Войдите снова.' }
+    try {
+      const idToken = await firebaseUser.getIdToken()
+      const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '') : (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '')
+      const res = await fetch(`${base}/api/auth/set-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, newPassword }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return { error: data.error || i18n.t('app.loginError') }
+      return { success: true }
+    } catch (err) {
+      logger.error('Auth', 'Ошибка установки пароля для входа по email', null, err)
+      return { error: err?.message || i18n.t('app.loginError') }
+    }
+  }, [firebaseUser])
 
   const handleLogout = useCallback(async () => {
     const userEmail = currentUser?.email
@@ -4427,6 +4446,8 @@ export default function VPNServiceApp() {
         onSetEditingProfile={setEditingProfile}
         profileData={profileData}
         onSetProfileData={setProfileData}
+        hasGoogleProvider={firebaseUser?.providerData?.some((p) => p.providerId === 'google.com')}
+        onSetPasswordForEmail={handleSetPasswordForEmail}
         creatingSubscription={creatingSubscription}
         onHandleCreateSubscription={handleCreateSubscription}
         onHandleRenewSubscription={handleRenewSubscription}
