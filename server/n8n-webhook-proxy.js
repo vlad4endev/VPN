@@ -557,6 +557,78 @@ app.post('/api/auth/set-password-by-login', express.json(), async (req, res) => 
 })
 
 /**
+ * Создать документ пользователя в Firestore, если его нет (для аккаунтов Firebase Auth без записи в users_v4).
+ * POST /api/auth/ensure-firestore-user
+ * Header: Authorization: Bearer <Firebase ID token>
+ * Ответ: { success: true, user: { id, email, name, role, ... } } или 404 если документ уже есть (клиент просто загрузит его).
+ */
+app.post('/api/auth/ensure-firestore-user', express.json(), async (req, res) => {
+  const authResult = await verifyIdToken(req, res)
+  if (!authResult?.ok) return
+  if (!db || !admin) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  const uid = authResult.uid
+  const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`)
+
+  try {
+    const snap = await userRef.get()
+    if (snap.exists) {
+      return res.json({ success: true, alreadyExists: true, user: { id: uid, ...snap.data() } })
+    }
+
+    const authUser = await admin.auth().getUser(uid)
+    const email = (authUser.email || '').trim()
+    const displayName = (authUser.displayName || '').trim()
+    const photoURL = authUser.photoURL || null
+
+    const generateSubId = () => {
+      const chars = '0123456789abcdefghijklmnopqrstuvwxyz'
+      let result = ''
+      for (let i = 0; i < 16; i++) result += chars[crypto.randomInt(0, chars.length)]
+      return result
+    }
+    let subId = generateSubId()
+    for (let i = 0; i < 10; i++) {
+      const existingSub = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).where('subId', '==', subId).limit(1).get()
+      if (existingSub.empty) break
+      subId = generateSubId()
+    }
+
+    const now = new Date().toISOString()
+    const newUserData = {
+      email: email || null,
+      name: displayName || email || '',
+      phone: '',
+      role: 'user',
+      plan: 'free',
+      uuid: crypto.randomUUID ? crypto.randomUUID() : randomUUID(),
+      subId,
+      expiresAt: null,
+      tariffName: '',
+      tariffId: '',
+      photoURL,
+      language: 'ru',
+      createdAt: now,
+      updatedAt: now,
+    }
+    await userRef.set(newUserData)
+    console.log('✅ ensure-firestore-user: создан документ для uid', uid, email || '(no email)')
+    return res.json({ success: true, created: true, user: { id: uid, ...newUserData } })
+  } catch (err) {
+    console.error('❌ POST /api/auth/ensure-firestore-user:', err.message)
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+function randomUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+/**
  * Установка пароля для текущего пользователя (в т.ч. привязанного к Google).
  * Позволяет потом входить по email и паролю.
  * POST /api/auth/set-password

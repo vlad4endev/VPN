@@ -140,6 +140,37 @@ export const authService = {
   },
 
   /**
+   * Если документ в Firestore отсутствует — создаёт его через API, затем загружает данные.
+   * Используется при onAuthStateChanged и signInWithEmail, когда loadUserData вернул null.
+   * @param {import('firebase/auth').User} firebaseUser - Текущий пользователь Firebase Auth
+   * @param {Firestore|null} [dbOverride] - опциональный экземпляр Firestore
+   * @returns {Promise<Object|null>} Данные пользователя или null
+   */
+  async ensureFirestoreUserIfMissing(firebaseUser, dbOverride = null) {
+    if (!firebaseUser?.uid) return null
+    const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
+      ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
+      : (typeof window !== 'undefined' && window.location?.origin) || ''
+    try {
+      const idToken = await firebaseUser.getIdToken()
+      const res = await fetch(`${baseUrl}/api/auth/ensure-firestore-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.user) {
+          return { id: data.user.id, ...data.user }
+        }
+        return await this.loadUserData(firebaseUser.uid, dbOverride)
+      }
+    } catch (err) {
+      logger.warn('Auth', 'ensure-firestore-user не удался', { uid: firebaseUser.uid }, err)
+    }
+    return null
+  },
+
+  /**
    * Регистрация с email и паролем
    * @param {string} email - Email пользователя
    * @param {string} password - Пароль
@@ -224,12 +255,15 @@ export const authService = {
     const firebaseUser = userCredential.user
     
     // Загружаем дополнительные данные пользователя из Firestore
-    const userData = await this.loadUserData(firebaseUser.uid)
-    
+    let userData = await this.loadUserData(firebaseUser.uid)
+
     if (!userData) {
-      logger.warn('Auth', 'Данные пользователя не найдены в Firestore', { uid: firebaseUser.uid })
-      await signOut(auth)
-      throw new Error('Данные пользователя не найдены. Обратитесь к администратору.')
+      userData = await this.ensureFirestoreUserIfMissing(firebaseUser)
+      if (!userData) {
+        logger.warn('Auth', 'Данные пользователя не найдены в Firestore', { uid: firebaseUser.uid })
+        await signOut(auth)
+        throw new Error('Данные пользователя не найдены. Обратитесь к администратору.')
+      }
     }
 
     // Объединяем данные Firebase Auth и Firestore

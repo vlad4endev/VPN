@@ -767,6 +767,9 @@ export default function VPNServiceApp() {
         // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
         try {
           let userData = await loadUserData(firebaseUser.uid, dbInstance)
+          if (!userData) {
+            userData = await authService.ensureFirestoreUserIfMissing(firebaseUser, dbInstance)
+          }
           if (userData) {
             // Миграция: если у существующего пользователя нет subId, генерируем его
             if (!userData.subId) {
