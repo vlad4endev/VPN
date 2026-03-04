@@ -115,7 +115,7 @@ export async function createPayment(orderId, amount, options = {}) {
     const { request_id, payment_url } = response.data
 
     // Сохраняем платеж в storage со статусом 'pending'
-    const payment = savePayment(
+    const payment = await savePayment(
       orderId,
       orderId, // label = orderId (для поиска в operation-history)
       'pending',
@@ -174,7 +174,7 @@ export async function createPayment(orderId, amount, options = {}) {
  * @param {string} orderId - Уникальный идентификатор заказа
  * @returns {Object|null} Данные платежа
  */
-export function getPaymentInfo(orderId) {
-  // Используем динамический import для избежания circular dependency
-  return import('./storage.js').then(({ getPayment }) => getPayment(orderId))
+export async function getPaymentInfo(orderId) {
+  const { getPayment } = await import('./storage.js')
+  return getPayment(orderId)
 }

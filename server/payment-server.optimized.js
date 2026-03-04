@@ -19,15 +19,18 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { createPayment } from './paymentService.js'
-import { getPayment, getAllPayments } from './storage.js'
+import { getPayment, getAllPayments, initStorage } from './storage.js'
 import { cache } from './cache.js'
 import { startCluster, getWorkerInfo } from './cluster.js'
+import { initFirebaseAdmin } from './lib/firebaseInit.js'
 
-// Загружаем переменные окружения
 dotenv.config()
 
-// ========== Функция создания приложения ==========
 async function createApp() {
+  const { db } = await initFirebaseAdmin()
+  const appId = process.env.APP_ID || 'skyputh'
+  if (db) initStorage(db, appId)
+
   const app = express()
 
   // Middleware
@@ -152,7 +155,7 @@ async function createApp() {
    *   "createdAt": "2024-01-01T00:00:00.000Z"
    * }
    */
-  app.get('/payment/:orderId', (req, res) => {
+  app.get('/payment/:orderId', async (req, res) => {
     try {
       const { orderId } = req.params
 
@@ -168,7 +171,7 @@ async function createApp() {
         })
       }
 
-      const payment = getPayment(orderId)
+      const payment = await getPayment(orderId)
 
       if (!payment) {
         return res.status(404).json({
@@ -200,7 +203,7 @@ async function createApp() {
    * 
    * Получить все платежи
    */
-  app.get('/payments', (req, res) => {
+  app.get('/payments', async (req, res) => {
     try {
       // ОПТИМИЗАЦИЯ: Проверяем кэш
       const cacheKey = 'payments_all'
@@ -215,7 +218,7 @@ async function createApp() {
         })
       }
 
-      const payments = getAllPayments()
+      const payments = await getAllPayments()
       
       // ОПТИМИЗАЦИЯ: Сохраняем в кэш на 5 секунд
       cache.set(cacheKey, payments, 5)

@@ -29,7 +29,7 @@ export function useCurrentUser() {
     queryFn: async () => {
       if (!firebaseUser || !db) return null
 
-      const userRef = doc(db, `artifacts/${APP_ID}/users/${firebaseUser.uid}`)
+      const userRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
       const snapshot = await getDoc(userRef)
 
       if (!snapshot.exists()) {

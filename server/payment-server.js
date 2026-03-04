@@ -1,11 +1,11 @@
 /**
  * Минимальный Express сервер для работы с платежами ЮMoney
- * 
+ *
  * Этот сервер:
  * 1. Создает платежи через ЮMoney API
- * 2. Сохраняет данные о платежах в локальное хранилище
+ * 2. Сохраняет данные о платежах в Firestore (или in-memory при отсутствии Firebase)
  * 3. Отдает пользователю ссылку на оплату
- * 
+ *
  * ВАЖНО: Проверка статуса оплаты выполняется в n8n через operation-history API.
  * n8n будет опрашивать operation-history по label (orderId) и обновлять статус.
  */
@@ -13,12 +13,19 @@
 import express from 'express'
 import compression from 'compression'
 import cors from 'cors'
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import { createPayment } from './paymentService.js'
-import { getPayment, getAllPayments } from './storage.js'
+import { getPayment, getAllPayments, initStorage } from './storage.js'
+import { initFirebaseAdmin } from './lib/firebaseInit.js'
 
-// Загружаем переменные окружения
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config()
+if (fs.existsSync(path.join(__dirname, '.env'))) {
+  dotenv.config({ path: path.join(__dirname, '.env'), override: false })
+}
 
 const app = express()
 
@@ -138,11 +145,10 @@ app.post('/create-payment', async (req, res) => {
  *   "createdAt": "2024-01-01T00:00:00.000Z"
  * }
  */
-app.get('/payment/:orderId', (req, res) => {
+app.get('/payment/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params
-
-    const payment = getPayment(orderId)
+    const payment = await getPayment(orderId)
 
     if (!payment) {
       return res.status(404).json({
@@ -159,7 +165,7 @@ app.get('/payment/:orderId', (req, res) => {
     console.error('❌ Error in /payment/:orderId:', error)
     res.status(500).json({
       success: false,
-      error: error.message || 'Ошибка получения платежа'
+      error: error?.message || 'Ошибка получения платежа'
     })
   }
 })
@@ -169,9 +175,9 @@ app.get('/payment/:orderId', (req, res) => {
  * 
  * Получить все платежи
  */
-app.get('/payments', (req, res) => {
+app.get('/payments', async (req, res) => {
   try {
-    const payments = getAllPayments()
+    const payments = await getAllPayments()
     res.json({
       success: true,
       count: payments.length,
@@ -181,7 +187,7 @@ app.get('/payments', (req, res) => {
     console.error('❌ Error in /payments:', error)
     res.status(500).json({
       success: false,
-      error: error.message || 'Ошибка получения платежей'
+      error: error?.message || 'Ошибка получения платежей'
     })
   }
 })
@@ -210,7 +216,16 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PAYMENT_SERVER_PORT || 3002
 const HOST = process.env.PAYMENT_SERVER_HOST || '0.0.0.0'
 
-app.listen(PORT, HOST, () => {
+async function startPaymentServer() {
+  const { db } = await initFirebaseAdmin()
+  const appId = process.env.APP_ID || 'skyputh'
+  if (db) {
+    initStorage(db, appId)
+  } else {
+    console.warn('⚠️ Firebase не настроен: платежи будут храниться в памяти (потеряются при перезапуске)')
+  }
+
+  app.listen(PORT, HOST, () => {
   console.log('🚀 Payment Server запущен')
   console.log(`📡 http://${HOST}:${PORT}`)
   console.log(`💳 Endpoints:`)
@@ -232,6 +247,12 @@ app.listen(PORT, HOST, () => {
   if (!process.env.YOOMONEY_WALLET) {
     console.warn('⚠️  YOOMONEY_WALLET не настроен!')
   }
+  })
+}
+
+startPaymentServer().catch((err) => {
+  console.error('❌ Ошибка запуска Payment Server:', err)
+  process.exit(1)
 })
 
 export default app

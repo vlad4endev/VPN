@@ -583,7 +583,7 @@ export default function VPNServiceApp() {
     }
   }, [view, currentUser])
 
-  // Синхронизация view с path/hash — только #review (login/register игнорируются для приоритета welcome)
+  // Синхронизация view с path/hash — #review, /set-password; /payment/success и /payment/fail рендерятся по path в основном рендере
   useEffect(() => {
     const syncViewFromUrl = () => {
       if (typeof window === 'undefined') return
@@ -591,6 +591,7 @@ export default function VPNServiceApp() {
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
+      // /payment/success и /payment/fail обрабатываются в рендере по path — view не меняем
     }
     syncViewFromUrl()
     window.addEventListener('hashchange', syncViewFromUrl)
@@ -1240,6 +1241,18 @@ export default function VPNServiceApp() {
       logger.info('App', 'Переход в ЛК по currentUser (страховка)', { view, nextView, uid: currentUser.id })
     }
   }, [currentUser, view, setView])
+
+  // Редирект при отсутствии доступа (finances, support, admin, analytics) — в useEffect, не во время рендера
+  useEffect(() => {
+    if (view === 'finances' && (!currentUser || !canAccessFinances(currentUser?.role))) {
+      setView('dashboard')
+    } else if (view === 'support' && !currentUser) {
+      setView('login')
+    } else if ((view === 'admin' || view === 'analytics') && (!currentUser || !canAccessAdmin(currentUser?.role))) {
+      setView('dashboard')
+      setError('Недостаточно прав для доступа к админ-панели')
+    }
+  }, [view, currentUser])
 
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
@@ -4177,7 +4190,6 @@ export default function VPNServiceApp() {
   // Раздел «Финансы» — для ролей Админ и Бухгалтер
   if (view === 'finances') {
     if (!currentUser || !canAccessFinances(currentUser.role)) {
-      setView('dashboard')
       return null
     }
     return (
@@ -4204,10 +4216,7 @@ export default function VPNServiceApp() {
 
   // Раздел «Тех. поддержка» — тикеты для всех авторизованных
   if (view === 'support') {
-    if (!currentUser) {
-      setView('login')
-      return null
-    }
+    if (!currentUser) return null
     return (
       <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <SupportView
@@ -4235,10 +4244,7 @@ export default function VPNServiceApp() {
         </div>
       )
     }
-    if (!currentUser || !canAccessAdmin(currentUser.role)) {
-      setView('dashboard')
-      return null
-    }
+    if (!currentUser || !canAccessAdmin(currentUser.role)) return null
     const analyticsTab = 'analytics-funnel'
     const setAdminTabOrSwitchView = (tab) => {
       setAdminTab(tab)
@@ -4344,8 +4350,6 @@ export default function VPNServiceApp() {
         userId: currentUser?.id, 
         role: currentUser?.role 
       })
-      setView('dashboard')
-      setError('Недостаточно прав для доступа к админ-панели')
       return null
     }
     

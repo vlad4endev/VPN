@@ -34,6 +34,7 @@ import webpush from 'web-push'
 import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
+import { initStorage } from './storage.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -7755,6 +7756,9 @@ const HOST = process.env.HOST || '0.0.0.0'
 
 async function startServer() {
   await initFirebaseAdmin()
+  if (db) {
+    initStorage(db, APP_ID)
+  }
   if (!db) {
     console.warn('⚠️ Telegram Mini App и админ-API будут возвращать 503 до настройки Firebase (положите server/firebase-service-account.json или задайте FIREBASE_SERVICE_ACCOUNT_PATH).')
   }
