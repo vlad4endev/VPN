@@ -438,7 +438,10 @@ async function validateTelegramWidgetData(widgetUser, botToken) {
     return { ok: false, reason: 'invalid_hash', message: 'Неверная подпись данных виджета' }
   }
   const authDate = parseInt(widgetUser.auth_date, 10)
-  if (authDate && (Date.now() / 1000 - authDate > TELEGRAM_INIT_DATA_MAX_AGE_MS / 1000)) {
+  if (widgetUser.auth_date == null || widgetUser.auth_date === '' || Number.isNaN(authDate)) {
+    return { ok: false, reason: 'no_auth_date', message: 'Отсутствует или невалиден auth_date в данных виджета' }
+  }
+  if (Date.now() / 1000 - authDate > TELEGRAM_INIT_DATA_MAX_AGE_MS / 1000) {
     return { ok: false, reason: 'expired', message: 'Сессия виджета истекла. Авторизуйтесь заново.' }
   }
   const tgId = String(widgetUser.id || '')
