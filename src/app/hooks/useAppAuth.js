@@ -198,8 +198,8 @@ export const useAppAuth = ({
             // Всегда редирект с экрана логина после успешной загрузки пользователя (email, Google, customToken)
             const nextView = getAllowedView(savedView, effectiveRole)
             setView(nextView)
-            if ((view === 'login' || view === 'register' || view === 'welcome') && isBrowserAuthPath(path)) {
-              logger.debug('App', 'onAuthStateChanged: редирект с экрана входа', { nextView, role: effectiveRole })
+            if (isBrowserAuthPath(path)) {
+              logger.debug('App', 'onAuthStateChanged: редирект на dashboard/admin', { nextView, role: effectiveRole })
             }
           } else {
             // Данные не найдены — для Google создаём документ (fallback при redirect/гонке с popup)
