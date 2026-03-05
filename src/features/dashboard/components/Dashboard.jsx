@@ -16,94 +16,9 @@ import { useSubscriptionNotifications } from '../hooks/useSubscriptionNotificati
 import notificationService from '../../../shared/services/notificationService.js'
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 import TelegramBindCard from '../../telegram/components/TelegramBindCard.jsx'
+import SetPasswordForEmailCard from './SetPasswordForEmailCard.jsx'
 
-function SetPasswordForEmailCard({ onSetPassword, t }) {
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState(null)
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setMessage(null)
-    if (newPassword.length < 6) {
-      setMessage({ type: 'error', text: t('dashboard.setPasswordMinLength') || 'Пароль не короче 6 символов' })
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      setMessage({ type: 'error', text: t('dashboard.setPasswordMismatch') || 'Пароли не совпадают' })
-      return
-    }
-    setLoading(true)
-    try {
-      const result = await onSetPassword(newPassword)
-      if (result?.success) {
-        setMessage({ type: 'success', text: t('dashboard.setPasswordSuccess') || 'Пароль установлен. Теперь вы можете входить по email и паролю.' })
-        setNewPassword('')
-        setConfirmPassword('')
-      } else {
-        setMessage({ type: 'error', text: result?.error || t('dashboard.setPasswordError') || 'Ошибка установки пароля' })
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-  return (
-    <div className="bg-slate-800/50 rounded-lg sm:rounded-xl border border-slate-700 p-4 sm:p-5">
-      <h3 className="text-slate-200 font-bold flex items-center gap-2 mb-2">
-        <Lock className="w-4 h-4" />
-        {t('dashboard.setPasswordForEmailTitle') || 'Вход по email и паролю'}
-      </h3>
-      <p className="text-slate-400 text-sm mb-4">
-        {t('dashboard.setPasswordForEmailDesc') || 'Установите пароль, чтобы входить по email и паролю (не только через Google).'}
-      </p>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div>
-          <label htmlFor="set-password-new" className="block text-slate-300 text-sm font-bold mb-1">
-            {t('dashboard.setPasswordNew') || 'Новый пароль'}
-          </label>
-          <input
-            id="set-password-new"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="••••••••"
-            minLength={6}
-            className="w-full min-h-[44px] px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={loading}
-          />
-        </div>
-        <div>
-          <label htmlFor="set-password-confirm" className="block text-slate-300 text-sm font-bold mb-1">
-            {t('dashboard.setPasswordConfirm') || 'Повторите пароль'}
-          </label>
-          <input
-            id="set-password-confirm"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="••••••••"
-            minLength={6}
-            className="w-full min-h-[44px] px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={loading}
-          />
-        </div>
-        {message && (
-          <p className={`text-sm ${message.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
-            {message.text}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={loading}
-          className="min-h-[44px] px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {t('dashboard.setPasswordSubmit') || 'Установить пароль'}
-        </button>
-      </form>
-    </div>
-  )
-}
+
 
 const Dashboard = ({
   currentUser,
@@ -169,7 +84,7 @@ const Dashboard = ({
   const [paymentPollAttempt, setPaymentPollAttempt] = useState(0)
   const paymentAutoPollTimeoutRef = useRef(null)
   const paymentAutoPollIntervalRef = useRef(null)
-  const handleManualPaymentCheckRef = useRef(() => {})
+  const handleManualPaymentCheckRef = useRef(() => { })
   /** Защита от двойного создания: orderId, для которых подписка уже создаётся или создана (до следующего нового платежа). */
   const subscriptionCreatedForOrderIdsRef = useRef(new Set())
   /** orderId, для которого идёт повторная проверка статуса из истории платежей */
@@ -180,7 +95,7 @@ const Dashboard = ({
 
   // Получаем статус подписки (subscription.status - единственный источник правды)
   const { status: subscriptionStatus, label: subscriptionLabel, color: subscriptionColor, subscription } = useSubscriptionStatus(currentUser)
-  
+
   // Показываем блок подписки, если есть ключ и тариф, и статус не «окончательно истёк»
   // active до конца срока, expiring_soon (< 2 дней), grace (5 дней после просрочки), затем expired — только тогда «нет подписки»
   const hasSubscription = currentUser?.uuid && currentUser?.tariffId && (
@@ -197,14 +112,14 @@ const Dashboard = ({
       return false
     })())
   )
-  
+
   // Используем статус из subscription (единственный источник правды)
   const userStatus = {
     status: subscriptionStatus,
     label: subscriptionLabel,
     color: subscriptionColor
   }
-  
+
   const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
   const currentPlanKey = (currentUser?.plan || currentUser?.tariffName || '').toLowerCase()
   // Все остальные активные тарифы для переключения; по одному на уникальное имя/план (без дублей в UI)
@@ -221,12 +136,12 @@ const Dashboard = ({
     return acc
   }, [])
   const otherTariffForSwitch = otherTariffsForSwitch[0] ?? null
-  
+
   // Состояние для оставшегося времени подписки (обновляется каждую минуту)
-  const [timeRemaining, setTimeRemaining] = useState(() => 
+  const [timeRemaining, setTimeRemaining] = useState(() =>
     currentUser?.expiresAt ? getTimeRemaining(currentUser.expiresAt) : null
   )
-  
+
   // Обновление оставшегося времени каждую минуту
   useEffect(() => {
     if (!currentUser?.expiresAt) {
@@ -256,7 +171,7 @@ const Dashboard = ({
       logger.info('Dashboard', 'Получено событие для открытия окна оплаты', {
         type: event.detail?.type
       })
-      
+
       // Если есть доступные тарифы, открываем модальное окно с первым доступным тарифом
       if (tariffs && tariffs.length > 0) {
         // Находим первый активный тариф или просто первый тариф
@@ -436,7 +351,7 @@ const Dashboard = ({
                     payment.amount || 0
                   )
                 }
-              } catch (_) {}
+              } catch (_) { }
               setShowPaymentProcessing(false)
               setPaymentOrderId(null)
               setPaymentWindowRef(null)
@@ -593,7 +508,7 @@ const Dashboard = ({
                   orderId: paymentOrderId,
                   status: payment.status
                 })
-                
+
                 // Находим тариф (используем refs для стабильности)
                 // Тариф только из платежа или subscriptionSuccess (выбранный при оплате)
                 const tariffsList = tariffsRef.current || []
@@ -614,7 +529,7 @@ const Dashboard = ({
                     paymentTariffName: payment.tariffName
                   })
                 }
-                
+
                 if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
                   try {
                     await dashboardService.applyAddDevicesAfterPayment(currentUserData, subscriptionData.newDevicesCount)
@@ -704,14 +619,14 @@ const Dashboard = ({
   useEffect(() => {
     const syncUserDataOnLoad = async () => {
       if (!currentUser || !currentUser.id) return
-      
+
       try {
         const { dashboardService } = await import('../services/dashboardService.js')
-        
+
         // Проверяем тестовый период
         if (currentUser?.paymentStatus === 'test_period') {
           const updatedUser = await dashboardService.checkAndUpdateTestPeriod(currentUser)
-          
+
           if (updatedUser && updatedUser.paymentStatus === 'unpaid') {
             // Обновляем страницу, чтобы загрузить обновленные данные пользователя
             window.location.reload()
@@ -722,14 +637,14 @@ const Dashboard = ({
         // Проверяем неоплаченную подписку (5 дней для удаления)
         if (currentUser?.paymentStatus === 'unpaid') {
           const deletedUser = await dashboardService.checkAndDeleteUnpaidSubscription(currentUser)
-          
+
           if (deletedUser === null) {
             // Подписка была удалена, обновляем страницу
             window.location.reload()
             return
           }
         }
-        
+
         // Опционально: автоматическая синхронизация с n8n (можно включить при необходимости)
         // Раскомментируйте для автоматической синхронизации при каждой загрузке:
         /*
@@ -745,7 +660,7 @@ const Dashboard = ({
         // Не блокируем работу приложения, если синхронизация не удалась
       }
     }
-    
+
     syncUserDataOnLoad()
   }, [currentUser?.id]) // Проверяем только при изменении ID пользователя
 
@@ -765,7 +680,7 @@ const Dashboard = ({
     const checkSubscriptionStatus = async () => {
       try {
         const { dashboardService } = await import('../services/dashboardService.js')
-        
+
         // Проверяем тестовый период
         if (currentUser.paymentStatus === 'test_period') {
           const now = Date.now()
@@ -844,7 +759,7 @@ const Dashboard = ({
     try {
       logger.debug('Dashboard', 'Закрываем модальное окно выбора тарифа')
       setShowTariffModal(false)
-      
+
       // Показываем модальное окно обработки платежа
       if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
       setPaymentProcessingMessage(t('paymentProcessing.accountant'))
@@ -871,9 +786,9 @@ const Dashboard = ({
         tariffId: subscriptionData.tariff.id,
         tariffName: subscriptionData.tariff.name
       })
-      
+
       console.log('🔍 Dashboard: ПЕРЕД await onHandleCreateSubscription')
-      
+
       const result = await onHandleCreateSubscription(
         subscriptionData.tariff,
         subscriptionData.devices,
@@ -884,7 +799,7 @@ const Dashboard = ({
         subscriptionData.discount || 0,
         subscriptionData.promocodeId || null
       )
-      
+
       logger.info('Dashboard', 'onHandleCreateSubscription вернул результат (ПОСЛЕ await)', {
         hasResult: !!result,
         hasPaymentUrl: !!result?.paymentUrl,
@@ -892,9 +807,9 @@ const Dashboard = ({
         resultKeys: result ? Object.keys(result) : [],
         fullResult: result
       })
-      
+
       console.log('🔍 Dashboard: result после await onHandleCreateSubscription:', result)
-      
+
       // Если результат содержит требование оплаты (orderId + requiresPayment), показываем модалку ожидания
       // paymentUrl может быть пустым (оплата по реквизитам / Platega не настроен)
       if (paymentProcessingMessageTimerRef.current) {
@@ -945,7 +860,7 @@ const Dashboard = ({
           amount: result.amount,
           requiresPayment: result.requiresPayment
         })
-        
+
         // Показываем модальное окно с информацией об оплате
         const subscriptionSuccessData = {
           vpnLink: null,
@@ -960,7 +875,7 @@ const Dashboard = ({
           periodMonths: result.periodMonths || subscriptionData.periodMonths || 1,
           discount: result.discount || subscriptionData.discount || 0
         }
-        
+
         logger.info('Dashboard', 'Устанавливаем subscriptionSuccess и показываем модальное окно', {
           hasPaymentUrl: !!subscriptionSuccessData.paymentUrl,
           orderId: subscriptionSuccessData.orderId,
@@ -968,17 +883,17 @@ const Dashboard = ({
           tariffName: subscriptionSuccessData.tariffName,
           willSetShowSuccessModal: true
         })
-        
+
         setSubscriptionSuccess(subscriptionSuccessData)
         setShowSuccessModal(true)
         // Закрываем модалку обработки, чтобы была видна модалка «требуется оплата» и автопроверка («Проверяем оплату…»)
         setShowPaymentProcessing(false)
-        
+
         logger.info('Dashboard', 'Модальное окно должно быть показано', {
           showSuccessModal: true,
           subscriptionSuccess: subscriptionSuccessData
         })
-        
+
         // Открываем ссылку на оплату в новом окне как miniapp
         // Используем параметры для создания окна, похожего на miniapp
         const windowFeatures = [
@@ -993,21 +908,21 @@ const Dashboard = ({
           'menubar=no',
           'location=no'
         ].join(',')
-        
+
         const paymentWindow = window.open(
-          result.paymentUrl, 
+          result.paymentUrl,
           'payment_miniapp',
           windowFeatures
         )
-        
+
         // Фокусируемся на новом окне
         if (paymentWindow) {
           paymentWindow.focus()
-          
+
           // Обновляем сообщение модального окна обработки - окно меняется
           setPaymentProcessingMessage(t('paymentProcessing.redirecting'))
           setPaymentProcessingStatus('processing')
-          
+
           // Сохраняем ссылку на окно и orderId для отслеживания
           setPaymentWindowRef(paymentWindow)
           if (result.orderId) {
@@ -1015,8 +930,8 @@ const Dashboard = ({
             // Модальное окно обработки остается открытым для отслеживания статуса платежа
             // Оно будет менять сообщения через useEffect выше
           }
-          
-          logger.info('Dashboard', 'Окно оплаты открыто, начинаем отслеживание', { 
+
+          logger.info('Dashboard', 'Окно оплаты открыто, начинаем отслеживание', {
             orderId: result.orderId,
             paymentUrl: result.paymentUrl
           })
@@ -1029,14 +944,14 @@ const Dashboard = ({
         }
         return
       }
-      
+
       // Закрываем модальное окно обработки платежа если нет ссылки на оплату
       if (paymentProcessingMessageTimerRef.current) {
         clearTimeout(paymentProcessingMessageTimerRef.current)
         paymentProcessingMessageTimerRef.current = null
       }
       setShowPaymentProcessing(false)
-      
+
       // Если результат содержит данные подписки, показываем модальное окно успеха
       if (result) {
         logger.info('Dashboard', 'Показываем модальное окно успеха', {
@@ -1045,7 +960,7 @@ const Dashboard = ({
           devices: result.devices,
           periodMonths: result.periodMonths
         })
-        
+
         setSubscriptionSuccess({
           vpnLink: result.vpnLink || null,
           subscriptionLinks: result.subscriptionLinks || null,
@@ -1069,7 +984,7 @@ const Dashboard = ({
         errorType: error.constructor.name,
         errorStatus: error.response?.status
       }, error)
-      
+
       // Отправляем уведомление об ошибке оплаты
       try {
         const notificationInstance = notificationService.getInstance()
@@ -1081,14 +996,14 @@ const Dashboard = ({
       } catch (notificationError) {
         logger.warn('Dashboard', 'Ошибка отправки уведомления об ошибке оплаты', null, notificationError)
       }
-      
+
       // Закрываем модальное окно обработки платежа при ошибке
       if (paymentProcessingMessageTimerRef.current) {
         clearTimeout(paymentProcessingMessageTimerRef.current)
         paymentProcessingMessageTimerRef.current = null
       }
       setShowPaymentProcessing(false)
-      
+
       // Модальное окно уже закрыто, но ошибка будет показана через setError в App.jsx
       // Здесь просто логируем для диагностики
     }
@@ -1146,7 +1061,7 @@ const Dashboard = ({
       const reloadDelayMs = (typeof import.meta !== 'undefined' && import.meta.env?.DEV) ? 8000 : 2000
 
       const { dashboardService } = await import('../services/dashboardService.js')
-      
+
       // Проверка статуса через Platega API (GET /api/payment/status)
       const statusResult = await dashboardService.fetchPaymentStatus(orderId)
 
@@ -1186,139 +1101,139 @@ const Dashboard = ({
       const isPaid = paymentStatus === 'completed' || paymentStatus === 'paid'
 
       if (payment && isPaid) {
-          // Восстанавливаем tariffId только из subscriptionSuccess (тариф, выбранный при открытии оплаты), не из currentUser
-          if (!payment.tariffId && subscriptionSuccess) {
-            const subscriptionData = subscriptionSuccess
-            const tariffId = subscriptionData.tariffId ||
-              (subscriptionData.tariffName ? tariffs.find(t => (t.name || '').toLowerCase() === (subscriptionData.tariffName || '').toLowerCase())?.id : null)
-            if (tariffId) {
-              payment.tariffId = tariffId
-              payment.tariffName = subscriptionData.tariffName || tariffs.find(t => t.id === tariffId)?.name
-              payment.devices = subscriptionData.devices ?? payment.devices ?? 1
-              payment.periodMonths = subscriptionData.periodMonths ?? payment.periodMonths ?? 1
-              payment.discount = subscriptionData.discount ?? payment.discount ?? 0
-              logger.info('Dashboard', 'tariffId восстановлен из subscriptionSuccess', { orderId, tariffId: payment.tariffId, tariffName: payment.tariffName })
-            }
-          }
-
-          logger.info('Dashboard', 'Платеж подтвержден (Platega, ручная проверка), создаем подписку', {
-            orderId,
-            amount: payment.amount,
-            tariffId: payment.tariffId,
-            tariffName: payment.tariffName,
-            status: payment.status
-          })
-
-          try {
-            // Тариф только из платежа или subscriptionSuccess (оплаченный тариф). Не подставлять другой тариф.
-            let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
-            if (!tariff && (payment.tariffName || subscriptionSuccess?.tariffName)) {
-              const name = (payment.tariffName || subscriptionSuccess?.tariffName || '').trim()
-              tariff = name ? tariffs.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
-              if (tariff) {
-                payment.tariffId = tariff.id
-                payment.tariffName = tariff.name
-                logger.info('Dashboard', 'Тариф найден по имени из платежа/subscriptionSuccess', { tariffId: tariff.id, tariffName: tariff.name })
-              }
-            }
-            if (!tariff && subscriptionSuccess?.tariffId) {
-              tariff = tariffs.find(t => t.id === subscriptionSuccess.tariffId)
-              if (tariff) {
-                payment.tariffId = tariff.id
-                payment.tariffName = tariff.name
-              }
-            }
-            if (!tariff) {
-              logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
-                tariffId: payment.tariffId,
-                orderId,
-                availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
-              })
-              throw new Error('Тариф не найден')
-            }
-
-            if (subscriptionSuccess?.operationType === 'add_devices' && subscriptionSuccess?.newDevicesCount != null && currentUser) {
-              if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
-              subscriptionCreatedForOrderIdsRef.current.add(orderId)
-              try {
-                await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionSuccess.newDevicesCount)
-                await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
-                await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
-                setShowSuccessModal(false)
-                setSubscriptionSuccess(null)
-                setTimeout(() => { window.location.reload() }, 1000)
-              } catch (addDevErr) {
-                subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-                throw addDevErr
-              }
-              return
-            }
-
-            if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
-              logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (ручная проверка)', { orderId })
-              return
-            }
-            subscriptionCreatedForOrderIdsRef.current.add(orderId)
-            const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
-              await onHandleCreateSubscription(
-                tariff,
-                payment.devices || 1,
-                null, // natrockPort
-                payment.periodMonths || 1,
-                false, // testPeriod
-                'paid', // paymentMode: оплата уже проверена, создаём подписку без нового платежа
-                payment.discount || 0
-              )
-              logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
-              await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
-              const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
-              const cleanUrl = window.location.origin + cleanPath
-              if (typeof window.history?.replaceState === 'function') {
-                window.history.replaceState({}, '', cleanUrl)
-              }
-              await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
-              if (isFirstPaymentManual && typeof onSetShowKeyModal === 'function') {
-                setShowSuccessModal(false)
-                setSubscriptionSuccess(null)
-                onSetShowKeyModal(true)
-              } else {
-                if (reloadDelayMs > 2000) {
-                  logger.info('Dashboard', 'Перезагрузка через 8 сек. В DevTools → Console → включите «Preserve log», чтобы логи не пропадали.')
-                }
-                setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
-              }
-          } catch (err) {
-            subscriptionCreatedForOrderIdsRef.current.delete(orderId)
-            logger.error('Dashboard', 'Ошибка создания подписки после ручной проверки оплаты', {
-              orderId
-            }, err)
-            throw err
-          }
-        } else if (payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected')) {
-          logger.warn('Dashboard', 'Платеж не прошел (ручная проверка)', {
-            orderId,
-            status: payment.status
-          })
-          throw new Error(`Платеж не прошел. Статус: ${payment.status}`)
-        } else {
-          // Если payment есть, но статус не "completed" или "paid", логируем детали
-          if (payment) {
-            logger.warn('Dashboard', 'Платеж найден, но статус не оплачено (ручная проверка)', {
-              orderId,
-              status: payment.status,
-              originalStatus: payment.originalStatus,
-              payment: payment
-            })
-            throw new Error(`Платеж найден, но статус: ${payment.status || payment.originalStatus || 'неизвестен'}`)
-          } else {
-            logger.warn('Dashboard', 'Платеж не найден или статус не оплачено в ответе API (ручная проверка)', {
-              orderId,
-              hasPayment: !!payment,
-              paymentStatus: payment?.status
-            })
-            throw new Error('Платеж еще не завершен. Попробуйте позже.')
+        // Восстанавливаем tariffId только из subscriptionSuccess (тариф, выбранный при открытии оплаты), не из currentUser
+        if (!payment.tariffId && subscriptionSuccess) {
+          const subscriptionData = subscriptionSuccess
+          const tariffId = subscriptionData.tariffId ||
+            (subscriptionData.tariffName ? tariffs.find(t => (t.name || '').toLowerCase() === (subscriptionData.tariffName || '').toLowerCase())?.id : null)
+          if (tariffId) {
+            payment.tariffId = tariffId
+            payment.tariffName = subscriptionData.tariffName || tariffs.find(t => t.id === tariffId)?.name
+            payment.devices = subscriptionData.devices ?? payment.devices ?? 1
+            payment.periodMonths = subscriptionData.periodMonths ?? payment.periodMonths ?? 1
+            payment.discount = subscriptionData.discount ?? payment.discount ?? 0
+            logger.info('Dashboard', 'tariffId восстановлен из subscriptionSuccess', { orderId, tariffId: payment.tariffId, tariffName: payment.tariffName })
           }
         }
+
+        logger.info('Dashboard', 'Платеж подтвержден (Platega, ручная проверка), создаем подписку', {
+          orderId,
+          amount: payment.amount,
+          tariffId: payment.tariffId,
+          tariffName: payment.tariffName,
+          status: payment.status
+        })
+
+        try {
+          // Тариф только из платежа или subscriptionSuccess (оплаченный тариф). Не подставлять другой тариф.
+          let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
+          if (!tariff && (payment.tariffName || subscriptionSuccess?.tariffName)) {
+            const name = (payment.tariffName || subscriptionSuccess?.tariffName || '').trim()
+            tariff = name ? tariffs.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
+            if (tariff) {
+              payment.tariffId = tariff.id
+              payment.tariffName = tariff.name
+              logger.info('Dashboard', 'Тариф найден по имени из платежа/subscriptionSuccess', { tariffId: tariff.id, tariffName: tariff.name })
+            }
+          }
+          if (!tariff && subscriptionSuccess?.tariffId) {
+            tariff = tariffs.find(t => t.id === subscriptionSuccess.tariffId)
+            if (tariff) {
+              payment.tariffId = tariff.id
+              payment.tariffName = tariff.name
+            }
+          }
+          if (!tariff) {
+            logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
+              tariffId: payment.tariffId,
+              orderId,
+              availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
+            })
+            throw new Error('Тариф не найден')
+          }
+
+          if (subscriptionSuccess?.operationType === 'add_devices' && subscriptionSuccess?.newDevicesCount != null && currentUser) {
+            if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) return
+            subscriptionCreatedForOrderIdsRef.current.add(orderId)
+            try {
+              await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionSuccess.newDevicesCount)
+              await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
+              await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
+              setShowSuccessModal(false)
+              setSubscriptionSuccess(null)
+              setTimeout(() => { window.location.reload() }, 1000)
+            } catch (addDevErr) {
+              subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+              throw addDevErr
+            }
+            return
+          }
+
+          if (subscriptionCreatedForOrderIdsRef.current.has(orderId)) {
+            logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (ручная проверка)', { orderId })
+            return
+          }
+          subscriptionCreatedForOrderIdsRef.current.add(orderId)
+          const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
+          await onHandleCreateSubscription(
+            tariff,
+            payment.devices || 1,
+            null, // natrockPort
+            payment.periodMonths || 1,
+            false, // testPeriod
+            'paid', // paymentMode: оплата уже проверена, создаём подписку без нового платежа
+            payment.discount || 0
+          )
+          logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
+          await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
+          const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
+          const cleanUrl = window.location.origin + cleanPath
+          if (typeof window.history?.replaceState === 'function') {
+            window.history.replaceState({}, '', cleanUrl)
+          }
+          await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
+          if (isFirstPaymentManual && typeof onSetShowKeyModal === 'function') {
+            setShowSuccessModal(false)
+            setSubscriptionSuccess(null)
+            onSetShowKeyModal(true)
+          } else {
+            if (reloadDelayMs > 2000) {
+              logger.info('Dashboard', 'Перезагрузка через 8 сек. В DevTools → Console → включите «Preserve log», чтобы логи не пропадали.')
+            }
+            setTimeout(() => { window.location.replace(cleanUrl) }, reloadDelayMs)
+          }
+        } catch (err) {
+          subscriptionCreatedForOrderIdsRef.current.delete(orderId)
+          logger.error('Dashboard', 'Ошибка создания подписки после ручной проверки оплаты', {
+            orderId
+          }, err)
+          throw err
+        }
+      } else if (payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.status === 'rejected')) {
+        logger.warn('Dashboard', 'Платеж не прошел (ручная проверка)', {
+          orderId,
+          status: payment.status
+        })
+        throw new Error(`Платеж не прошел. Статус: ${payment.status}`)
+      } else {
+        // Если payment есть, но статус не "completed" или "paid", логируем детали
+        if (payment) {
+          logger.warn('Dashboard', 'Платеж найден, но статус не оплачено (ручная проверка)', {
+            orderId,
+            status: payment.status,
+            originalStatus: payment.originalStatus,
+            payment: payment
+          })
+          throw new Error(`Платеж найден, но статус: ${payment.status || payment.originalStatus || 'неизвестен'}`)
+        } else {
+          logger.warn('Dashboard', 'Платеж не найден или статус не оплачено в ответе API (ручная проверка)', {
+            orderId,
+            hasPayment: !!payment,
+            paymentStatus: payment?.status
+          })
+          throw new Error('Платеж еще не завершен. Попробуйте позже.')
+        }
+      }
     } catch (error) {
       logger.error('Dashboard', 'Ошибка при ручной проверке статуса оплаты', { orderId }, error)
       throw error
@@ -1391,7 +1306,7 @@ const Dashboard = ({
             if (typeof fn === 'function') await Promise.resolve(fn(orderId)).catch((err) => console.warn('Dashboard:', err?.message))
             return
           }
-        } catch (_) {}
+        } catch (_) { }
         if (attempt >= MAX_ATTEMPTS) {
           if (paymentAutoPollIntervalRef.current) {
             clearInterval(paymentAutoPollIntervalRef.current)
@@ -1463,7 +1378,7 @@ const Dashboard = ({
         maxAttempts
       })
       handleManualPaymentCheck(orderIdFromUrl)
-        .then(() => {})
+        .then(() => { })
         .catch((err) => {
           if (attempt < maxAttempts) {
             logger.info('Dashboard', 'Повтор проверки платежа через ' + delayMs / 1000 + ' с', {
@@ -1555,413 +1470,49 @@ const Dashboard = ({
 
         {/* Контент разделов (навигация — в боковом меню / нижней панели на мобильных) */}
         <div key={dashboardTab} className="dashboard-tab-enter">
-        {dashboardTab === 'subscription' && (
-          <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
-            {hasSubscription ? (
-              <div>
-                <div className="mb-3 sm:mb-4">
-                  <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">{t('dashboard.currentSubscription')}</h2>
-                </div>
-                <div className="space-y-3">
-                  {/* Основная карточка подписки - компактный дизайн */}
-                  <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-lg sm:rounded-xl p-4 sm:p-5 border border-slate-700">
-                    {/* Заголовок с тарифом и статусом - компактная версия */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
-                      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                        <h3 className="text-[clamp(1.25rem,1.15rem+0.5vw,1.5rem)] font-bold text-white">{currentUser.tariffName || t('dashboard.notSpecified')}</h3>
-                        {currentUser.tariffName?.toLowerCase() === 'super' && (
-                          <span className="px-2 py-0.5 bg-blue-600 text-white text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] font-bold rounded-full">PREMIUM</span>
-                        )}
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg ${userStatus.color} font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]`}>
-                          {userStatus.status === 'active' && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
-                          {(userStatus.status === 'expiring_soon' || userStatus.status === 'grace') && <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
-                          {userStatus.status === 'expired' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
-                          {userStatus.status === 'unpaid' && <XCircle className="w-3.5 h-3.5 flex-shrink-0" />}
-                          {userStatus.status === 'test_period' && <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
-                          {userStatus.status === 'no-key' && <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />}
-                          <span>{userStatus.label}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Компактная сетка метрик */}
-                    <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
-                      {/* Устройств */}
-                      <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center relative">
-                        <div className="flex items-center justify-center gap-1.5 mb-1">
-                          <Smartphone className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                          <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">{t('dashboard.devices')}</p>
-                        </div>
-                        <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
-                          {currentUser.devices || currentTariff?.devices || 1}
-                        </p>
-                        {/* Кнопка «Добавить устройства» для Super — прямо в карточке устройств */}
-                        {(() => {
-                          const isSuper = currentUser?.tariffName?.toLowerCase() === 'super' ||
-                            (currentTariff && (currentTariff.plan?.toLowerCase() === 'super' || currentTariff.name?.toLowerCase() === 'super'))
-                          const canAdd = (userStatus.status === 'active' || userStatus.status === 'expiring_soon' || userStatus.status === 'test_period') && onHandleAddDevices
-                          return isSuper && canAdd
-                        })() && (
-                          <button
-                            type="button"
-                            onClick={() => { setAdditionalDevices(1); setShowAddDevicesModal(true) }}
-                            disabled={creatingSubscription}
-                            className="mt-2 w-full min-h-[28px] px-2 py-1 bg-blue-600/90 hover:bg-blue-600 text-white text-[clamp(0.65rem,0.6rem+0.2vw,0.75rem)] font-semibold rounded-md transition-all flex items-center justify-center gap-1 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
-                            aria-label={t('dashboard.addDevicesAria', 'Добавить устройства')}
-                          >
-                            <span className="inline-flex items-center gap-0.5">+ {t('dashboard.addDevices', 'Добавить устройства')}</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Период или Трафик */}
-                      {currentUser.periodMonths ? (
-                        <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
-                          <div className="flex items-center justify-center gap-1.5 mb-1">
-                            <Calendar className="w-4 h-4 text-green-400 flex-shrink-0" />
-                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">{t('dashboard.period')}</p>
-                          </div>
-                          <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
-                            {currentUser.periodMonths} {currentUser.periodMonths === 1 ? t('dashboard.month') : t('dashboard.months')}
-                          </p>
-                        </div>
-                      ) : (
-                        (currentTariff || currentUser?.paymentStatus) && (
-                          <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
-                            <div className="flex items-center justify-center gap-1.5 mb-1">
-                              <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-                              <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">{t('dashboard.traffic')}</p>
-                            </div>
-                            <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
-                              {currentUser?.paymentStatus === 'test_period' ? '3 GB' :
-                               currentTariff?.trafficGB > 0 ? `${currentTariff.trafficGB} GB` : '∞'}
-                            </p>
-                          </div>
-                        )
-                      )}
-
-                      {/* Трафик или пустой */}
-                      {(currentTariff || currentUser?.paymentStatus) && currentUser.periodMonths && (
-                        <div className="bg-slate-900/60 rounded-lg p-2.5 sm:p-3 border border-slate-700/50 text-center">
-                          <div className="flex items-center justify-center gap-1.5 mb-1">
-                            <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] font-medium">{t('dashboard.traffic')}</p>
-                          </div>
-                          <p className="text-white font-bold text-[clamp(1rem,0.95rem+0.25vw,1.25rem)]">
-                            {currentUser?.paymentStatus === 'test_period' ? '3 GB' :
-                             currentTariff?.trafficGB > 0 ? `${currentTariff.trafficGB} GB` : '∞'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Компактная строка с датой и статусом оплаты */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-2.5 sm:p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-3">
-                      {currentUser.expiresAt && (
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <Calendar className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">{t('dashboard.validityPeriod')}</p>
-                            {timeRemaining && !timeRemaining.isExpired ? (
-                              <div>
-                                <p className={`font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] ${
-                                  timeRemaining.days <= 3 && timeRemaining.months === 0 
-                                    ? 'text-yellow-400' 
-                                    : timeRemaining.days <= 7 && timeRemaining.months === 0
-                                    ? 'text-orange-400'
-                                    : 'text-white'
-                                }`}>
-                                  {formatTimeRemaining(currentUser.expiresAt)}
-                                </p>
-                                <p className="text-slate-500 text-[clamp(0.65rem,0.6rem+0.25vw,0.7rem)] mt-0.5">
-                                  До {formatDate(currentUser.expiresAt)}
-                                </p>
-                              </div>
-                            ) : (
-                              <p className="text-red-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                                {t('dashboard.expired')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <CreditCard className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-slate-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] mb-0.5">{t('dashboard.payment')}</p>
-                          <p className={`font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] ${
-                            currentUser.paymentStatus === 'paid' ? 'text-green-400' :
-                            currentUser.paymentStatus === 'test_period' ? 'text-yellow-400' :
-                            currentUser.paymentStatus === 'unpaid' ? 'text-red-400' :
-                            'text-slate-300'
-                          }`}>
-                            {currentUser.paymentStatus === 'paid' ? t('dashboard.paid') : 
-                             currentUser.paymentStatus === 'test_period' ? t('dashboard.test') :
-                             currentUser.paymentStatus === 'unpaid' ? t('dashboard.unpaid') : 
-                             t('dashboard.dash')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Компактные предупреждения */}
-                    <div className="space-y-2 sm:space-y-2.5">
-                      {/* Подписка истекает через X дней — показываем блок и кнопку «Продлить» */}
-                      {userStatus.status === 'expiring_soon' && currentUser?.expiresAt && (
-                        <div className="p-2.5 sm:p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
-                          <div className="flex items-start gap-2">
-                            <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-yellow-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                                  {t('dashboard.expiringIn')} {timeRemaining?.days != null ? (timeRemaining.days === 0 ? t('dashboard.lessThanDay') : `${timeRemaining.days} ${timeRemaining.days === 1 ? t('dashboard.day_one') : timeRemaining.days < 5 ? t('dashboard.day_few') : t('dashboard.day_many')}`) : t('dashboard.daysDefault')}
-                                </p>
-                                <p className="text-yellow-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
-                                  {t('dashboard.renewHint', { date: formatDate(currentUser.expiresAt) })}
-                                </p>
-                              </div>
-                              {onHandleRenewSubscription && (
-                                <button
-                                  onClick={async () => {
-                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
-                                    setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-      setShowPaymentProcessing(true)
-                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
-                                      setPaymentProcessingMessage(t('paymentProcessing.accountantLong'))
-                                      paymentProcessingMessageTimerRef.current = null
-                                    }, 3000)
-                                    try {
-                                      const result = await onHandleRenewSubscription()
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                      if (result && result.paymentUrl && result.requiresPayment) {
-                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
-                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
-                                        if (paymentWindow) paymentWindow.focus()
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: t('dashboard.paymentWindowOpen'), tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || t('dashboard.notSpecified'), devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
-                                        setShowSuccessModal(true)
-                                      }
-                                    } catch (error) {
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                    }
-                                  }}
-                                  disabled={creatingSubscription || showPaymentProcessing}
-                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                                  aria-label={t('dashboard.renewAria')}
-                                >
-                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                                  <span>{creatingSubscription || showPaymentProcessing ? t('dashboard.processing') : t('dashboard.renew')}</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {/* Просрочено до 5 дней — показываем блок и кнопку «Продлить», подписка не исчезает */}
-                      {userStatus.status === 'grace' && (
-                        <div className="p-2.5 sm:p-3 bg-orange-900/20 border border-orange-800/50 rounded-lg">
-                          <div className="flex items-start gap-2">
-                            <Clock className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-orange-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                                  {userStatus.label}
-                                </p>
-                                <p className="text-orange-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
-                                  {t('dashboard.payWithin5Days')}
-                                </p>
-                              </div>
-                              {onHandleRenewSubscription && (
-                                <button
-                                  onClick={async () => {
-                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
-                                    setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-      setShowPaymentProcessing(true)
-                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
-                                      setPaymentProcessingMessage(t('paymentProcessing.accountantLong'))
-                                      paymentProcessingMessageTimerRef.current = null
-                                    }, 3000)
-                                    try {
-                                      const result = await onHandleRenewSubscription()
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                      if (result && result.paymentUrl && result.requiresPayment) {
-                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
-                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
-                                        if (paymentWindow) {
-                                          paymentWindow.focus()
-                                          setPaymentWindowRef(paymentWindow)
-                                          setPaymentOrderId(result.orderId)
-                                        }
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: t('dashboard.paymentWindowOpen'), tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || t('dashboard.notSpecified'), devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
-                                        setShowSuccessModal(true)
-                                      }
-                                    } catch (error) {
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                    }
-                                  }}
-                                  disabled={creatingSubscription || showPaymentProcessing}
-                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                                  aria-label={t('dashboard.renewAria')}
-                                >
-                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                                  <span>{creatingSubscription || showPaymentProcessing ? t('dashboard.processing') : t('dashboard.renew')}</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {currentUser?.paymentStatus === 'test_period' && currentUser?.testPeriodEndDate && (
-                        <div className="p-2.5 sm:p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
-                          <div className="flex items-start gap-2">
-                            <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-yellow-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">Тест до {formatDate(currentUser.testPeriodEndDate)}</p>
-                                <p className="text-yellow-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">{t('dashboard.afterExpiryNote')}</p>
-                              </div>
-                              {onHandleRenewSubscription && (
-                                <button
-                                  onClick={async () => {
-                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
-                                    setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-      setShowPaymentProcessing(true)
-                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
-                                      setPaymentProcessingMessage(t('paymentProcessing.accountantLong'))
-                                      paymentProcessingMessageTimerRef.current = null
-                                    }, 3000)
-                                    try {
-                                      const result = await onHandleRenewSubscription()
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                      if (result && result.paymentUrl && result.requiresPayment) {
-                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
-                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
-                                        if (paymentWindow) paymentWindow.focus()
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: t('dashboard.paymentWindowOpen'), tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || t('dashboard.notSpecified'), devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
-                                        setShowSuccessModal(true)
-                                      }
-                                    } catch (error) {
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                    }
-                                  }}
-                                  disabled={creatingSubscription || showPaymentProcessing}
-                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                                  aria-label="Оплатить подписку"
-                                >
-                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {currentUser?.paymentStatus === 'unpaid' && (() => {
-                        const unpaidStartDate = currentUser.unpaidStartDate || currentUser.testPeriodEndDate
-                      const daysUnpaid = unpaidStartDate 
-                        ? Math.floor((Date.now() - new Date(unpaidStartDate).getTime()) / (24 * 60 * 60 * 1000))
-                        : 0
-                      const daysLeft = 5 - daysUnpaid
-                      const isExpiringSoon = daysLeft <= 2 && daysLeft > 0
-                      const isExpired = daysLeft <= 0
-
-                      return (
-                        <div className={`p-2.5 sm:p-3 border rounded-lg ${isExpired || isExpiringSoon ? 'bg-red-900/30 border-red-800/70' : 'bg-red-900/20 border-red-800/50'}`}>
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${isExpired || isExpiringSoon ? 'text-red-400 animate-pulse' : 'text-red-400'}`} />
-                            <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-red-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                                  {isExpired ? t('dashboard.subscriptionWillBeRemoved') : t('dashboard.paymentRequiredDays', { days: daysLeft, dayWord: daysLeft === 1 ? t('dashboard.day_one') : daysLeft < 5 ? t('dashboard.day_few') : t('dashboard.day_many') })}
-                                </p>
-                                {!isExpired && (
-                                  <p className="text-red-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
-                                    Необходимо произвести оплату для продолжения
-                                  </p>
-                                )}
-                              </div>
-                              {!isExpired && (
-                                <button
-                                  onClick={async () => {
-                                    if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
-                                    setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-      setShowPaymentProcessing(true)
-                                    paymentProcessingMessageTimerRef.current = setTimeout(() => {
-                                      setPaymentProcessingMessage(t('paymentProcessing.accountantLong'))
-                                      paymentProcessingMessageTimerRef.current = null
-                                    }, 3000)
-                                    try {
-                                      const result = await onHandleRenewSubscription()
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                      if (result && result.paymentUrl && result.requiresPayment) {
-                                        const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
-                                        const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
-                                        if (paymentWindow) {
-                                          paymentWindow.focus()
-                                          setPaymentWindowRef(paymentWindow)
-                                          setPaymentOrderId(result.orderId)
-                                          logger.info('Dashboard', 'Окно оплаты открыто (unpaid), начинаем отслеживание', { orderId: result.orderId, paymentUrl: result.paymentUrl })
-                                        }
-                                        setSubscriptionSuccess({ vpnLink: null, paymentUrl: result.paymentUrl, orderId: result.orderId, amount: result.amount, requiresPayment: true, message: t('dashboard.paymentWindowOpen'), tariffId: result.tariffId || currentUser.tariffId || null, tariffName: result.tariffName || currentUser.tariffName || t('dashboard.notSpecified'), devices: result.devices || currentUser.devices || 1, periodMonths: result.periodMonths || currentUser.periodMonths || 1, discount: result.discount || 0 })
-                                        setShowSuccessModal(true)
-                                      }
-                                    } catch (error) {
-                                      if (paymentProcessingMessageTimerRef.current) { clearTimeout(paymentProcessingMessageTimerRef.current); paymentProcessingMessageTimerRef.current = null }
-                                      setShowPaymentProcessing(false)
-                                    }
-                                  }}
-                                  disabled={creatingSubscription || showPaymentProcessing}
-                                  className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                                  aria-label="Оплатить подписку"
-                                >
-                                  <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                                  <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })()}
-                    </div>
-
+          {dashboardTab === 'subscription' && (
+            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
+              {hasSubscription ? (
+                <div>
+                  <div className="mb-3 sm:mb-4">
+                    <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">{t('dashboard.currentSubscription')}</h2>
+                  </div>
+                  <div className="space-y-3">
+                    {/* Основная карточка подписки - компактный дизайн */}
+                    <SubscriptionInfoCard
+                      currentUser={currentUser}
+                      currentTariff={currentTariff}
+                      userStatus={userStatus}
+                      timeRemaining={timeRemaining}
+                      hasSubscription={hasSubscription}
+                      creatingSubscription={creatingSubscription}
+                      showPaymentProcessing={showPaymentProcessing}
+                      onHandleAddDevices={onHandleAddDevices}
+                      onHandleRenewSubscription={onHandleRenewSubscription}
+                      setShowAddDevicesModal={setShowAddDevicesModal}
+                      setAdditionalDevices={setAdditionalDevices}
+                      setPaymentProcessingMessage={setPaymentProcessingMessage}
+                      setShowPaymentProcessing={setShowPaymentProcessing}
+                      setSubscriptionSuccess={setSubscriptionSuccess}
+                      setShowSuccessModal={setShowSuccessModal}
+                      setPaymentWindowRef={setPaymentWindowRef}
+                      setPaymentOrderId={setPaymentOrderId}
+                      paymentProcessingMessageTimerRef={paymentProcessingMessageTimerRef}
+                    />
                     {/* Компактный блок управления подключением */}
-                    <div className="mt-3 p-2.5 sm:p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 flex items-center justify-center">
-                      {currentUser.uuid ? (
-                        <button
-                          onClick={() => onSetShowKeyModal(true)}
-                          className="btn-icon-only-mobile btn-label-adaptive min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
-                          aria-label={t('dashboard.config')}
-                        >
-                          <Globe className="w-4 h-4 flex-shrink-0" />
-                          <span className="btn-text">{t('dashboard.config')}</span>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={onGetKey}
-                          className="btn-icon-only-mobile btn-label-adaptive min-h-[40px] w-full sm:w-auto px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] rounded-lg transition-all flex items-center justify-center gap-2 touch-manipulation whitespace-nowrap"
-                          aria-label={t('dashboard.getKey')}
-                        >
-                          <Shield className="w-4 h-4 flex-shrink-0" />
-                          <span className="btn-text">{t('dashboard.getKey')}</span>
-                        </button>
-                      )}
-                    </div>
-
+                    <VPNKeyControl
+                      currentUser={currentUser}
+                      onSetShowKeyModal={onSetShowKeyModal}
+                      onGetKey={onGetKey}
+                    />
                     {/* Компактная кнопка продления для expired статуса */}
                     {userStatus.status === 'expired' && (
                       <div className="mt-3">
                         <button
                           onClick={async () => {
                             if (paymentProcessingMessageTimerRef.current) clearTimeout(paymentProcessingMessageTimerRef.current)
-setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-                                    setShowPaymentProcessing(true)
+                            setPaymentProcessingMessage(t('paymentProcessing.accountant'))
+                            setShowPaymentProcessing(true)
                             paymentProcessingMessageTimerRef.current = setTimeout(() => {
                               setPaymentProcessingMessage(t('paymentProcessing.accountantLong'))
                               paymentProcessingMessageTimerRef.current = null
@@ -2048,437 +1599,274 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                     )}
                   </div>
                 </div>
+              ) : (
+                <TariffsContainer
+                  tariffs={tariffs}
+                  settings={settings}
+                  creatingSubscription={creatingSubscription}
+                  handleTariffSelect={handleTariffSelect}
+                />
+              )
+              }
+
+              {/* Реферальная программа */}
+              <div className="mt-6 pt-6 border-t border-slate-700/50">
+                <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] font-bold text-white mb-3 flex items-center gap-2">
+                  <Gift className="w-5 h-5 text-blue-400" />
+                  {t('dashboard.inviteFriend')}
+                </h3>
+                <p className="text-slate-400 text-[clamp(0.8rem,0.75rem+0.25vw,0.875rem)] mb-4">
+                  {t('dashboard.referralDescription')}
+                </p>
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
+                      <span className="px-3 py-2.5 text-slate-500 text-sm font-mono shrink-0 flex items-center gap-1.5">
+                        <Link2 className="w-4 h-4" /> {t('dashboard.linkLabel')}
+                      </span>
+                      <input
+                        type="text"
+                        readOnly
+                        value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : '…'}
+                        className="flex-1 min-h-[44px] px-3 py-2.5 bg-transparent text-slate-200 text-sm font-mono border-0 outline-none"
+                        aria-label={t('dashboard.referralLinkAria')}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => currentUser.referralCode && onCopy(`${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}`)}
+                        disabled={!currentUser.referralCode}
+                        className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
+                        aria-label={t('dashboard.copyLinkAria')}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-500 text-sm">{t('dashboard.code')}</span>
+                    <div className="inline-flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
+                      <code className="px-3 py-2 text-slate-200 font-mono text-sm font-bold">
+                        {currentUser.referralCode || '…'}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => currentUser.referralCode && onCopy(currentUser.referralCode)}
+                        disabled={!currentUser.referralCode}
+                        className="min-h-[40px] min-w-[40px] px-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
+                        aria-label={t('dashboard.copyCodeAria')}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-300 text-sm">
+                    <Gift className="w-4 h-4 text-green-400 shrink-0" />
+                    <span><Trans i18nKey="dashboard.referralBalance" values={{ count: Number(currentUser.referralBonusBalance) || 0 }} components={{ strong: <strong className="text-white" /> }} /></span>
+                  </div>
+                </div>
               </div>
-            ) : (
-              <div>
-                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-2 sm:mb-3">{t('dashboard.chooseTariff')}</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                  {tariffs.filter(t => t.active !== false).map((tariff) => {
-                    const planKey = (tariff.plan || tariff.name || '').toLowerCase()
-                    const nameKey = (tariff.name || '').toLowerCase()
-                    const isSuper = planKey === 'super' || tariff.name === 'Super'
-                    const isMulti = planKey === 'multi' || tariff.name === 'MULTI'
-                    const isMegaMix = nameKey === 'megamix'
-                    const tariffDescriptions = {
-                      super: 'Идеален для смартфона и планшета: приоритетная поддержка и быстрое подключение. Обход блокировок и белых списков — один аккаунт для мобильного интернета.',
-                      multi: 'До 5 устройств сразу: ТВ-приставки, компьютеры, роутеры. Высокая скорость без белого списка — для дома и офиса. Подключите всё, что нужно.',
-                      megamix: 'Два тарифа в одной подписке: объедините возможности Super и MULTI. Больше гибкости и выгоды, когда нужны и мобильный доступ, и домашняя сеть.',
-                    }
-                    const linkedConfigs = Array.isArray(tariff.linkedTariffConfigs) && tariff.linkedTariffConfigs.length > 0 ? tariff.linkedTariffConfigs : null
-                    const linkedIds = Array.isArray(tariff.linkedTariffIds) ? tariff.linkedTariffIds.filter(Boolean) : []
-                    const isCombinedTariff = linkedConfigs?.length > 0 || linkedIds.length > 0
-                    let totalDevices = tariff.devices ?? 1
-                    let totalTrafficGB = tariff.trafficGB ?? 0
-                    let linkedBreakdown = null
-                    if (linkedConfigs?.length > 0) {
-                      totalDevices = linkedConfigs.reduce((sum, c) => sum + (Number(c.devices) || 1), 0)
-                      const hasUnlimited = linkedConfigs.some(c => (Number(c.trafficGB) ?? 0) === 0)
-                      totalTrafficGB = hasUnlimited ? 0 : linkedConfigs.reduce((sum, c) => sum + (Number(c.trafficGB) || 0), 0)
-                      linkedBreakdown = linkedConfigs.map(c => {
-                        const name = tariffs.find(t => t.id === c.tariffId)?.name || c.tariffId || ''
-                        const d = Number(c.devices) || 1
-                        const tr = (Number(c.trafficGB) ?? 0)
-                        return { name, devices: d, trafficGB: tr }
-                      })
-                    } else if (linkedIds.length > 0) {
-                      const resolved = linkedIds.map(tid => tariffs.find(t => t.id === tid)).filter(Boolean)
-                      if (resolved.length > 0) {
-                        totalDevices = resolved.reduce((sum, t) => sum + (Number(t.devices) || 1), 0)
-                        const hasUnlimited = resolved.some(t => (Number(t.trafficGB) ?? 0) === 0)
-                        totalTrafficGB = hasUnlimited ? 0 : resolved.reduce((sum, t) => sum + (Number(t.trafficGB) || 0), 0)
-                        linkedBreakdown = resolved.map(t => ({ name: t.name, devices: Number(t.devices) || 1, trafficGB: t.trafficGB ?? 0 }))
-                      }
-                    }
-                    const devicesCount = isCombinedTariff ? totalDevices : (tariff.devices ?? 1)
-                    const devicesWord = devicesCount === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany')
-                    const description = tariff.description ?? (
-                      isSuper ? tariffDescriptions.super
-                        : isMulti ? tariffDescriptions.multi
-                          : isMegaMix ? tariffDescriptions.megamix
-                            : `До ${devicesCount} ${devicesWord}. Стандартная поддержка и стабильное подключение. Подойдёт для повседневного использования.`
-                    )
-                    const conditionsFromSettings = settings?.tariffConditions?.[nameKey] || settings?.tariffConditions?.[planKey] || (nameKey !== 'super' && nameKey !== 'multi' && nameKey !== 'megamix' ? settings?.tariffConditions?.default : null)
-                    const trafficGB = isCombinedTariff ? totalTrafficGB : (tariff.trafficGB ?? 0)
-                    const durationDays = tariff.durationDays ?? 30
-                    const durationMonths = durationDays >= 30 ? Math.round(durationDays / 30) : 0
-                    const durationLabel = durationMonths >= 1 ? `${durationMonths} ${t('dashboard.month', 'мес.')}` : `${durationDays} ${t('dashboard.daysShort', 'дн.')}`
-                    return (
-                      <div key={tariff.id} className="bg-slate-800/80 rounded-lg p-3 sm:p-3.5 border border-slate-700 flex flex-col min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1.5">
-                          <h3 className="text-[clamp(1.1rem,1rem+0.4vw,1.35rem)] font-bold text-white truncate">{tariff.name}</h3>
-                          {isSuper && (
-                            <span className="px-1.5 py-0.5 bg-blue-600 text-white text-[10px] sm:text-xs font-bold rounded-full shrink-0">{t('dashboard.hit')}</span>
-                          )}
-                        </div>
-                        <div className="mb-2">
-                          <span className="text-[clamp(1.25rem,1.15rem+0.35vw,1.6rem)] font-bold text-blue-400">{tariff.price ?? 0}</span>
-                          <span className="text-slate-400 ml-1 text-xs sm:text-sm">{t('dashboard.perMonthShort')}</span>
-                        </div>
-                        <div className="mb-2 py-2 px-2.5 bg-slate-900/60 rounded-lg border border-slate-700/80">
-                          <p className="text-slate-400 text-[0.6875rem] sm:text-xs font-medium mb-1.5">{t('dashboard.whatIncluded', 'Что входит')}</p>
-                          <ul className="space-y-1 text-[0.6875rem] sm:text-xs text-slate-300">
-                            <li className="flex justify-between gap-2">
-                              <span className="text-slate-500">{t('dashboard.devices', 'Устройств')}</span>
-                              <span className="font-medium text-slate-300">{devicesCount}</span>
-                            </li>
-                            <li className="flex justify-between gap-2">
-                              <span className="text-slate-500">{t('dashboard.traffic', 'Трафик')}</span>
-                              <span className="font-medium text-slate-300">{trafficGB > 0 ? `${trafficGB} GB` : t('dashboard.unlimited', 'Безлимит')}</span>
-                            </li>
-                            <li className="flex justify-between gap-2">
-                              <span className="text-slate-500">{t('dashboard.periodShort', 'Срок')}</span>
-                              <span className="font-medium text-slate-300">{durationLabel}</span>
-                            </li>
-                          </ul>
-                          {linkedBreakdown && linkedBreakdown.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-slate-700/80">
-                              <p className="text-slate-500 text-[0.625rem] sm:text-[0.6875rem] font-medium mb-1">{t('dashboard.includesTariffs', 'Входит по тарифам')}</p>
-                              <ul className="space-y-0.5 text-[0.625rem] sm:text-[0.6875rem] text-slate-400">
-                                {linkedBreakdown.map((item, idx) => (
-                                  <li key={idx}>
-                                    <span className="font-medium text-slate-400">{item.name}</span>
-                                    {' — '}
-                                    <span>{item.devices} {item.devices === 1 ? t('dashboard.deviceOne') : t('dashboard.devicesMany').toLowerCase()}</span>
-                                    {', '}
-                                    <span>{item.trafficGB > 0 ? `${item.trafficGB} GB` : t('dashboard.unlimited', 'Безлимит').toLowerCase()}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                        <div className="mb-3 flex-1 min-h-0">
-                          <p className="text-slate-400 text-xs sm:text-[0.8125rem] leading-snug line-clamp-3">
-                            {description}
-                          </p>
-                          {conditionsFromSettings && conditionsFromSettings.trim() && (
-                            <p className="text-slate-500 text-[0.6875rem] sm:text-xs leading-snug mt-1.5 line-clamp-2">
-                              {conditionsFromSettings.trim()}
-                            </p>
-                          )}
-                        </div>
+
+            </div >
+          )}
+
+          {
+            dashboardTab === 'profile' && (
+              <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-4 sm:mb-5 md:mb-6">{t('dashboard.profileSettings')}</h2>
+                <div className="space-y-4 sm:space-y-5 md:space-y-6">
+                  <div>
+                    <label htmlFor="profile-email" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Email</label>
+                    <input
+                      key="profile-email-input-disabled"
+                      id="profile-email"
+                      name="profile-email"
+                      type="email"
+                      value={currentUser.email}
+                      disabled
+                      className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-not-allowed"
+                    />
+                    <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">Email нельзя изменить</p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="profile-subid" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">SubId (ID подписки)</label>
+                    {currentUser.subId ? (
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          key="profile-subid-input-disabled"
+                          id="profile-subid"
+                          name="profile-subid"
+                          type="text"
+                          value={currentUser.subId}
+                          disabled
+                          readOnly
+                          className="flex-1 min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-text font-mono text-sm sm:text-base"
+                        />
                         <button
-                          onClick={() => handleTariffSelect(tariff)}
-                          disabled={creatingSubscription}
-                          className="w-full min-h-[38px] sm:min-h-[40px] px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-sm transition-all flex items-center justify-center touch-manipulation mt-auto"
-                          aria-label={t('dashboard.selectTariffAria', { name: tariff.name })}
+                          onClick={() => onCopy(currentUser.subId)}
+                          className="min-h-[44px] min-w-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center touch-manipulation"
+                          title="Копировать SubId"
+                          aria-label="Копировать SubId"
                         >
-                          {t('dashboard.selectTariffBtn')} {tariff.name}
+                          <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
                       </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Реферальная программа */}
-            <div className="mt-6 pt-6 border-t border-slate-700/50">
-              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] font-bold text-white mb-3 flex items-center gap-2">
-                <Gift className="w-5 h-5 text-blue-400" />
-                {t('dashboard.inviteFriend')}
-              </h3>
-              <p className="text-slate-400 text-[clamp(0.8rem,0.75rem+0.25vw,0.875rem)] mb-4">
-                {t('dashboard.referralDescription')}
-              </p>
-              <div className="space-y-3">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex-1 flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
-                    <span className="px-3 py-2.5 text-slate-500 text-sm font-mono shrink-0 flex items-center gap-1.5">
-                      <Link2 className="w-4 h-4" /> {t('dashboard.linkLabel')}
-                    </span>
-                    <input
-                      type="text"
-                      readOnly
-                      value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : '…'}
-                      className="flex-1 min-h-[44px] px-3 py-2.5 bg-transparent text-slate-200 text-sm font-mono border-0 outline-none"
-                      aria-label={t('dashboard.referralLinkAria')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => currentUser.referralCode && onCopy(`${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}`)}
-                      disabled={!currentUser.referralCode}
-                      className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
-                      aria-label={t('dashboard.copyLinkAria')}
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-slate-500 text-sm">{t('dashboard.code')}</span>
-                  <div className="inline-flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
-                    <code className="px-3 py-2 text-slate-200 font-mono text-sm font-bold">
-                      {currentUser.referralCode || '…'}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => currentUser.referralCode && onCopy(currentUser.referralCode)}
-                      disabled={!currentUser.referralCode}
-                      className="min-h-[40px] min-w-[40px] px-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
-                      aria-label={t('dashboard.copyCodeAria')}
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-slate-300 text-sm">
-                  <Gift className="w-4 h-4 text-green-400 shrink-0" />
-                  <span><Trans i18nKey="dashboard.referralBalance" values={{ count: Number(currentUser.referralBonusBalance) || 0 }} components={{ strong: <strong className="text-white" /> }} /></span>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {dashboardTab === 'profile' && (
-          <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
-            <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-4 sm:mb-5 md:mb-6">{t('dashboard.profileSettings')}</h2>
-            <div className="space-y-4 sm:space-y-5 md:space-y-6">
-              <div>
-                <label htmlFor="profile-email" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">Email</label>
-                <input
-                  key="profile-email-input-disabled"
-                  id="profile-email"
-                  name="profile-email"
-                  type="email"
-                  value={currentUser.email}
-                  disabled
-                  className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-not-allowed"
-                />
-                <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">Email нельзя изменить</p>
-              </div>
-
-              <div>
-                <label htmlFor="profile-subid" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">SubId (ID подписки)</label>
-                {currentUser.subId ? (
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      key="profile-subid-input-disabled"
-                      id="profile-subid"
-                      name="profile-subid"
-                      type="text"
-                      value={currentUser.subId}
-                      disabled
-                      readOnly
-                      className="flex-1 min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-text font-mono text-sm sm:text-base"
-                    />
-                    <button
-                      onClick={() => onCopy(currentUser.subId)}
-                      className="min-h-[44px] min-w-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center touch-manipulation"
-                      title="Копировать SubId"
-                      aria-label="Копировать SubId"
-                    >
-                      <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-500 text-base flex items-center">
-                    <span>{t('dashboard.notGenerated')}</span>
-                  </div>
-                )}
-                <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">{t('dashboard.subIdHint')}</p>
-              </div>
-
-              <div>
-                <label htmlFor={editingProfile ? "profile-name" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">{t('dashboard.name')}</label>
-                {editingProfile ? (
-                  <input
-                    key="profile-name-input"
-                    id="profile-name"
-                    name="profile-name"
-                    type="text"
-                    value={profileData.name || ''}
-                    onChange={onProfileNameChange}
-                    placeholder={t('dashboard.namePlaceholder')}
-                    className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
-                    autoFocus={false}
-                  />
-                ) : (
-                  <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base flex items-center">
-                    {currentUser.name || <span className="text-slate-500">{t('dashboard.notSet')}</span>}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor={editingProfile ? "profile-phone" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">{t('dashboard.phone')}</label>
-                {editingProfile ? (
-                  <input
-                    key="profile-phone-input"
-                    id="profile-phone"
-                    name="profile-phone"
-                    type="tel"
-                    value={profileData.phone || ''}
-                    onChange={onProfilePhoneChange}
-                    placeholder="+7 (999) 123-45-67"
-                    className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
-                    autoFocus={false}
-                  />
-                ) : (
-                  <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base flex items-center">
-                    {currentUser.phone || <span className="text-slate-500">{t('dashboard.notSet')}</span>}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4 sm:space-y-5">
-                <TelegramBindCard
-                  currentUser={currentUser}
-                  onBoundChange={onRefreshUserAfterPayment}
-                  onCopy={onCopy}
-                />
-              </div>
-
-              {hasGoogleProvider && typeof onSetPasswordForEmail === 'function' && (
-                <SetPasswordForEmailCard
-                  onSetPassword={onSetPasswordForEmail}
-                  t={t}
-                />
-              )}
-
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-                {editingProfile ? (
-                  <>
-                    <button
-                      onClick={onHandleUpdateProfile}
-                      className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                      aria-label={t('dashboard.saveProfileAria')}
-                    >
-                      {t('common.save')}
-                    </button>
-                    <button
-                      onClick={() => onSetEditingProfile(false)}
-                      className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                      aria-label={t('dashboard.cancelEditAria')}
-                    >
-                      {t('common.cancel')}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => onSetEditingProfile(true)}
-                    className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                    aria-label={t('dashboard.editProfileAria')}
-                  >
-                    {t('dashboard.editProfile')}
-                  </button>
-                )}
-              </div>
-
-              <div className="border-t border-slate-800 pt-4 sm:pt-5 md:pt-6">
-                <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-red-400 mb-3 sm:mb-4">{t('dashboard.dangerZone')}</h3>
-                <button
-                  onClick={onHandleDeleteAccount}
-                  className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                  aria-label="Удалить аккаунт"
-                >
-                  Удалить аккаунт
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {dashboardTab === 'payments' && (
-          <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
-            <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-4 sm:mb-5 md:mb-6">{t('dashboard.paymentHistory')}</h2>
-            {paymentsLoading ? (
-              <div className="flex items-center justify-center py-8 sm:py-10 md:py-12">
-                <div className="w-7 h-7 sm:w-8 sm:h-8 border-2 border-slate-600 border-t-blue-600 rounded-full animate-spin"></div>
-              </div>
-            ) : payments.length === 0 ? (
-              <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 text-center py-8 sm:py-10 md:py-12">{t('dashboard.noPayments')}</p>
-            ) : (
-              <>
-                {/* Mobile Card Layout */}
-                <div className="md:hidden space-y-3">
-                  {payments.map((payment) => (
-                    <div key={payment.id} className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                      <div className="space-y-2">
-                        <div>
-                          <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.date')}</span>
-                          <p className="text-slate-200 mt-0.5 text-sm">{formatDate(payment.createdAt)}</p>
-                        </div>
-                        <div>
-                          <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.tariffTableHeader')}</span>
-                          <p className="text-slate-200 mt-0.5 text-sm">{payment.tariffName || 'Не указан'}</p>
-                        </div>
-                        <div>
-                          <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.amount')}</span>
-                          <p className="text-slate-200 font-semibold mt-0.5 text-sm">{payment.amount} ₽</p>
-                        </div>
-                        <div>
-                          <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.statusTableHeader')}</span>
-                          <div className="mt-0.5">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                              payment.status === 'completed' 
-                                ? 'bg-green-900/30 text-green-400' 
-                                : 'bg-slate-700 text-slate-400'
-                            }`}>
-                              {payment.status === 'completed' ? 'Успех' : payment.status}
-                            </span>
-                          </div>
-                        </div>
-                        {payment.orderId && (
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              onClick={() => handleRecheckPaymentStatusFromHistory(payment.orderId)}
-                              disabled={recheckingOrderId === payment.orderId}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
-                              title={t('dashboard.recheckPaymentStatus', 'Проверить статус оплаты')}
-                            >
-                              {recheckingOrderId === payment.orderId ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                              ) : (
-                                <RefreshCw className="w-3.5 h-3.5" aria-hidden />
-                              )}
-                              {t('dashboard.recheckPaymentStatus', 'Проверить статус')}
-                            </button>
-                          </div>
-                        )}
+                    ) : (
+                      <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-500 text-base flex items-center">
+                        <span>{t('dashboard.notGenerated')}</span>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    )}
+                    <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">{t('dashboard.subIdHint')}</p>
+                  </div>
 
-                {/* Desktop Table Layout */}
-                <div className="hidden md:block overflow-x-auto -mx-2 sm:mx-0">
-                  <div className="inline-block min-w-full align-middle">
-                    <table className="min-w-full divide-y divide-slate-800">
-                      <thead>
-                        <tr className="border-b border-slate-800">
-                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.date')}</th>
-                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.tariffTableHeader')}</th>
-                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.amount')}</th>
-                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.statusTableHeader')}</th>
-                          <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.actionsTableHeader', 'Действия')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payments.map((payment) => (
-                          <tr key={payment.id} className="border-b border-slate-800 hover:bg-slate-800/50">
-                            <td className="py-3 px-2 sm:px-4 text-slate-300 text-xs sm:text-sm">{formatDate(payment.createdAt)}</td>
-                            <td className="py-3 px-2 sm:px-4 text-slate-300 text-xs sm:text-sm">{payment.tariffName || 'Не указан'}</td>
-                            <td className="py-3 px-2 sm:px-4 text-slate-300 font-semibold text-xs sm:text-sm">{payment.amount} ₽</td>
-                            <td className="py-3 px-2 sm:px-4">
-                              <span className={`px-2 sm:px-3 py-1 rounded-full text-xs font-semibold ${
-                                payment.status === 'completed' 
-                                  ? 'bg-green-900/30 text-green-400' 
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}>
-                                {payment.status === 'completed' ? 'Успех' : payment.status}
-                              </span>
-                            </td>
-                            <td className="py-3 px-2 sm:px-4">
-                              {payment.orderId ? (
+                  <div>
+                    <label htmlFor={editingProfile ? "profile-name" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">{t('dashboard.name')}</label>
+                    {editingProfile ? (
+                      <input
+                        key="profile-name-input"
+                        id="profile-name"
+                        name="profile-name"
+                        type="text"
+                        value={profileData.name || ''}
+                        onChange={onProfileNameChange}
+                        placeholder={t('dashboard.namePlaceholder')}
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        autoFocus={false}
+                      />
+                    ) : (
+                      <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base flex items-center">
+                        {currentUser.name || <span className="text-slate-500">{t('dashboard.notSet')}</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor={editingProfile ? "profile-phone" : undefined} className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">{t('dashboard.phone')}</label>
+                    {editingProfile ? (
+                      <input
+                        key="profile-phone-input"
+                        id="profile-phone"
+                        name="profile-phone"
+                        type="tel"
+                        value={profileData.phone || ''}
+                        onChange={onProfilePhoneChange}
+                        placeholder="+7 (999) 123-45-67"
+                        className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all touch-manipulation"
+                        autoFocus={false}
+                      />
+                    ) : (
+                      <div className="min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-200 text-base flex items-center">
+                        {currentUser.phone || <span className="text-slate-500">{t('dashboard.notSet')}</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 sm:space-y-5">
+                    <TelegramBindCard
+                      currentUser={currentUser}
+                      onBoundChange={onRefreshUserAfterPayment}
+                      onCopy={onCopy}
+                    />
+                  </div>
+
+                  {hasGoogleProvider && typeof onSetPasswordForEmail === 'function' && (
+                    <SetPasswordForEmailCard
+                      onSetPassword={onSetPasswordForEmail}
+                      t={t}
+                    />
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                    {editingProfile ? (
+                      <>
+                        <button
+                          onClick={onHandleUpdateProfile}
+                          className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
+                          aria-label={t('dashboard.saveProfileAria')}
+                        >
+                          {t('common.save')}
+                        </button>
+                        <button
+                          onClick={() => onSetEditingProfile(false)}
+                          className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
+                          aria-label={t('dashboard.cancelEditAria')}
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => onSetEditingProfile(true)}
+                        className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
+                        aria-label={t('dashboard.editProfileAria')}
+                      >
+                        {t('dashboard.editProfile')}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="border-t border-slate-800 pt-4 sm:pt-5 md:pt-6">
+                    <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg font-semibold text-red-400 mb-3 sm:mb-4">{t('dashboard.dangerZone')}</h3>
+                    <button
+                      onClick={onHandleDeleteAccount}
+                      className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
+                      aria-label="Удалить аккаунт"
+                    >
+                      Удалить аккаунт
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          {
+            dashboardTab === 'payments' && (
+              <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 p-4 sm:p-5 md:p-6">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-4 sm:mb-5 md:mb-6">{t('dashboard.paymentHistory')}</h2>
+                {paymentsLoading ? (
+                  <div className="flex items-center justify-center py-8 sm:py-10 md:py-12">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 border-2 border-slate-600 border-t-blue-600 rounded-full animate-spin"></div>
+                  </div>
+                ) : payments.length === 0 ? (
+                  <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 text-center py-8 sm:py-10 md:py-12">{t('dashboard.noPayments')}</p>
+                ) : (
+                  <>
+                    {/* Mobile Card Layout */}
+                    <div className="md:hidden space-y-3">
+                      {payments.map((payment) => (
+                        <div key={payment.id} className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.date')}</span>
+                              <p className="text-slate-200 mt-0.5 text-sm">{formatDate(payment.createdAt)}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.tariffTableHeader')}</span>
+                              <p className="text-slate-200 mt-0.5 text-sm">{payment.tariffName || 'Не указан'}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.amount')}</span>
+                              <p className="text-slate-200 font-semibold mt-0.5 text-sm">{payment.amount} ₽</p>
+                            </div>
+                            <div>
+                              <span className="text-xs font-medium text-slate-400 uppercase">{t('dashboard.statusTableHeader')}</span>
+                              <div className="mt-0.5">
+                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${payment.status === 'completed'
+                                  ? 'bg-green-900/30 text-green-400'
+                                  : 'bg-slate-700 text-slate-400'
+                                  }`}>
+                                  {payment.status === 'completed' ? 'Успех' : payment.status}
+                                </span>
+                              </div>
+                            </div>
+                            {payment.orderId && (
+                              <div className="pt-2">
                                 <button
                                   type="button"
                                   onClick={() => handleRecheckPaymentStatusFromHistory(payment.orderId)}
                                   disabled={recheckingOrderId === payment.orderId}
-                                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
                                   title={t('dashboard.recheckPaymentStatus', 'Проверить статус оплаты')}
                                 >
                                   {recheckingOrderId === payment.orderId ? (
@@ -2486,23 +1874,74 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
                                   ) : (
                                     <RefreshCw className="w-3.5 h-3.5" aria-hidden />
                                   )}
-                                  <span className="hidden sm:inline">{t('dashboard.recheckPaymentStatus', 'Проверить статус')}</span>
+                                  {t('dashboard.recheckPaymentStatus', 'Проверить статус')}
                                 </button>
-                              ) : (
-                                <span className="text-slate-500 text-xs">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-        </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Desktop Table Layout */}
+                    <div className="hidden md:block overflow-x-auto -mx-2 sm:mx-0">
+                      <div className="inline-block min-w-full align-middle">
+                        <table className="min-w-full divide-y divide-slate-800">
+                          <thead>
+                            <tr className="border-b border-slate-800">
+                              <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.date')}</th>
+                              <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.tariffTableHeader')}</th>
+                              <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.amount')}</th>
+                              <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.statusTableHeader')}</th>
+                              <th className="text-left py-3 px-2 sm:px-4 text-slate-400 font-semibold text-xs sm:text-sm">{t('dashboard.actionsTableHeader', 'Действия')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {payments.map((payment) => (
+                              <tr key={payment.id} className="border-b border-slate-800 hover:bg-slate-800/50">
+                                <td className="py-3 px-2 sm:px-4 text-slate-300 text-xs sm:text-sm">{formatDate(payment.createdAt)}</td>
+                                <td className="py-3 px-2 sm:px-4 text-slate-300 text-xs sm:text-sm">{payment.tariffName || 'Не указан'}</td>
+                                <td className="py-3 px-2 sm:px-4 text-slate-300 font-semibold text-xs sm:text-sm">{payment.amount} ₽</td>
+                                <td className="py-3 px-2 sm:px-4">
+                                  <span className={`px-2 sm:px-3 py-1 rounded-full text-xs font-semibold ${payment.status === 'completed'
+                                    ? 'bg-green-900/30 text-green-400'
+                                    : 'bg-slate-800 text-slate-400'
+                                    }`}>
+                                    {payment.status === 'completed' ? 'Успех' : payment.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-2 sm:px-4">
+                                  {payment.orderId ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRecheckPaymentStatusFromHistory(payment.orderId)}
+                                      disabled={recheckingOrderId === payment.orderId}
+                                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 disabled:pointer-events-none"
+                                      title={t('dashboard.recheckPaymentStatus', 'Проверить статус оплаты')}
+                                    >
+                                      {recheckingOrderId === payment.orderId ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                                      ) : (
+                                        <RefreshCw className="w-3.5 h-3.5" aria-hidden />
+                                      )}
+                                      <span className="hidden sm:inline">{t('dashboard.recheckPaymentStatus', 'Проверить статус')}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-500 text-xs">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )
+          }
+        </div >
 
         {showKeyModal && currentUser && (
           <KeyModal
@@ -2515,237 +1954,247 @@ setPaymentProcessingMessage(t('paymentProcessing.accountant'))
         )}
 
         {/* Модальное окно выбора тарифа */}
-        {showTariffModal && selectedTariff && (
-          <TariffSelectionModal
-            tariff={selectedTariff}
-            onClose={() => {
-              setShowTariffModal(false)
-              setSelectedTariff(null)
-            }}
-            onConfirm={handleTariffConfirm}
-            isLoading={creatingSubscription}
-            natrockPorts={settings?.natrockPorts || []}
-            settings={settings}
-            servers={servers}
-            userId={currentUser?.id}
-          />
-        )}
+        {
+          showTariffModal && selectedTariff && (
+            <TariffSelectionModal
+              tariff={selectedTariff}
+              onClose={() => {
+                setShowTariffModal(false)
+                setSelectedTariff(null)
+              }}
+              onConfirm={handleTariffConfirm}
+              isLoading={creatingSubscription}
+              natrockPorts={settings?.natrockPorts || []}
+              settings={settings}
+              servers={servers}
+              userId={currentUser?.id}
+            />
+          )
+        }
 
         {/* Модальное окно обработки платежа */}
-        {showPaymentProcessing && (
-          <PaymentProcessingModal
-            message={paymentProcessingMessage}
-            status={paymentProcessingStatus}
-            onClose={() => {
-              // Закрываем модальное окно только если статус ошибки
-              if (paymentProcessingStatus === 'error') {
-                setShowPaymentProcessing(false)
-                setPaymentOrderId(null)
-                setPaymentWindowRef(null)
-                setPaymentProcessingStatus('processing')
-                setPaymentProcessingMessage(t('paymentProcessing.accountant'))
-              }
-            }}
-          />
-        )}
+        {
+          showPaymentProcessing && (
+            <PaymentProcessingModal
+              message={paymentProcessingMessage}
+              status={paymentProcessingStatus}
+              onClose={() => {
+                // Закрываем модальное окно только если статус ошибки
+                if (paymentProcessingStatus === 'error') {
+                  setShowPaymentProcessing(false)
+                  setPaymentOrderId(null)
+                  setPaymentWindowRef(null)
+                  setPaymentProcessingStatus('processing')
+                  setPaymentProcessingMessage(t('paymentProcessing.accountant'))
+                }
+              }}
+            />
+          )
+        }
 
         {/* Модальное окно успешного оформления подписки */}
-        {showSuccessModal && subscriptionSuccess && (
-          <SubscriptionSuccessModal
-            vpnLink={subscriptionSuccess.vpnLink}
-            subscriptionLinks={subscriptionSuccess.subscriptionLinks || null}
-            subscriptionLinksWithPlan={subscriptionSuccess.subscriptionLinksWithPlan || null}
-            user={currentUser}
-            onClose={() => {
-              setShowSuccessModal(false)
-              setSubscriptionSuccess(null)
-            }}
-            onCopy={onCopy}
-            tariffName={subscriptionSuccess.tariffName || currentUser.tariffName || 'Не указан'}
-            devices={subscriptionSuccess.devices || currentUser.devices || 1}
-            periodMonths={subscriptionSuccess.periodMonths || currentUser.periodMonths || 1}
-            expiresAt={subscriptionSuccess.expiresAt || currentUser.expiresAt || null}
-            paymentStatus={subscriptionSuccess.paymentStatus || currentUser.paymentStatus || 'paid'}
-            testPeriod={subscriptionSuccess.testPeriod || subscriptionSuccess.paymentStatus === 'test_period' || false}
-            paymentUrl={subscriptionSuccess.paymentUrl || null}
-            orderId={subscriptionSuccess.orderId || null}
-            amount={subscriptionSuccess.amount || null}
-            requiresPayment={subscriptionSuccess.requiresPayment || false}
-            message={subscriptionSuccess.message || null}
-            onCheckPaymentStatus={handleManualPaymentCheck}
-            awaitingPaymentResult={awaitingPaymentResult}
-            paymentPollAttempt={paymentPollAttempt}
-          />
-        )}
+        {
+          showSuccessModal && subscriptionSuccess && (
+            <SubscriptionSuccessModal
+              vpnLink={subscriptionSuccess.vpnLink}
+              subscriptionLinks={subscriptionSuccess.subscriptionLinks || null}
+              subscriptionLinksWithPlan={subscriptionSuccess.subscriptionLinksWithPlan || null}
+              user={currentUser}
+              onClose={() => {
+                setShowSuccessModal(false)
+                setSubscriptionSuccess(null)
+              }}
+              onCopy={onCopy}
+              tariffName={subscriptionSuccess.tariffName || currentUser.tariffName || 'Не указан'}
+              devices={subscriptionSuccess.devices || currentUser.devices || 1}
+              periodMonths={subscriptionSuccess.periodMonths || currentUser.periodMonths || 1}
+              expiresAt={subscriptionSuccess.expiresAt || currentUser.expiresAt || null}
+              paymentStatus={subscriptionSuccess.paymentStatus || currentUser.paymentStatus || 'paid'}
+              testPeriod={subscriptionSuccess.testPeriod || subscriptionSuccess.paymentStatus === 'test_period' || false}
+              paymentUrl={subscriptionSuccess.paymentUrl || null}
+              orderId={subscriptionSuccess.orderId || null}
+              amount={subscriptionSuccess.amount || null}
+              requiresPayment={subscriptionSuccess.requiresPayment || false}
+              message={subscriptionSuccess.message || null}
+              onCheckPaymentStatus={handleManualPaymentCheck}
+              awaitingPaymentResult={awaitingPaymentResult}
+              paymentPollAttempt={paymentPollAttempt}
+            />
+          )
+        }
 
         {/* Модальное окно «Добавить устройства» (Super) */}
-        {showAddDevicesModal && currentTariff && (currentUser?.tariffName?.toLowerCase() === 'super' || currentTariff.plan?.toLowerCase() === 'super' || currentTariff.name?.toLowerCase() === 'super') && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={() => setShowAddDevicesModal(false)}>
-            <div
-              className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white">{t('dashboard.addDevices', 'Добавить устройства')}</h3>
-                <button type="button" onClick={() => setShowAddDevicesModal(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700" aria-label={t('common.close')}>
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-4 sm:p-5 space-y-4">
-                <p className="text-slate-300 text-sm">
-                  {t('dashboard.addDevicesDescription', 'Укажите, сколько устройств добавить. Оплата — за оставшийся период подписки.')}
-                </p>
-                <div>
-                  <label className="block text-slate-400 text-sm font-medium mb-2">{t('dashboard.devicesToAdd', 'Количество устройств')}</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={additionalDevices}
-                    onChange={(e) => setAdditionalDevices(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+        {
+          showAddDevicesModal && currentTariff && (currentUser?.tariffName?.toLowerCase() === 'super' || currentTariff.plan?.toLowerCase() === 'super' || currentTariff.name?.toLowerCase() === 'super') && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={() => setShowAddDevicesModal(false)}>
+              <div
+                className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white">{t('dashboard.addDevices', 'Добавить устройства')}</h3>
+                  <button type="button" onClick={() => setShowAddDevicesModal(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700" aria-label={t('common.close')}>
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                {(() => {
-                  const expiresAt = currentUser?.expiresAt ? new Date(currentUser.expiresAt).getTime() : 0
-                  const now = Date.now()
-                  const remainingMs = Math.max(0, expiresAt - now)
-                  const remainingMonths = Math.max(1, Math.ceil(remainingMs / (30 * 24 * 60 * 60 * 1000)))
-                  const devicePrice = currentTariff?.price || 150
-                  const baseAmount = additionalDevices * devicePrice * remainingMonths
-                  const discountPercent = 5
-                  const amount = Math.round(baseAmount * (1 - discountPercent / 100))
-                  return (
-                    <div className="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
-                      <p className="text-slate-300 text-sm">
-                        {t('dashboard.addDevicesPrice', 'К оплате')}: <span className="font-semibold text-white">{amount} ₽</span>
-                        {baseAmount > amount && (
-                          <span className="text-slate-500 text-xs ml-1 line-through">{baseAmount} ₽</span>
-                        )}
-                        {discountPercent > 0 && (
-                          <span className="text-green-400 text-xs ml-1">({t('dashboard.addDevicesDiscount', 'скидка')} {discountPercent}%)</span>
-                        )}
-                      </p>
-                      <p className="text-slate-500 text-xs mt-1">
-                        {additionalDevices} × {devicePrice} ₽/мес × {remainingMonths} {remainingMonths === 1 ? t('dashboard.month') : t('dashboard.months')}
-                        {discountPercent > 0 && ` − ${discountPercent}%`}
-                      </p>
-                    </div>
-                  )
-                })()}
-              </div>
-              <div className="p-4 sm:p-5 flex gap-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddDevicesModal(false)}
-                  className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={creatingSubscription}
-                  onClick={async () => {
-                    if (!onHandleAddDevices) return
-                    const result = await onHandleAddDevices(additionalDevices)
-                    if (!result?.paymentUrl || !result?.orderId) return
-                    setShowAddDevicesModal(false)
-                    setSubscriptionSuccess({
-                      paymentUrl: result.paymentUrl,
-                      orderId: result.orderId,
-                      amount: result.amount,
-                      requiresPayment: true,
-                      message: t('dashboard.paymentWindowOpen'),
-                      tariffId: result.tariffId || currentUser?.tariffId,
-                      tariffName: result.tariffName || currentUser?.tariffName,
-                      devices: result.devices,
-                      periodMonths: result.periodMonths,
-                      discount: 0,
-                      operationType: 'add_devices',
-                      newDevicesCount: result.newDevicesCount,
-                    })
-                    setShowSuccessModal(true)
-                    const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
-                    const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
-                    if (paymentWindow) {
-                      paymentWindow.focus()
-                      setPaymentWindowRef(paymentWindow)
-                      setPaymentOrderId(result.orderId)
-                    }
-                  }}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white rounded-lg font-medium flex items-center justify-center gap-2"
-                >
-                  {creatingSubscription ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  <span>{creatingSubscription ? t('dashboard.processing', 'Обработка...') : t('dashboard.payAndAdd', 'Оплатить и добавить')}</span>
-                </button>
+                <div className="p-4 sm:p-5 space-y-4">
+                  <p className="text-slate-300 text-sm">
+                    {t('dashboard.addDevicesDescription', 'Укажите, сколько устройств добавить. Оплата — за оставшийся период подписки.')}
+                  </p>
+                  <div>
+                    <label className="block text-slate-400 text-sm font-medium mb-2">{t('dashboard.devicesToAdd', 'Количество устройств')}</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={additionalDevices}
+                      onChange={(e) => setAdditionalDevices(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
+                      className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  {(() => {
+                    const expiresAt = currentUser?.expiresAt ? new Date(currentUser.expiresAt).getTime() : 0
+                    const now = Date.now()
+                    const remainingMs = Math.max(0, expiresAt - now)
+                    const remainingMonths = Math.max(1, Math.ceil(remainingMs / (30 * 24 * 60 * 60 * 1000)))
+                    const devicePrice = currentTariff?.price || 150
+                    const baseAmount = additionalDevices * devicePrice * remainingMonths
+                    const discountPercent = 5
+                    const amount = Math.round(baseAmount * (1 - discountPercent / 100))
+                    return (
+                      <div className="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                        <p className="text-slate-300 text-sm">
+                          {t('dashboard.addDevicesPrice', 'К оплате')}: <span className="font-semibold text-white">{amount} ₽</span>
+                          {baseAmount > amount && (
+                            <span className="text-slate-500 text-xs ml-1 line-through">{baseAmount} ₽</span>
+                          )}
+                          {discountPercent > 0 && (
+                            <span className="text-green-400 text-xs ml-1">({t('dashboard.addDevicesDiscount', 'скидка')} {discountPercent}%)</span>
+                          )}
+                        </p>
+                        <p className="text-slate-500 text-xs mt-1">
+                          {additionalDevices} × {devicePrice} ₽/мес × {remainingMonths} {remainingMonths === 1 ? t('dashboard.month') : t('dashboard.months')}
+                          {discountPercent > 0 && ` − ${discountPercent}%`}
+                        </p>
+                      </div>
+                    )
+                  })()}
+                </div>
+                <div className="p-4 sm:p-5 flex gap-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddDevicesModal(false)}
+                    className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={creatingSubscription}
+                    onClick={async () => {
+                      if (!onHandleAddDevices) return
+                      const result = await onHandleAddDevices(additionalDevices)
+                      if (!result?.paymentUrl || !result?.orderId) return
+                      setShowAddDevicesModal(false)
+                      setSubscriptionSuccess({
+                        paymentUrl: result.paymentUrl,
+                        orderId: result.orderId,
+                        amount: result.amount,
+                        requiresPayment: true,
+                        message: t('dashboard.paymentWindowOpen'),
+                        tariffId: result.tariffId || currentUser?.tariffId,
+                        tariffName: result.tariffName || currentUser?.tariffName,
+                        devices: result.devices,
+                        periodMonths: result.periodMonths,
+                        discount: 0,
+                        operationType: 'add_devices',
+                        newDevicesCount: result.newDevicesCount,
+                      })
+                      setShowSuccessModal(true)
+                      const windowFeatures = ['width=400', 'height=700', 'left=' + (window.screen.width / 2 - 200), 'top=' + (window.screen.height / 2 - 350), 'resizable=yes', 'scrollbars=yes', 'status=no', 'toolbar=no', 'menubar=no', 'location=no'].join(',')
+                      const paymentWindow = window.open(result.paymentUrl, 'payment_miniapp', windowFeatures)
+                      if (paymentWindow) {
+                        paymentWindow.focus()
+                        setPaymentWindowRef(paymentWindow)
+                        setPaymentOrderId(result.orderId)
+                      }
+                    }}
+                    className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white rounded-lg font-medium flex items-center justify-center gap-2"
+                  >
+                    {creatingSubscription ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    <span>{creatingSubscription ? t('dashboard.processing', 'Обработка...') : t('dashboard.payAndAdd', 'Оплатить и добавить')}</span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        }
 
         {/* Модальное окно подтверждения удаления подписки */}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={() => setShowDeleteConfirm(false)}>
-            <div
-              className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-4 sm:p-5 md:p-6 border-b border-slate-800">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-red-500/20 rounded-lg">
-                    <AlertCircle className="w-6 h-6 text-red-400" />
+        {
+          showDeleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md" onClick={() => setShowDeleteConfirm(false)}>
+              <div
+                className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-4 sm:p-5 md:p-6 border-b border-slate-800">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-red-500/20 rounded-lg">
+                      <AlertCircle className="w-6 h-6 text-red-400" />
+                    </div>
+                    <h3 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">
+                      {t('dashboard.confirmUnsubscribeTitle')}
+                    </h3>
                   </div>
-                  <h3 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-white">
-                    {t('dashboard.confirmUnsubscribeTitle')}
-                  </h3>
-                </div>
-                <p className="text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mt-3">
-                  {t('dashboard.confirmUnsubscribeQuestion')}
-                </p>
-                <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
-                  <p className="text-yellow-300 text-xs sm:text-sm">
-                    {t('dashboard.deleteWarning')}
+                  <p className="text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] mt-3">
+                    {t('dashboard.confirmUnsubscribeQuestion')}
                   </p>
+                  <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-800/50 rounded-lg">
+                    <p className="text-yellow-300 text-xs sm:text-sm">
+                      {t('dashboard.deleteWarning')}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="p-4 sm:p-5 md:p-6 flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  disabled={deletingSubscription}
-                  className="flex-1 min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
-                  aria-label={t('common.cancel')}
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  onClick={handleConfirmDelete}
-                  disabled={deletingSubscription || creatingSubscription}
-                  className="flex-1 min-h-[44px] px-4 py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
-                  aria-label={t('dashboard.confirmDeleteAria')}
-                >
-                  {deletingSubscription || creatingSubscription ? (
-                    <>
-                      <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
-                      <span>{t('dashboard.deleting')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                      <span>{t('dashboard.confirmUnsubscribe')}</span>
-                    </>
-                  )}
-                </button>
+                <div className="p-4 sm:p-5 md:p-6 flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deletingSubscription}
+                    className="flex-1 min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                    aria-label={t('common.cancel')}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    disabled={deletingSubscription || creatingSubscription}
+                    className="flex-1 min-h-[44px] px-4 py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
+                    aria-label={t('dashboard.confirmDeleteAria')}
+                  >
+                    {deletingSubscription || creatingSubscription ? (
+                      <>
+                        <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                        <span>{t('dashboard.deleting')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span>{t('dashboard.confirmUnsubscribe')}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        }
 
         <div className="max-sm:hidden">
           <Footer />
         </div>
-      </div>
+      </div >
       {showLogger && <LoggerPanel onClose={() => onSetShowLogger(false)} />}
-    </div>
+    </div >
   )
 }
 

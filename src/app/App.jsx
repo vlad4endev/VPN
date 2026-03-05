@@ -55,6 +55,9 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { saveUserLanguage, applyUserLanguageToUi } from '../features/auth/services/userLanguageService.js'
 import { authService } from '../features/auth/services/authService.js'
+import { getFirestoreSafeName } from '../shared/utils/firestoreSafe.js'
+import { useTelegramInit } from './hooks/useTelegramInit.js'
+import { useAppAuth } from './hooks/useAppAuth.js'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 import { isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
 
@@ -113,17 +116,7 @@ const validateName = (name) => {
 }
 
 /** Имя для Firestore: 2–100 символов, только [a-zA-Zа-яА-ЯёЁ \\s-]. При пустом/невалидном displayName — из email или "User". */
-function getFirestoreSafeName(displayName, email) {
-  const allowed = /[a-zA-Zа-яА-ЯёЁ\s-]/g
-  const raw = (displayName || '').trim()
-  const cleaned = raw ? raw.match(allowed)?.join('') || '' : ''
-  if (cleaned.length >= 2 && cleaned.length <= 100) return cleaned.slice(0, 100)
-  const fromEmail = (email || '').trim().split('@')[0]
-  const fromEmailCleaned = fromEmail ? fromEmail.match(allowed)?.join('') || '' : ''
-  if (fromEmailCleaned.length >= 2) return fromEmailCleaned.slice(0, 100)
-  if (fromEmailCleaned.length === 1) return fromEmailCleaned + 'u'
-  return 'User'
-}
+
 
 // Компонент LoginForm вынесен в отдельный файл src/components/LoginForm.jsx
 
@@ -446,7 +439,7 @@ export default function VPNServiceApp() {
     if (newView && newView !== 'welcome' && newView !== 'review') {
       try {
         localStorage.setItem('vpn_current_view', newView)
-        console.log('💾 View сохранен в localStorage:', newView)
+        logger.debug('App', 'View сохранен в localStorage:', newView)
       } catch (err) {
         logger.error('App', 'Ошибка при сохранении view в localStorage', { view: newView }, err)
       }
@@ -458,10 +451,10 @@ export default function VPNServiceApp() {
   }, [])
 
   // Локальные состояния
-  const [users, setUsers] = useState([])
+  const { users, setUsers } = useAppStore()
   const [currentUser, setCurrentUserState] = useState(null)
-  const [settings, setSettings] = useState(null)
-  const [tariffs, setTariffs] = useState([])
+  const { settings, setSettings } = useAppStore()
+  const { tariffs, setTariffs } = useAppStore()
   const [loading, setLoading] = useState(true)
   const [authMode, setAuthMode] = useState('login') // 'login' | 'register'
   const [loginData, setLoginData] = useState({ email: '', login: '', password: '', name: '' })
@@ -477,21 +470,35 @@ export default function VPNServiceApp() {
   const tmaFlowStartedThisSessionRef = useRef(false)
   const signInInProgressRef = useRef(false)
   /** User из ответа POST /api/telegram/auth — используется в onAuthStateChanged чтобы не блокировать рендер на loadUserData. */
-  const tmaUserFromAuthRef = useRef(null)
+  // Removed: const tmaUserFromAuthRef = useRef(null)
   const [referralCodePending, setReferralCodePending] = useState('')
-  const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
+  // Removed: const [telegramSignInLoading, setTelegramSignInLoading] = useState(false)
   const [googleSignInLoading, setGoogleSignInLoading] = useState(false)
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('')
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
-  /** Контекст Telegram Mini App: true только при наличии непустого initData (в браузере SDK есть, но initData пустой). Определяется один раз при проверке на /t. */
-  const [hasTmaInitData, setHasTmaInitData] = useState(false)
-  const isTelegramApp = hasTmaInitData
-  /** Пока ждём авто-вход по Telegram — показываем «Вход через Telegram…» вместо формы входа */
-  const [tmaWaitingAuth, setTmaWaitingAuth] = useState(false)
-  /** initData, полученный при первой проверке Telegram.WebApp (для autoLogin без waitTelegramInitData) */
-  const [tmaInitDataFromCheck, setTmaInitDataFromCheck] = useState(null)
 
-  // TMA: таймаут ожидания initData (7 с) обрабатывается в эффекте авто-входа; при таймауте показывается экран «Откройте из бота»
+  // Инициализация хука Telegram
+  const {
+    telegramSignInLoading,
+    hasTmaInitData,
+    tmaWaitingAuth,
+    tmaInitDataFromCheck,
+    isTelegramApp,
+    tmaUserFromAuthRef,
+    handleTelegramSignIn,
+    handleTelegramWidgetAuth
+  } = useTelegramInit({
+    auth,
+    setCurrentUser,
+    setView,
+    loadUserData,
+    setError,
+    setTelegramOpenModal,
+    firebaseUser,
+    authChecking
+  })
+
+// TMA: таймаут ожидания initData (7 с) обрабатывается в эффекте авто-входа; при таймауте показывается экран «Откройте из бота»
 
   // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
   useEffect(() => {
@@ -511,7 +518,7 @@ export default function VPNServiceApp() {
     if (user) {
       try {
         localStorage.setItem('vpn_current_user', JSON.stringify(user))
-        console.log('💾 Пользователь сохранен в localStorage:', user.email)
+        logger.debug('App', 'Пользователь сохранен в localStorage:', user.email)
       } catch (err) {
         logger.error('App', 'Ошибка при сохранении пользователя в localStorage', { email: user?.email }, err)
       }
@@ -530,7 +537,7 @@ export default function VPNServiceApp() {
           useUIStore.getState().setDashboardTab('subscription')
         } catch (_) {}
       }).catch((err) => console.warn('App:', err?.message))
-      if (had) console.log('🗑️ Пользователь удален из localStorage')
+      if (had) logger.debug('App', 'Пользователь удален из localStorage')
     }
   }, [])
 
@@ -690,394 +697,22 @@ export default function VPNServiceApp() {
    * @param {number} maxAttempts - Максимальное количество попыток генерации
    * @returns {Promise<string>} Уникальный subId
    */
-  const generateUniqueSubId = useCallback(async (dbInstance, appIdValue, maxAttempts = 10) => {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const subId = ThreeXUI.generateSubId()
-      
-      try {
-        // Проверяем, существует ли уже такой subId в базе данных
-        const usersCollection = collection(dbInstance, `artifacts/${appIdValue}/public/data/users_v4`)
-        const q = query(usersCollection, where('subId', '==', subId))
-        const querySnapshot = await getDocs(q)
-        
-        if (querySnapshot.empty) {
-          // subId уникален
-          logger.info('Auth', `Уникальный subId сгенерирован с попытки ${attempt}`, { subId })
-          return subId
-        } else {
-          // subId уже существует, генерируем новый
-          logger.warn('Auth', `subId ${subId} уже существует, генерируем новый (попытка ${attempt})`)
-          if (attempt === maxAttempts) {
-            // Если достигли максимума попыток, добавляем дополнительную случайность
-            const timestamp = Date.now()
-            const extraRandom = Math.floor(Math.random() * 10000000000)
-            const uniqueSubId = `${timestamp}${extraRandom.toString().padStart(10, '0')}`
-            logger.warn('Auth', `Достигнут максимум попыток, используем subId с дополнительной случайностью`, { uniqueSubId })
-            return uniqueSubId
-          }
-        }
-      } catch (error) {
-        const isInvalidDb = error?.message?.includes('Expected first argument to collection()') || error?.message?.includes('Expected first argument to doc()')
-        if (isInvalidDb) {
-          logger.debug('Auth', 'Firestore db недействителен при проверке subId, возвращаем subId без проверки', { subId })
-          return subId
-        }
-        logger.error('Auth', 'Ошибка при проверке уникальности subId', { subId, attempt }, error)
-        if (attempt === maxAttempts) {
-          return subId
-        }
-      }
-    }
-    
-    // Если все попытки не удались, возвращаем последний сгенерированный
-    return ThreeXUI.generateSubId()
-  }, [])
 
-  // Единая загрузка данных пользователя через authService (subId-миграция, офлайн, permission-denied)
-  const loadUserData = useCallback(async (uid, dbOverride) => {
-    try {
-      return await authService.loadUserData(uid, dbOverride ?? getDb())
-    } catch (err) {
-      if (err.code === 'permission-denied') {
-        setError(i18n.t('app.noAccessDb'))
-        return null
-      }
-      throw err
-    }
-  }, [])
-
-  // Отслеживание состояния авторизации Firebase Auth (getDb() — актуальный Firestore, избегаем FirebaseError при дублировании модуля)
-  useEffect(() => {
-    if (!auth || !getDb()) {
-      setLoading(false)
-      setAuthChecking(false)
-      return
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      logger.debug('App', 'onAuthStateChanged', { user: !!firebaseUser, uid: firebaseUser?.uid })
-      setFirebaseUser(firebaseUser)
-      const dbInstance = getDb()
-      const path = typeof window !== 'undefined' ? (window.location.pathname || '').toLowerCase().replace(/\/+$/, '') : ''
-      if (!dbInstance) {
-        setLoading(false)
-        setAuthChecking(false)
-        return
-      }
-      if (firebaseUser) {
-        // Пользователь авторизован - загружаем данные из Firestore (getDb() даёт актуальный экземпляр)
-        try {
-          let userData = await loadUserData(firebaseUser.uid, dbInstance)
-          if (!userData) {
-            userData = await authService.ensureFirestoreUserIfMissing(firebaseUser, dbInstance)
-          }
-          if (userData) {
-            // Миграция: если у существующего пользователя нет subId, генерируем его
-            if (!userData.subId) {
-              logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный', {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email
-              })
-              try {
-                const generatedSubId = await generateUniqueSubId(dbInstance, appId)
-                const userDocRef = doc(dbInstance, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                await updateDoc(userDocRef, {
-                  subId: generatedSubId,
-                  updatedAt: new Date().toISOString(),
-                })
-                userData = { ...userData, subId: generatedSubId }
-                logger.info('Auth', 'subId добавлен существующему пользователю', { uid: firebaseUser.uid, subId: generatedSubId })
-              } catch (subIdErr) {
-                logger.error('Auth', 'Ошибка при генерации subId для существующего пользователя', { uid: firebaseUser.uid }, subIdErr)
-                // Продолжаем работу без subId, но логируем ошибку
-              }
-            }
-
-            // Проверяем неоплаченную подписку (5 дней для удаления)
-            if (userData.paymentStatus === 'unpaid' && userData.uuid && userData.tariffId) {
-              try {
-                const { dashboardService } = await import('../features/dashboard/services/dashboardService.js')
-                const deletedUser = await dashboardService.checkAndDeleteUnpaidSubscription(userData)
-                if (deletedUser === null) {
-                  // Подписка была удалена, перезагружаем данные пользователя
-                  userData = await loadUserData(firebaseUser.uid, dbInstance)
-                  if (!userData) {
-                    setCurrentUser(null)
-                    setLoading(false)
-                    setAuthChecking(false)
-                    return
-                  }
-                }
-              } catch (unpaidErr) {
-                logger.error('Auth', 'Ошибка проверки неоплаченной подписки', { uid: firebaseUser.uid }, unpaidErr)
-                // Продолжаем работу, даже если проверка не удалась
-              }
-            }
-
-            let effectiveRole = userData.role || 'user'
-
-            // Специальный доступ к админ-панели для конкретного пользователя по email
-            // Это выполняется один раз и сразу сохраняется в Firestore,
-            // чтобы далее роль хранилась в данных пользователя.
-            const normalizedEmail = (firebaseUser.email || userData.email || '').trim().toLowerCase()
-            if (isAdminEmail(normalizedEmail) && effectiveRole !== 'admin') {
-              try {
-                const userDocRef = doc(dbInstance, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                effectiveRole = 'admin'
-                logger.info('Auth', 'Пользователю выданы права администратора по email', { email: normalizedEmail })
-              } catch (roleErr) {
-                logger.error('Auth', 'Не удалось обновить роль пользователя до admin', { email: normalizedEmail }, roleErr)
-              }
-            }
-
-            const currentUserData = {
-              ...userData,
-              email: firebaseUser.email || userData.email,
-              photoURL: firebaseUser.photoURL || userData.photoURL || null,
-              name: firebaseUser.displayName || userData.name || '',
-              role: effectiveRole,
-            }
-            setCurrentUser(currentUserData)
-            logger.info('Firebase', 'Пользователь авторизован, данные загружены', { uid: firebaseUser.uid, role: effectiveRole })
-            
-            // Запрашиваем разрешение на уведомления для существующих пользователей (с задержкой)
-            setTimeout(async () => {
-              try {
-                const notificationService = (await import('../shared/services/notificationService.js')).default
-                const notificationInstance = notificationService.getInstance()
-                // Запрашиваем только если разрешения еще нет
-                if (!notificationInstance.hasPermission()) {
-                  await notificationInstance.requestPermission()
-                  logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для существующего пользователя')
-                }
-              } catch (notificationError) {
-                logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
-                // Не блокируем загрузку из-за ошибки уведомлений
-              }
-            }, 2000) // Задержка 2 секунды, чтобы не показывать запрос сразу при загрузке
-            
-            // Устанавливаем view с учётом роли (многопользовательский режим: не показывать админку не-админу)
-            const savedView = localStorage.getItem('vpn_current_view')
-            // Всегда редирект с экрана логина после успешной загрузки пользователя (email, Google, customToken)
-            const nextView = getAllowedView(savedView, effectiveRole)
-            setView(nextView)
-            if ((view === 'login' || view === 'register' || view === 'welcome') && isBrowserAuthPath(path)) {
-              logger.debug('App', 'onAuthStateChanged: редирект с экрана входа', { nextView, role: effectiveRole })
-            }
-          } else {
-            // Данные не найдены — для Google создаём документ (fallback при redirect/гонке с popup)
-            if (firebaseUser.providerData?.some((p) => p.providerId === 'google.com')) {
-              try {
-                const dbForFallback = getDb()
-                if (!dbForFallback) {
-                  logger.warn('Auth', 'Firestore недоступен для fallback-создания пользователя после Google', { uid: firebaseUser.uid })
-                  setCurrentUser(null)
-                  setLoading(false)
-                  setAuthChecking(false)
-                  return
-                }
-                logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback после Google)', { uid: firebaseUser.uid, email: firebaseUser.email })
-                const generatedUUID = ThreeXUI.generateUUID()
-                const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
-                const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
-                const newUserData = {
-                  email: firebaseUser.email || '',
-                  name: safeName,
-                  phone: '',
-                  role: 'user',
-                  plan: 'free',
-                  uuid: generatedUUID,
-                  subId: generatedSubId,
-                  expiresAt: null,
-                  tariffName: '',
-                  tariffId: '',
-                  photoURL: firebaseUser.photoURL || null,
-                  language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                }
-                await setDoc(userDocRef, newUserData)
-                let effectiveRole = 'user'
-                const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
-                if (isAdminEmail(normalizedEmail)) {
-                  try {
-                    await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                    effectiveRole = 'admin'
-                  } catch (roleErr) {
-                    logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
-                  }
-                }
-                const currentUserData = {
-                  id: firebaseUser.uid,
-                  ...newUserData,
-                  email: firebaseUser.email || '',
-                  photoURL: firebaseUser.photoURL || null,
-                  name: firebaseUser.displayName || '',
-                  role: effectiveRole,
-                }
-                setCurrentUser(currentUserData)
-                applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
-                setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-                if (effectiveRole !== 'admin') setDashboardTab('subscription')
-                logger.info('Auth', 'Вход через Google восстановлен в onAuthStateChanged', { uid: firebaseUser.uid, role: effectiveRole })
-              } catch (fallbackErr) {
-                logger.error('Auth', 'Ошибка fallback-создания пользователя после Google', { uid: firebaseUser.uid }, fallbackErr)
-                setCurrentUser(null)
-              }
-            } else {
-              let fallbackHandled = false
-              // Не Google — пробуем создать документ клиентом (fallback при недоступности API ensure-firestore-user)
-              const dbForFallback = getDb()
-              if (dbForFallback && firebaseUser.email) {
-                try {
-                  logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback для email)', { uid: firebaseUser.uid, email: firebaseUser.email })
-                  const generatedUUID = ThreeXUI.generateUUID()
-                  const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
-                  const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                  const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
-                  const newUserData = {
-                    email: firebaseUser.email || '',
-                    name: safeName,
-                    phone: '',
-                    role: 'user',
-                    plan: 'free',
-                    uuid: generatedUUID,
-                    subId: generatedSubId,
-                    expiresAt: null,
-                    tariffName: '',
-                    tariffId: '',
-                    photoURL: firebaseUser.photoURL || null,
-                    language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  }
-                  await setDoc(userDocRef, newUserData)
-                  let effectiveRole = 'user'
-                  const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
-                  if (isAdminEmail(normalizedEmail)) {
-                    try {
-                      await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                      effectiveRole = 'admin'
-                    } catch (roleErr) {
-                      logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
-                    }
-                  }
-                  const currentUserData = {
-                    id: firebaseUser.uid,
-                    ...newUserData,
-                    email: firebaseUser.email || '',
-                    photoURL: firebaseUser.photoURL || null,
-                    name: firebaseUser.displayName || '',
-                    role: effectiveRole,
-                  }
-                  setCurrentUser(currentUserData)
-                  applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
-                  setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
-                  if (effectiveRole !== 'admin') setDashboardTab('subscription')
-                  logger.info('Auth', 'Вход через email восстановлен в onAuthStateChanged (client fallback)', { uid: firebaseUser.uid, role: effectiveRole })
-                  fallbackHandled = true
-                } catch (emailFallbackErr) {
-                  logger.warn('Auth', 'Не удалось создать документ для email-пользователя (client fallback)', { uid: firebaseUser.uid }, emailFallbackErr)
-                }
-              }
-              if (!fallbackHandled) {
-                // Пробуем кеш localStorage (если fallback выше не сработал)
-                try {
-                  const savedUserStr = localStorage.getItem('vpn_current_user')
-                  if (savedUserStr) {
-                    const savedUser = JSON.parse(savedUserStr)
-                    if (savedUser.id === firebaseUser.uid) {
-                      logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
-                    setCurrentUser(savedUser)
-                    applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
-                    setTimeout(async () => {
-                      try {
-                        const notificationService = (await import('../shared/services/notificationService.js')).default
-                        const notificationInstance = notificationService.getInstance()
-                        if (!notificationInstance.hasPermission()) {
-                          await notificationInstance.requestPermission()
-                          logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для пользователя из кеша')
-                        }
-                      } catch (notificationError) {
-                        logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
-                      }
-                    }, 2000)
-                    const savedView = localStorage.getItem('vpn_current_view')
-                    setView(getAllowedView(savedView, savedUser.role))
-                  } else {
-                    logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
-                    setCurrentUser(null)
-                  }
-                } else {
-                  logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
-                  setCurrentUser(null)
-                }
-              } catch (localErr) {
-                logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
-                setCurrentUser(null)
-              }
-            }
-          }
-        } catch (err) {
-          const isInvalidDb = err?.message?.includes('Expected first argument to collection()') || err?.message?.includes('Expected first argument to doc()')
-          if (isInvalidDb) {
-            logger.debug('App', 'Firestore db недействителен (HMR/Strict Mode), пропускаем обработку onAuthStateChanged', { uid: firebaseUser?.uid })
-            setLoading(false)
-            setAuthChecking(false)
-            return
-          }
-          const isOffline = err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')
-          if (isOffline) {
-              logger.warn('Firebase', 'Офлайн-режим Firebase, используем кеш', { uid: firebaseUser.uid })
-              try {
-                const savedUserStr = localStorage.getItem('vpn_current_user')
-                if (savedUserStr) {
-                  const savedUser = JSON.parse(savedUserStr)
-                  if (savedUser.id === firebaseUser.uid) {
-                    logger.info('Firebase', 'Данные загружены из кеша (офлайн-режим)', { uid: firebaseUser.uid, email: savedUser.email })
-                    setCurrentUser(savedUser)
-                    applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
-                    const savedView = localStorage.getItem('vpn_current_view')
-                    setView(getAllowedView(savedView, savedUser.role))
-                  } else {
-                    setCurrentUser(null)
-                  }
-                } else {
-                  setCurrentUser(null)
-                }
-              } catch (localErr) {
-                logger.warn('Firebase', 'Ошибка загрузки из localStorage', { uid: firebaseUser.uid }, localErr)
-                setCurrentUser(null)
-              }
-            } else {
-              logger.error('Firebase', 'Ошибка загрузки данных пользователя', { uid: firebaseUser.uid }, err)
-              setCurrentUser(null)
-            }
-        }
-      } else {
-        // Пользователь не авторизован
-        // Не сбрасывать currentUser во время TMA sign-in (гонка: onAuthStateChanged(null) может прийти после успешного входа)
-        if (!signInInProgressRef.current) {
-          setCurrentUser(null)
-          logger.info('Firebase', 'Пользователь не авторизован')
-        }
-        // Не переключать view — остаёмся на welcome до клика (без глобального редиректа)
-        if (typeof window !== 'undefined') {
-          const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
-          const hash = (window.location.hash || '').toLowerCase()
-          if (path === '/review' || hash === '#review') setViewState('review')
-          else if (path === '/set-password') setViewState('set-password')
-        }
-      }
-      
-      setLoading(false)
-      setAuthChecking(false) // Завершили проверку авторизации
-    })
-
-    return () => unsubscribe()
-  }, [auth, db, loadUserData, generateUniqueSubId])
+  const { generateUniqueSubId, loadUserData } = useAppAuth({
+    appId,
+    db,
+    auth,
+    setCurrentUser,
+    setView,
+    setDashboardTab,
+    setLoading,
+    setError,
+    setAuthChecking,
+    getAllowedView,
+    firebaseUser,
+    setFirebaseUser,
+    signInInProgressRef
+  })
 
   const TMA_SESSION_KEY = 'tma_session_token'
   const clearTmaSession = useCallback(() => {
@@ -1097,7 +732,7 @@ export default function VPNServiceApp() {
   const [testingServerId, setTestingServerId] = useState(null)
   
   // Синхронизация servers из React Query
-  const [servers, setServers] = useState([])
+  const { servers, setServers } = useAppStore()
 
   // Загрузка настроек из Firestore
   // ВАЖНО: Настройки глобальные - применяются ко ВСЕМ пользователям системы
@@ -1382,7 +1017,7 @@ export default function VPNServiceApp() {
       try {
         const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(loginOrEmail)}`)
         if (res.ok) {
-          const data = await res.json().catch(() => ({}))
+          const data = await res.json().catch(e => { console.error("API JSON Parse Error:", e); return {}; })
           if (data.email) emailToUse = data.email
         } else if (res.status === 503) {
           resolveServiceUnavailable = true
@@ -1760,7 +1395,7 @@ export default function VPNServiceApp() {
       try {
         const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(raw)}`)
         if (res.ok) {
-          const data = await res.json().catch(() => ({}))
+          const data = await res.json().catch(e => { console.error("API JSON Parse Error:", e); return {}; })
           if (data.email) emailToUse = data.email
         }
       } catch (_) {}
@@ -1784,151 +1419,8 @@ export default function VPNServiceApp() {
   }, [forgotPasswordEmail, getAuthErrorMsg])
 
   // Обработка выхода
-  const handleTelegramSignIn = useCallback(async () => {
-    if (!auth) return
-    const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : null
-    tmaLog('info', 'button_click', 'Кнопка «Войти через Telegram»: нажатие', { hasInitData: !!initData })
-    logger.info('TelegramAuth', 'Кнопка «Войти через Telegram»: нажатие', { hasInitData: !!initData })
-    if (!initData) {
-      const fromEnv = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TELEGRAM_BOT_USERNAME)
-        ? String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME).trim().replace(/^@/, '')
-        : ''
-      const botUsername = fromEnv || DEFAULT_TELEGRAM_BOT_USERNAME
-      const url = botUsername ? `https://t.me/${botUsername}/app` : null
-      tmaLog('warn', 'button_no_initdata', 'Вход через Telegram: нет initData — показ модалки «Открыть в боте»', { hasUrl: !!url })
-      logger.warn('TelegramAuth', 'Вход через Telegram: нет initData', { url })
-      setTelegramOpenModal({ open: true, url })
-      return
-    }
-    setTelegramSignInLoading(true)
-    setError('')
-    try {
-      const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
-      let data = {}
-      const storedToken = (typeof localStorage !== 'undefined' && localStorage.getItem('tma_session_token')) || ''
-      if (storedToken) {
-        tmaLog('info', 'button_session_request', 'Вход по кнопке: запрос по сессии', {})
-        logger.info('TelegramAuth', 'Вход по кнопке: запрос по сессии', {})
-        const resSession = await fetch(`${base}/api/telegram/auth`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Telegram-Session-Token': storedToken },
-          body: JSON.stringify({ sessionToken: storedToken }),
-        })
-        data = await resSession.json().catch(() => ({}))
-        tmaLog('info', 'button_session_response', 'Вход по кнопке: ответ по сессии', { success: data.success, status: resSession.status })
-        logger.info('TelegramAuth', 'Вход по кнопке: ответ по сессии', { success: data.success, status: resSession.status })
-        if (!data.success && typeof localStorage !== 'undefined') {
-          localStorage.removeItem('tma_session_token')
-          localStorage.removeItem('tma_session_expires')
-        }
-      }
-      if (!data.success && initData) {
-        tmaLog('info', 'button_initdata_request', 'Вход по кнопке: запрос по initData', {})
-        logger.info('TelegramAuth', 'Вход по кнопке: запрос по initData', {})
-        const resInit = await fetch(`${base}/api/telegram/auth`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Telegram-InitData': initData },
-          body: JSON.stringify({ initData }),
-        })
-        data = await resInit.json().catch(() => ({}))
-        tmaLog('info', 'button_initdata_response', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
-        logger.info('TelegramAuth', 'Вход по кнопке: ответ по initData', { success: data.success, reason: data.reason, status: resInit.status })
-      }
-      if (data.success && data.customToken) {
-        tmaLog('info', 'button_success', 'Вход по кнопке: успешная загрузка', { hasUser: !!data.user, uid: data.user?.id })
-        logger.info('TelegramAuth', 'Вход по кнопке: успех', { hasSessionToken: !!data.sessionToken, hasUser: !!data.user })
-        if (data.user && data.user.id) tmaUserFromAuthRef.current = { uid: data.user.id, user: data.user }
-        if (data.sessionToken && typeof localStorage !== 'undefined') {
-          localStorage.setItem('tma_session_token', data.sessionToken)
-          if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
-        }
-        await signInWithCustomToken(auth, data.customToken)
-        // Сразу редирект: форма входа скрывается без ожидания onAuthStateChanged
-        if (data.user && data.uid) {
-          const currentUserData = { ...data.user, id: data.uid, role: data.user?.role || 'user' }
-          setCurrentUser(currentUserData)
-          setView(currentUserData.role === 'admin' ? 'admin' : 'dashboard')
-        }
-      } else {
-        tmaLog('warn', 'button_error', 'Вход по кнопке: ошибка от сервера', { reason: data.reason, error: data.error })
-        logger.warn('TelegramAuth', 'Вход по кнопке: ошибка', { error: data.error, reason: data.reason })
-        setError(data.error || 'Не удалось войти через Telegram. Откройте приложение заново из меню бота.')
-      }
-    } catch (err) {
-      tmaLog('error', 'button_exception', 'Вход по кнопке: исключение', { message: err?.message })
-      logger.error('TelegramAuth', 'Вход по кнопке: исключение', { message: err?.message }, err)
-      setError(err?.message || i18n.t('app.telegramSignInError'))
-    } finally {
-      setTelegramSignInLoading(false)
-    }
-  }, [auth])
+  // handleTelegramSignIn and handleTelegramWidgetAuth removed here
 
-  const handleTelegramWidgetAuth = useCallback(
-    async (user) => {
-      if (!auth || !user) return
-      setTelegramSignInLoading(true)
-      setError('')
-      const base = (import.meta.env?.VITE_API_BASE_URL || '').toString()
-      try {
-        tmaLog('info', 'widget_request', 'Login Widget: отправка данных на сервер', { userId: user?.id })
-        logger.info('TelegramAuth', 'Login Widget: отправка данных на сервер', { userId: user.id })
-        const res = await fetch(`${base}/api/telegram/auth-widget`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(user),
-        })
-        const data = await res.json().catch(() => ({}))
-        if (data.success && data.customToken) {
-          tmaLog('info', 'widget_success', 'Login Widget: успешная загрузка', { status: res.status })
-          logger.info('TelegramAuth', 'Login Widget: успех', {})
-          if (data.sessionToken && typeof localStorage !== 'undefined') {
-            localStorage.setItem('tma_session_token', data.sessionToken)
-            if (data.sessionTokenExpiresAt) localStorage.setItem('tma_session_expires', String(data.sessionTokenExpiresAt))
-          }
-          const cred = await signInWithCustomToken(auth, data.customToken)
-          // /api/telegram/auth-widget не возвращает uid/user — сразу грузим данные и редиректим (без ожидания onAuthStateChanged)
-          const userData = await loadUserData(cred.user.uid)
-          if (userData) {
-            const currentUserData = { ...userData, id: cred.user.uid, role: userData.role || 'user' }
-            setCurrentUser(currentUserData)
-            setView(currentUserData.role === 'admin' ? 'admin' : 'dashboard')
-            logger.info('TelegramAuth', 'Login Widget: вход успешен, переход в ЛК', { uid: cred.user.uid })
-          }
-        } else {
-          tmaLog('warn', 'widget_error', 'Login Widget: ошибка от сервера', { error: data.error })
-          logger.warn('TelegramAuth', 'Login Widget: ошибка', { error: data.error })
-          setError(data.error || i18n.t('app.telegramSignInFailed'))
-        }
-      } catch (err) {
-        tmaLog('error', 'widget_exception', 'Login Widget: исключение', { message: err?.message })
-        logger.error('TelegramAuth', 'Login Widget: исключение', { message: err?.message }, err)
-        setError(err?.message || i18n.t('app.telegramSignInError'))
-      } finally {
-        setTelegramSignInLoading(false)
-      }
-    },
-    [auth, loadUserData, setView]
-  )
-
-  // Telegram Login Widget: если Telegram вернул пользователя по редиректу (в URL query) — только на браузерном пути
-  useEffect(() => {
-    if (!auth || firebaseUser || authChecking || typeof window === 'undefined') return
-    if (!isBrowserAuthPath()) return
-    const params = new URLSearchParams(window.location.search)
-    const id = params.get('id')
-    const hash = params.get('hash')
-    if (!id || !hash) return
-    const auth_date = params.get('auth_date')
-    const first_name = params.get('first_name') || ''
-    const last_name = params.get('last_name') || ''
-    const username = params.get('username') || ''
-    const photo_url = params.get('photo_url') || ''
-    const widgetUser = { id, hash, auth_date, first_name, last_name, username, photo_url }
-    tmaLog('info', 'widget_redirect', 'Возврат из Telegram по URL (виджет редирект), завершаем вход', { userId: id })
-    logger.info(TMA_LOG, 'Возврат из Telegram по URL (виджет редирект), завершаем вход', { userId: id })
-    window.history.replaceState(null, '', window.location.pathname + (window.location.hash || ''))
-    handleTelegramWidgetAuth(widgetUser)
-  }, [auth, firebaseUser, authChecking, handleTelegramWidgetAuth])
 
   const handleSetPasswordForEmail = useCallback(async (newPassword) => {
     if (!firebaseUser) return { error: i18n.t('app.authUnavailable') || 'Сессия истекла. Войдите снова.' }
@@ -1940,7 +1432,7 @@ export default function VPNServiceApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idToken, newPassword }),
       })
-      const data = await res.json().catch(() => ({}))
+      const data = await res.json().catch(e => { console.error("API JSON Parse Error:", e); return {}; })
       if (!res.ok) return { error: data.error || i18n.t('app.loginError') }
       return { success: true }
     } catch (err) {
@@ -2079,11 +1571,11 @@ export default function VPNServiceApp() {
   }, [])
 
   const handleAuthModeRegister = useCallback(() => {
-    console.log('🔄 Переключение на режим регистрации')
+    logger.debug('App', 'Переключение на режим регистрации')
     setAuthMode('register')
     setError('')
     setSuccess('')
-    console.log('🔄 authMode установлен в register')
+    logger.debug('App', 'authMode установлен в register')
   }, [])
 
 
@@ -2105,12 +1597,12 @@ export default function VPNServiceApp() {
     try {
       setError('')
       setSuccess('')
-      console.log('🔑 Начинаем получение ключа...')
+      logger.debug('App', 'Начинаем получение ключа...')
       
       // Используем dashboardService.getKey() который работает через Backend Proxy
       // Он использует subId из профиля и возвращает ссылку на подписку
       const subscriptionLink = await dashboardService.getKey(currentUser)
-      console.log('✅ Ссылка на подписку получена через Backend Proxy:', subscriptionLink)
+      logger.info('App', 'Ссылка на подписку получена через Backend Proxy', { subscriptionLink })
 
       // Обновляем локальное состояние - сохраняем ссылку на подписку
       const updatedUser = { 
@@ -2330,7 +1822,7 @@ export default function VPNServiceApp() {
 
   // Оформление подписки (создание клиента в 3x-ui)
   const handleCreateSubscription = useCallback(async (tariff, devices = null, natrockPort = null, periodMonths = 1, testPeriod = false, paymentMode = 'pay_now', discount = 0, promocodeId = null) => {
-    console.log('🎯 App.handleCreateSubscription вызван с параметрами:', {
+    logger.debug('App', 'handleCreateSubscription вызван с параметрами', {
       tariffName: tariff?.name,
       tariffId: tariff?.id,
       devices,
@@ -2366,12 +1858,12 @@ export default function VPNServiceApp() {
     }
 
     try {
-      console.log('🔄 App.handleCreateSubscription: Начинаем создание подписки...')
+      logger.debug('App', 'Начинаем создание подписки...')
       setCreatingSubscription(true)
       setError('')
       setSuccess('')
 
-      console.log('📤 App.handleCreateSubscription: Вызов dashboardService.createSubscription...')
+      logger.debug('App', 'Вызов dashboardService.createSubscription...')
       
       // Используем dashboardService.createSubscription() который работает через Backend Proxy
       // Он использует UUID из профиля, данные тарифа и сохраненную сессию
@@ -2387,7 +1879,7 @@ export default function VPNServiceApp() {
         promocodeId
       )
       
-      console.log('✅ App.handleCreateSubscription: dashboardService.createSubscription вернул данные:', {
+      logger.info('App', 'dashboardService.createSubscription вернул данные', {
         hasUpdatedData: !!updatedData,
         uuid: updatedData?.uuid,
         tariffName: updatedData?.tariffName,
@@ -4263,7 +3755,7 @@ export default function VPNServiceApp() {
         <div className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:pl-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
           <div className="w-full max-w-content mx-auto">
             <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
-              <FinancesDashboard users={users} tariffs={tariffs} formatDate={formatDate} currentUser={currentUser} />
+              <FinancesDashboard formatDate={formatDate} currentUser={currentUser} />
             </Suspense>
           </div>
           <div className="max-sm:hidden">
@@ -4314,10 +3806,10 @@ export default function VPNServiceApp() {
       <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <AdminViewWithContext
         currentUser={currentUser}
-        users={users}
+       
         setUsers={setUsers}
         setCurrentUser={setCurrentUser}
-        tariffs={tariffs}
+       
         setTariffs={setTariffs}
         setError={setError}
         setSuccess={setSuccess}
@@ -4331,13 +3823,13 @@ export default function VPNServiceApp() {
           onSetView={setView}
           sidebarView="analytics"
           onHandleLogout={handleLogout}
-          users={users}
+         
           editingUser={editingUser}
           onSetEditingUser={setEditingUser}
           onHandleUpdateUser={handleUpdateUser}
           onHandleDeleteUser={handleDeleteUser}
           onHandleCopy={handleCopy}
-          servers={servers}
+         
           editingServer={editingServer}
           onSetEditingServer={setEditingServer}
           onHandleAddServer={handleAddServer}
@@ -4347,7 +3839,7 @@ export default function VPNServiceApp() {
           testingServerId={testingServerId}
           newServerIdRef={newServerIdRef}
           settingsLoading={settingsLoading}
-          tariffs={tariffs}
+         
           editingTariff={editingTariff}
           onSetEditingTariff={setEditingTariff}
           onHandleSaveTariff={handleSaveTariff}
@@ -4380,7 +3872,7 @@ export default function VPNServiceApp() {
           onHandleTariffDurationDaysChange={handleTariffDurationDaysChange}
           onHandleTariffActiveChange={handleTariffActiveChange}
           onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
-          settings={settings}
+         
           onHandleAppLinkChange={handleAppLinkChange}
           onHandleSeoChange={handleSeoChange}
           onHandleTariffConditionChange={handleTariffConditionChange}
@@ -4417,10 +3909,10 @@ export default function VPNServiceApp() {
       <Suspense fallback={<div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
       <AdminViewWithContext
         currentUser={currentUser}
-        users={users}
+       
         setUsers={setUsers}
         setCurrentUser={setCurrentUser}
-        tariffs={tariffs}
+       
         setTariffs={setTariffs}
         setError={setError}
         setSuccess={setSuccess}
@@ -4433,13 +3925,13 @@ export default function VPNServiceApp() {
           onSetAdminTab={setAdminTab}
           onSetView={setView}
           onHandleLogout={handleLogout}
-          users={users}
+         
           editingUser={editingUser}
           onSetEditingUser={setEditingUser}
           onHandleUpdateUser={handleUpdateUser}
           onHandleDeleteUser={handleDeleteUser}
           onHandleCopy={handleCopy}
-          servers={servers}
+         
           editingServer={editingServer}
           onSetEditingServer={setEditingServer}
           onHandleAddServer={handleAddServer}
@@ -4449,7 +3941,7 @@ export default function VPNServiceApp() {
           testingServerId={testingServerId}
           newServerIdRef={newServerIdRef}
           settingsLoading={settingsLoading}
-          tariffs={tariffs}
+         
           editingTariff={editingTariff}
           onSetEditingTariff={setEditingTariff}
           onHandleSaveTariff={handleSaveTariff}
@@ -4482,7 +3974,7 @@ export default function VPNServiceApp() {
           onHandleTariffDurationDaysChange={handleTariffDurationDaysChange}
           onHandleTariffActiveChange={handleTariffActiveChange}
           onHandleTariffSubscriptionLinkChange={handleTariffSubscriptionLinkChange}
-          settings={settings}
+         
           onHandleAppLinkChange={handleAppLinkChange}
           onHandleSeoChange={handleSeoChange}
           onHandleTariffConditionChange={handleTariffConditionChange}
@@ -4505,7 +3997,7 @@ export default function VPNServiceApp() {
         view={view}
         onSetView={setView}
         onLogout={handleLogout}
-        tariffs={tariffs}
+       
         loadTariffs={loadTariffs}
         dashboardTab={dashboardTab}
         onSetDashboardTab={setDashboardTab}
@@ -4530,14 +4022,14 @@ export default function VPNServiceApp() {
         loadPayments={loadPayments}
         formatDate={formatDate}
         formatTraffic={formatTraffic}
-        settings={settings}
+       
         onCopy={handleCopy}
         showKeyModal={showKeyModal}
         onSetShowKeyModal={setShowKeyModal}
         showLogger={showLogger}
         onSetShowLogger={setShowLogger}
         onGetKey={handleGetKey}
-        servers={servers}
+       
       />
       </Suspense>
     )

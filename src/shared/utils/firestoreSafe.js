@@ -31,3 +31,15 @@ export function stripUndefinedForFirestore(value) {
   }
   return out
 }
+
+export function getFirestoreSafeName(displayName, email) {
+  const allowed = /[a-zA-Zа-яА-ЯёЁ\s-]/g
+  const raw = (displayName || '').trim()
+  const cleaned = raw ? raw.match(allowed)?.join('') || '' : ''
+  if (cleaned.length >= 2 && cleaned.length <= 100) return cleaned.slice(0, 100)
+  const fromEmail = (email || '').trim().split('@')[0]
+  const fromEmailCleaned = fromEmail ? fromEmail.match(allowed)?.join('') || '' : ''
+  if (fromEmailCleaned.length >= 2) return fromEmailCleaned.slice(0, 100)
+  if (fromEmailCleaned.length === 1) return fromEmailCleaned + 'u'
+  return 'User'
+}
