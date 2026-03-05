@@ -69,7 +69,7 @@ export function useNotifications(userId) {
           tag: `notification-${n.id}`,
           data: { url: '/dashboard', type: n.type, id: n.id },
         })
-        .catch(() => {})
+        .catch((err) => console.warn('useNotifications:', err?.message))
     })
     prevIdsRef.current = currentIds
   }, [userId, list])

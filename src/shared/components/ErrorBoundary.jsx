@@ -37,7 +37,7 @@ class ErrorBoundary extends Component {
       context: errorInfo?.componentStack?.slice(0, 500),
       stack: error?.stack,
       severity: 'high',
-    }).catch(() => {})
+    }).catch((err) => console.warn('ErrorBoundary: report failed', err?.message))
   }
 
   handleReload = () => {

@@ -5,6 +5,7 @@
 
 import express from 'express'
 import { handleWebhook } from '../controllers/telegram.controller.js'
+import { generateUniqueSubId } from '../lib/generateUniqueSubId.js'
 
 /**
  * @param {Object} deps — зависимости из основного сервера
@@ -241,9 +242,7 @@ export function createTelegramRouter(deps) {
       const firstName = validated.user.first_name || ''
       const lastName = validated.user.last_name || ''
       const name = [firstName, lastName].filter(Boolean).join(' ') || validated.user.username || `Telegram ${tgId}`
-      const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
-      let subId = ''
-      for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+      const subId = await generateUniqueSubId(db, appId)
       const newUserData = {
         email: `tg_${tgId}@telegram.placeholder`,
         login: `tg_${tgId}`,
@@ -338,9 +337,7 @@ export function createTelegramRouter(deps) {
         logTelegramAuth('initData_ok', { uid, tgId, created: false, source: 'widget' })
         return res.json({ success: true, customToken, sessionToken: sessionTokenNew, sessionTokenExpiresAt: sessionExpiresAt })
       }
-      const subIdChars = '0123456789abcdefghijklmnopqrstuvwxyz'
-      let subId = ''
-      for (let i = 0; i < 16; i++) subId += subIdChars[Math.floor(Math.random() * subIdChars.length)]
+      const subId = await generateUniqueSubId(db, appId)
       await userRef.set({
         email: `tg_${tgId}@telegram.placeholder`,
         login: `tg_${tgId}`,

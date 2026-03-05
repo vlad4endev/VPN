@@ -191,7 +191,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
   const handleCopyMessage = useCallback(() => {
     const text = offerMessage || aiResult?.suggestedOfferMessage || aiResult?.message
     if (text) {
-      navigator.clipboard.writeText(text).catch(() => {})
+      navigator.clipboard.writeText(text).catch((err) => console.warn('AnalyticsFunnelPanel: clipboard failed', err?.message))
     }
   }, [offerMessage, aiResult?.suggestedOfferMessage, aiResult?.message])
 

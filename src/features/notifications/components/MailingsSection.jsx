@@ -241,7 +241,7 @@ export default function MailingsSection({ users = [], tariffs = [], onSuccess, o
     const m = calendarMonth.getMonth()
     const from = new Date(y, m, 1).toISOString()
     const to = new Date(y, m + 1, 0, 23, 59, 59).toISOString()
-    notificationsService.getScheduled({ from, to }).then(setScheduledList).catch(() => {})
+    notificationsService.getScheduled({ from, to }).then(setScheduledList).catch((err) => console.warn('MailingsSection: getScheduled failed', err?.message))
   }, [])
 
   const loadScheduled = useCallback(async () => {

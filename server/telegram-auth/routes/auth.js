@@ -148,7 +148,7 @@ export function createAuthRouter(deps) {
       const previousRefreshId = await getRefreshIdFromRedis(user.id)
       if (previousRefreshId) {
         await deleteRefreshFromRedis(user.id)
-        await notifyNewDeviceLogin(botToken, telegramId, userAgent, fingerprint).catch(() => {})
+        await notifyNewDeviceLogin(botToken, telegramId, userAgent, fingerprint).catch((err) => console.warn('notifyNewDeviceLogin:', err?.message))
       }
 
       const { token: refreshToken, refreshId } = issueRefreshToken(user)

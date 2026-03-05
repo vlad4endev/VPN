@@ -35,6 +35,7 @@ import { getMetrics, metricsMiddleware } from './lib/metrics.js'
 import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 import { initStorage } from './storage.js'
+import { generateUniqueSubId } from './lib/generateUniqueSubId.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -593,18 +594,7 @@ app.post('/api/auth/ensure-firestore-user', express.json(), async (req, res) => 
     const displayName = (authUser.displayName || '').trim()
     const photoURL = authUser.photoURL || null
 
-    const generateSubId = () => {
-      const chars = '0123456789abcdefghijklmnopqrstuvwxyz'
-      let result = ''
-      for (let i = 0; i < 16; i++) result += chars[crypto.randomInt(0, chars.length)]
-      return result
-    }
-    let subId = generateSubId()
-    for (let i = 0; i < 10; i++) {
-      const existingSub = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).where('subId', '==', subId).limit(1).get()
-      if (existingSub.empty) break
-      subId = generateSubId()
-    }
+    const subId = await generateUniqueSubId(db, APP_ID)
 
     const now = new Date().toISOString()
     const newUserData = {
@@ -880,6 +870,18 @@ async function sendWebPushToUser(userId, payload) {
 /** Кэш uid→admin (только положительные результаты, TTL 5 мин). Снижает Firestore reads. */
 const adminCache = new Map() // uid -> { expiresAt: number }
 const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000
+const ADMIN_CACHE_MAX_SIZE = 500
+
+function cleanupAdminCache() {
+  const now = Date.now()
+  for (const [uid, entry] of adminCache.entries()) {
+    if (now >= entry.expiresAt) adminCache.delete(uid)
+  }
+  while (adminCache.size > ADMIN_CACHE_MAX_SIZE) {
+    const firstKey = adminCache.keys().next().value
+    if (firstKey) adminCache.delete(firstKey)
+  }
+}
 
 /**
  * Проверить Firebase ID token и убедиться, что пользователь — админ (claim или роль в Firestore).
@@ -908,6 +910,7 @@ async function ensureAdmin(req, res) {
   if (cached && Date.now() < cached.expiresAt) {
     return { ok: true, uid }
   }
+  if (adminCache.size >= ADMIN_CACHE_MAX_SIZE) cleanupAdminCache()
   if (decoded.admin === true) {
     adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
     return { ok: true, uid }
@@ -931,6 +934,7 @@ async function ensureAdmin(req, res) {
         const data = snap.data()
         const role = data.role
         if (isAdminRole(role)) {
+          if (adminCache.size >= ADMIN_CACHE_MAX_SIZE) cleanupAdminCache()
           adminCache.set(uid, { expiresAt: Date.now() + ADMIN_CACHE_TTL_MS })
           return { ok: true, uid }
         }
@@ -1279,7 +1283,7 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       source: 'broadcast',
       message: `Рассылка: отправлено ${sent}, ошибок ${failed}`,
       severity: failed === userIds.length ? 'high' : 'medium',
-    }).catch(() => {})
+    }).catch((err) => console.warn('notifyAdminError broadcast:', err?.message))
   }
   res.json({ success: true, sent, failed, total: userIds.length })
 })
@@ -1402,7 +1406,7 @@ async function checkSubscriptionAlerts(subscriptionId, subscriptionData) {
             context: alert.lastError || alert.subscriptionId,
             severity: alert.severity,
             userId: subscriptionData.userId,
-          }).catch(() => {})
+          }).catch((err) => console.warn('notifyAdminError subscription_alert:', err?.message))
         }
       }
     }
@@ -3974,18 +3978,6 @@ async function handleMiniAppData(botToken, message) {
   }
 }
 
-/** Обработка callback от inline-кнопок */
-async function handleCallbackQuery(botToken, callbackQuery) {
-  const chatId = callbackQuery.message?.chat?.id
-  const fromId = String(callbackQuery.from?.id || '')
-  const data = callbackQuery.data || ''
-  const id = callbackQuery.id
-  await answerCallbackQuery(botToken, id, { text: 'Ок' })
-  if (data === 'open_panel' || data === 'menu') {
-    await sendMainMenu(botToken, chatId)
-  }
-}
-
 app.use('/api/telegram', createTelegramRouter({
   getDb: () => db,
   getAdmin: () => admin,
@@ -4431,7 +4423,7 @@ async function notifyAdminError(opts) {
       if (snapshot.docs.length > ADMIN_ERRORS_LIMIT) {
         const toDelete = snapshot.docs.slice(ADMIN_ERRORS_LIMIT)
         for (const doc of toDelete) {
-          await doc.ref.delete().catch(() => {})
+          await doc.ref.delete().catch((err) => console.warn('notifyAdminError: delete old doc failed', err?.message))
         }
       }
     } catch (err) {
@@ -6745,7 +6737,7 @@ async function runSubscriptionRemindersAndExpiry() {
         }
         if (botToken && user.tgId) {
           const msg = `Подписка истекла. Доступ отключён. Продлите подписку, чтобы снова пользоваться VPN.`
-          await sendTelegramMessage(botToken, String(user.tgId).trim(), msg, replyMarkupPayment ? { reply_markup: replyMarkupPayment } : {}).catch(() => {})
+          await sendTelegramMessage(botToken, String(user.tgId).trim(), msg, replyMarkupPayment ? { reply_markup: replyMarkupPayment } : {}).catch((err) => console.warn('Напоминания: отправка в Telegram:', err?.message))
         }
         expiredProcessed++
       }
@@ -7796,7 +7788,7 @@ async function startServer() {
     })
   }, PAYMENT_CHECK_INTERVAL_MS)
   setTimeout(() => {
-    runBackgroundPendingPaymentsCheck().catch(() => {})
+    runBackgroundPendingPaymentsCheck().catch((err) => console.warn('Фоновая проверка платежей (старт):', err?.message))
   }, 15 * 1000)
   console.log(`📋 Фоновая проверка pending-платежей: каждые ${PAYMENT_CHECK_INTERVAL_MS / 1000} с`)
 
@@ -7806,7 +7798,7 @@ async function startServer() {
     runSubscriptionRemindersAndExpiry().catch((err) => console.warn('⚠️ Напоминания подписок:', err.message))
   }, SUBSCRIPTION_REMINDERS_INTERVAL_MS)
   setTimeout(() => {
-    runSubscriptionRemindersAndExpiry().catch(() => {})
+    runSubscriptionRemindersAndExpiry().catch((err) => console.warn('Напоминания подписок (старт):', err?.message))
   }, 60 * 1000)
   console.log(`📋 Напоминания подписок: каждые ${SUBSCRIPTION_REMINDERS_INTERVAL_MS / (60 * 60 * 1000)} ч`)
 

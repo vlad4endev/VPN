@@ -35,7 +35,9 @@ async function createApp() {
 
   // Middleware
   app.use(cors({
-    origin: '*', // В продакшене указать конкретные домены
+    origin: process.env.NODE_ENV === 'production'
+      ? (process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) || ['https://skypath.fun'])
+      : '*',
     credentials: true
   }))
   app.use(express.json())

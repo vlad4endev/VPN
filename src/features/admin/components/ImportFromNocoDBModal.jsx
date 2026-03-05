@@ -167,7 +167,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       }
       if (config.updateExistingUsers !== undefined) setUpdateExistingUsers(!!config.updateExistingUsers)
       if (config.writeBackLoginPasswordOnUpdate !== undefined) setWriteBackLoginPasswordOnUpdate(!!config.writeBackLoginPasswordOnUpdate)
-    }).catch(() => {})
+    }).catch((err) => console.warn('ImportFromNocoDBModal:', err?.message))
     return () => { cancelled = true }
   }, [savedRestored, getSavedNocoDBImportConfig])
 

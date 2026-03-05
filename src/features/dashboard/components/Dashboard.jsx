@@ -405,7 +405,7 @@ const Dashboard = ({
             if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
               try {
                 await dashboardService.applyAddDevicesAfterPayment(currentUserData, subscriptionData.newDevicesCount)
-                await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
                 setShowSuccessModal(false)
                 setSubscriptionSuccess(null)
                 subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
@@ -618,7 +618,7 @@ const Dashboard = ({
                 if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
                   try {
                     await dashboardService.applyAddDevicesAfterPayment(currentUserData, subscriptionData.newDevicesCount)
-                    await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                    await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
                     setShowSuccessModal(false)
                     setSubscriptionSuccess(null)
                     subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
@@ -650,7 +650,7 @@ const Dashboard = ({
                       isFirstPayment: isFirstPaymentWebhook
                     })
                     if (isFirstPaymentWebhook && typeof onSetShowKeyModalRef.current === 'function') {
-                      await onRefreshUserAfterPaymentRef.current?.().catch(() => {})
+                      await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
                       setShowSuccessModal(false)
                       setSubscriptionSuccess(null)
                       onSetShowKeyModalRef.current(true)
@@ -1123,7 +1123,7 @@ const Dashboard = ({
     try {
       setChangingPlan(true)
       const result = await dashboardService.changePlanTariff(currentUser, tariff)
-      await onRefreshUserAfterPayment?.().catch(() => {})
+      await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
       setChangePlanSuccess(result.message || t('dashboard.changePlanSuccess'))
       setTimeout(() => setChangePlanSuccess(null), 6000)
     } catch (err) {
@@ -1242,8 +1242,8 @@ const Dashboard = ({
               subscriptionCreatedForOrderIdsRef.current.add(orderId)
               try {
                 await dashboardService.applyAddDevicesAfterPayment(currentUser, subscriptionSuccess.newDevicesCount)
-                await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
-                await onRefreshUserAfterPayment?.().catch(() => {})
+                await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
+                await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
                 setShowSuccessModal(false)
                 setSubscriptionSuccess(null)
                 setTimeout(() => { window.location.reload() }, 1000)
@@ -1270,13 +1270,13 @@ const Dashboard = ({
                 payment.discount || 0
               )
               logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
-              await dashboardService.updatePaymentStatus(orderId, 'completed').catch(() => {})
+              await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
               const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
               const cleanUrl = window.location.origin + cleanPath
               if (typeof window.history?.replaceState === 'function') {
                 window.history.replaceState({}, '', cleanUrl)
               }
-              await onRefreshUserAfterPayment?.().catch(() => {})
+              await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
               if (isFirstPaymentManual && typeof onSetShowKeyModal === 'function') {
                 setShowSuccessModal(false)
                 setSubscriptionSuccess(null)
@@ -1388,7 +1388,7 @@ const Dashboard = ({
             setAwaitingPaymentResult(false)
             logger.info('Dashboard', 'Автопроверка: платёж оплачен, создаём подписку и закрываем окно', { orderId, attempt })
             const fn = handleManualPaymentCheckRef.current
-            if (typeof fn === 'function') await Promise.resolve(fn(orderId)).catch(() => {})
+            if (typeof fn === 'function') await Promise.resolve(fn(orderId)).catch((err) => console.warn('Dashboard:', err?.message))
             return
           }
         } catch (_) {}

@@ -137,7 +137,7 @@ export function useSupport(currentUser) {
           .triggerAutoReply(id, () =>
             auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
           )
-          .catch(() => {})
+          .catch((err) => console.warn('useSupport:', err?.message))
         return id
       } catch (err) {
         setError(err.message || 'Не удалось создать тикет')
@@ -215,7 +215,7 @@ export function useSupport(currentUser) {
               .triggerAutoReply(selectedTicketId, () =>
                 auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
               )
-              .catch(() => {})
+              .catch((err) => console.warn('useSupport:', err?.message))
           }
         }
       } catch (err) {

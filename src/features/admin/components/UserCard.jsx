@@ -266,7 +266,7 @@ const UserCard = ({
     const expiryMs = Number(clientStats3x.expiryTime) * 1000
     const updated = { ...editingUser, expiresAt: expiryMs }
     setEditingUser(updated)
-    handleSaveUserCard(normalizeUser(updated)).catch(() => {})
+    handleSaveUserCard(normalizeUser(updated)).catch((err) => console.warn('UserCard: save failed', err?.message))
   }, [clientStats3x, editingUser, handleSaveUserCard])
 
   useEffect(() => {

@@ -529,7 +529,7 @@ export default function VPNServiceApp() {
           useUIStore.getState().setAdminTab('dashboard')
           useUIStore.getState().setDashboardTab('subscription')
         } catch (_) {}
-      }).catch(() => {})
+      }).catch((err) => console.warn('App:', err?.message))
       if (had) console.log('🗑️ Пользователь удален из localStorage')
     }
   }, [])
@@ -1320,16 +1320,19 @@ export default function VPNServiceApp() {
     const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
     let emailToUse = loginOrEmail
     let resolveServiceUnavailable = false
-    try {
-      const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(loginOrEmail)}`)
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}))
-        if (data.email) emailToUse = data.email
-      } else if (res.status === 503) {
+    // resolve-login нужен только если введён логин (без @); для email сразу используем значение
+    if (!loginOrEmail.includes('@')) {
+      try {
+        const res = await fetch(`${base}/api/auth/resolve-login?q=${encodeURIComponent(loginOrEmail)}`)
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}))
+          if (data.email) emailToUse = data.email
+        } else if (res.status === 503) {
+          resolveServiceUnavailable = true
+        }
+      } catch (_) {
         resolveServiceUnavailable = true
       }
-    } catch (_) {
-      resolveServiceUnavailable = true
     }
 
     if (!emailToUse.includes('@')) {

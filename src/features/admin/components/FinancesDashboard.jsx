@@ -196,7 +196,7 @@ const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x !=
       }
       run()
     } else if (financeTab === 'analytics') {
-      loadAccounting().catch(() => {})
+      loadAccounting().catch((err) => console.warn('FinancesDashboard: loadAccounting failed', err?.message))
     }
   }, [financeTab, loadAccounting])
 

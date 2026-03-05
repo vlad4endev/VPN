@@ -66,6 +66,6 @@ export function initGlobalErrorReporting() {
       source: 'unhandledrejection',
       stack: event.reason?.stack,
       severity: 'medium',
-    }).catch(() => {})
+    }).catch((err) => console.warn('reportErrorService: report failed', err?.message))
   })
 }
