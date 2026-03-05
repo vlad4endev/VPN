@@ -740,6 +740,35 @@ export default function VPNServiceApp() {
   // Не фильтруются по userId, так как это системные настройки
   // ВАЖНО: Используем useRef для предотвращения повторных загрузок, которые могут перезаписать локальные изменения
   const settingsLoadInProgressRef = useRef(false)
+  const publicSettingsLoadedRef = useRef(false)
+  /** Загрузка публичных настроек (servers, appLinks) для обычных пользователей — только чтение */
+  const loadPublicSettings = useCallback(async () => {
+    if (!db || !currentUser) return
+    if (publicSettingsLoadedRef.current) return
+    publicSettingsLoadedRef.current = true
+    try {
+      const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
+      const snap = await getDoc(settingsDoc)
+      if (snap.exists()) {
+        const data = snap.data()
+        const merged = {
+          ...data,
+          appLinks: data.appLinks && typeof data.appLinks === 'object' ? data.appLinks : { android: '', ios: '', macos: '', windows: '' },
+          seo: data.seo && typeof data.seo === 'object' ? data.seo : {},
+        }
+        setSettings(merged)
+        const firestoreServers = (merged.servers || data.servers || []).map(server => ({
+          ...server,
+          xuiUsername: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+          protocol: server.protocol || ((server.serverPort === 443 || server.serverPort === 40919) ? 'https' : 'http'),
+        }))
+        setServers(firestoreServers)
+      }
+    } catch (err) {
+      publicSettingsLoadedRef.current = false
+      logger.warn('Firestore', 'Не удалось загрузить публичные настройки', null, err)
+    }
+  }, [db, currentUser, appId])
   const loadSettings = useCallback(async () => {
     // Проверка прав доступа - только админы могут загружать и изменять настройки
     if (!currentUser || currentUser.role !== 'admin') {
@@ -2266,6 +2295,14 @@ export default function VPNServiceApp() {
       setError('Ошибка загрузки тарифов')
     }
   }, [db, currentUser?.role])
+
+  // Загрузка тарифов и публичных настроек при открытии Dashboard (личный кабинет) — для обычных пользователей
+  useEffect(() => {
+    if (currentUser && (view === 'dashboard' || view === 'welcome')) {
+      if (tariffs.length === 0) loadTariffs()
+      if (currentUser.role !== 'admin') loadPublicSettings()
+    }
+  }, [currentUser, view, tariffs.length, loadTariffs, loadPublicSettings])
 
   // Загрузка данных при открытии админ-панели или раздела «Финансы»
   // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере

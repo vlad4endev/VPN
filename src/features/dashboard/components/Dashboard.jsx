@@ -120,10 +120,11 @@ const Dashboard = ({
     color: subscriptionColor
   }
 
-  const currentTariff = tariffs.find(t => t.id === currentUser?.tariffId)
+  const tariffsList = Array.isArray(tariffs) ? tariffs : []
+  const currentTariff = tariffsList.find(t => t.id === currentUser?.tariffId)
   const currentPlanKey = (currentUser?.plan || currentUser?.tariffName || '').toLowerCase()
   // Все остальные активные тарифы для переключения; по одному на уникальное имя/план (без дублей в UI)
-  const otherTariffsForSwitchRaw = tariffs.filter(t => {
+  const otherTariffsForSwitchRaw = tariffsList.filter(t => {
     if (!t.active) return false
     if (t.id === currentUser?.tariffId) return false
     return true
@@ -173,9 +174,9 @@ const Dashboard = ({
       })
 
       // Если есть доступные тарифы, открываем модальное окно с первым доступным тарифом
-      if (tariffs && tariffs.length > 0) {
+      if (tariffsList.length > 0) {
         // Находим первый активный тариф или просто первый тариф
-        const availableTariff = tariffs.find(t => t.active !== false) || tariffs[0]
+        const availableTariff = tariffsList.find(t => t.active !== false) || tariffsList[0]
         if (availableTariff) {
           setSelectedTariff(availableTariff)
           setShowTariffModal(true)
@@ -666,10 +667,10 @@ const Dashboard = ({
 
   // Загружаем тарифы при монтировании
   useEffect(() => {
-    if (tariffs.length === 0) {
+    if (tariffsList.length === 0) {
       loadTariffs()
     }
-  }, [tariffs.length, loadTariffs])
+  }, [tariffsList.length, loadTariffs])
 
   // Отслеживание тестового периода и неоплаченной подписки - проверяем каждую минуту
   useEffect(() => {
@@ -1085,9 +1086,9 @@ const Dashboard = ({
       const subscriptionData = subscriptionSuccess || {}
       if (payment && !payment.tariffId && (subscriptionData.tariffId || subscriptionData.tariffName)) {
         const tariffId = subscriptionData.tariffId
-          || (subscriptionData.tariffName ? tariffs.find(t => t.name === subscriptionData.tariffName)?.id : null)
+          || (subscriptionData.tariffName ? tariffsList.find(t => t.name === subscriptionData.tariffName)?.id : null)
           || currentUser?.tariffId
-        const tariff = tariffId ? tariffs.find(t => t.id === tariffId) : (tariffs.length > 0 ? tariffs[0] : null)
+        const tariff = tariffId ? tariffsList.find(t => t.id === tariffId) : (tariffsList.length > 0 ? tariffsList[0] : null)
         if (tariff) {
           payment.tariffId = tariff.id
           payment.tariffName = tariff.name
@@ -1105,10 +1106,10 @@ const Dashboard = ({
         if (!payment.tariffId && subscriptionSuccess) {
           const subscriptionData = subscriptionSuccess
           const tariffId = subscriptionData.tariffId ||
-            (subscriptionData.tariffName ? tariffs.find(t => (t.name || '').toLowerCase() === (subscriptionData.tariffName || '').toLowerCase())?.id : null)
+            (subscriptionData.tariffName ? tariffsList.find(t => (t.name || '').toLowerCase() === (subscriptionData.tariffName || '').toLowerCase())?.id : null)
           if (tariffId) {
             payment.tariffId = tariffId
-            payment.tariffName = subscriptionData.tariffName || tariffs.find(t => t.id === tariffId)?.name
+            payment.tariffName = subscriptionData.tariffName || tariffsList.find(t => t.id === tariffId)?.name
             payment.devices = subscriptionData.devices ?? payment.devices ?? 1
             payment.periodMonths = subscriptionData.periodMonths ?? payment.periodMonths ?? 1
             payment.discount = subscriptionData.discount ?? payment.discount ?? 0
@@ -1126,10 +1127,10 @@ const Dashboard = ({
 
         try {
           // Тариф только из платежа или subscriptionSuccess (оплаченный тариф). Не подставлять другой тариф.
-          let tariff = payment.tariffId ? tariffs.find(t => t.id === payment.tariffId) : null
+          let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
           if (!tariff && (payment.tariffName || subscriptionSuccess?.tariffName)) {
             const name = (payment.tariffName || subscriptionSuccess?.tariffName || '').trim()
-            tariff = name ? tariffs.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
+            tariff = name ? tariffsList.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
             if (tariff) {
               payment.tariffId = tariff.id
               payment.tariffName = tariff.name
@@ -1137,7 +1138,7 @@ const Dashboard = ({
             }
           }
           if (!tariff && subscriptionSuccess?.tariffId) {
-            tariff = tariffs.find(t => t.id === subscriptionSuccess.tariffId)
+            tariff = tariffsList.find(t => t.id === subscriptionSuccess.tariffId)
             if (tariff) {
               payment.tariffId = tariff.id
               payment.tariffName = tariff.name
@@ -1147,7 +1148,7 @@ const Dashboard = ({
             logger.error('Dashboard', 'Тариф не найден для завершенного платежа', {
               tariffId: payment.tariffId,
               orderId,
-              availableTariffs: tariffs.map(t => ({ id: t.id, name: t.name }))
+              availableTariffs: tariffsList.map(t => ({ id: t.id, name: t.name }))
             })
             throw new Error('Тариф не найден')
           }
