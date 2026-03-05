@@ -1,3 +1,4 @@
+import { useAppStore } from '../../../lib/store/appStore.js';
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   BarChart3,
@@ -73,7 +74,8 @@ const FINANCE_TABS = [
   { id: 'analytics', label: 'Аналитика', icon: Sparkles },
 ]
 
-const FinancesDashboard = ({ users = [], tariffs = [], formatDate = (x) => (x != null ? String(x) : '—'), currentUser = null }) => {
+const FinancesDashboard = ({formatDate = (x) => (x != null ? String(x) : '—'), currentUser = null }) => {
+  const { users, tariffs } = useAppStore()
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)

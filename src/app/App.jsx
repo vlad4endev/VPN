@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react'
+import { useAppStore } from '../lib/store/appStore.js';
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,

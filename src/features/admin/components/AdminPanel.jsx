@@ -4,6 +4,7 @@ import PropTypes from 'prop-types'
 import { useTranslation } from 'react-i18next'
 import { Settings, Users, Server, DollarSign, Edit2, Save, X, Bug, LogOut, Copy, Trash2, CheckCircle2, XCircle, AlertCircle, PlusCircle, TestTube, Loader2, Network, Activity, Link2, Monitor, CreditCard, Smartphone, Laptop, Apple, MessageCircle, LayoutDashboard, Database, RefreshCw } from 'lucide-react'
 import { useAdminContext } from '../context/AdminContext.jsx'
+import { useAppStore } from '../../../lib/store/appStore.js'
 import LoggerPanel from '../../../shared/components/LoggerPanel.jsx'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
@@ -36,13 +37,11 @@ const AdminPanel = ({
   onSetAdminTab,
   onSetView,
   onHandleLogout,
-  users,
   editingUser,
   onSetEditingUser,
   onHandleUpdateUser,
   onHandleDeleteUser,
   onHandleCopy,
-  servers,
   editingServer,
   onSetEditingServer,
   onHandleAddServer,
@@ -52,7 +51,6 @@ const AdminPanel = ({
   testingServerId,
   newServerIdRef,
   settingsLoading,
-  tariffs,
   editingTariff,
   onSetEditingTariff,
   onHandleSaveTariff,
@@ -87,7 +85,6 @@ const AdminPanel = ({
   onHandleTariffSubscriptionLinkChange = () => {},
   onHandleTariffLinkedTariffIdsChange = () => {},
   onHandleDeduplicateTariffs = () => {},
-  settings,
   onHandleAppLinkChange,
   onHandleSeoChange = () => {},
   onHandleTariffConditionChange = () => {},
@@ -95,6 +92,7 @@ const AdminPanel = ({
   onSetError = () => {},
   sidebarView, // для раздела «Аналитика»: передать 'analytics', чтобы в сайдбаре подсвечивался нужный пункт
 }) => {
+    const { users, servers, tariffs, settings } = useAppStore()
   const ctx = useAdminContext()
   const onHandleDeduplicateTariffsEffective = ctx?.handleDeduplicateTariffs ?? onHandleDeduplicateTariffs
   const onHandleTariffLinkedTariffIdsChangeEffective = ctx?.handleTariffLinkedTariffIdsChange ?? onHandleTariffLinkedTariffIdsChange
@@ -131,11 +129,9 @@ const AdminPanel = ({
   // Валидация пропсов в режиме разработки
   if (import.meta.env.DEV) {
     PropTypes.checkPropTypes(AdminPanelPropTypes, { 
-      currentUser, adminTab, onSetAdminTab, onSetView, onHandleLogout,
-      users, editingUser, onSetEditingUser, onHandleUpdateUser, onHandleDeleteUser, onHandleCopy,
-      servers, editingServer, onSetEditingServer, onHandleAddServer, onHandleSaveServer,
+      currentUser, adminTab, onSetAdminTab, onSetView, onHandleLogout, editingUser, onSetEditingUser, onHandleUpdateUser, onHandleDeleteUser, onHandleCopy, editingServer, onSetEditingServer, onHandleAddServer, onHandleSaveServer,
       onHandleDeleteServer, onHandleTestServerSession, testingServerId, newServerIdRef,
-      settingsLoading, tariffs, editingTariff, onSetEditingTariff, onHandleSaveTariff,
+      settingsLoading, editingTariff, onSetEditingTariff, onHandleSaveTariff,
       onHandleDeleteTariff, onHandleSaveSettings, formatDate, showLogger, onSetShowLogger,
       success, error, onSetSuccess, onSetError, onHandleServerNameChange, onHandleServerIPChange, onHandleServerPortChange,
       onHandleServerProtocolChange, onHandleServerRandomPathChange, onHandleServerRandomPathBlur,
@@ -143,7 +139,7 @@ const AdminPanel = ({
       onHandleServerLocationChange, onHandleServerActiveChange, onHandleServerTariffChange,
       onHandleTariffNameChange, onHandleTariffPlanChange, onHandleTariffPriceChange,
       onHandleTariffDevicesChange, onHandleTariffTrafficGBChange, onHandleTariffDurationDaysChange,
-      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, onHandleTariffLinkedTariffIdsChange, onHandleDeduplicateTariffs, settings, onHandleAppLinkChange, onHandleSeoChange, onHandleTariffConditionChange
+      onHandleTariffActiveChange, onHandleTariffSubscriptionLinkChange, onHandleTariffLinkedTariffIdsChange, onHandleDeduplicateTariffs, onHandleAppLinkChange, onHandleSeoChange, onHandleTariffConditionChange
       // onHandleSaveUserCard и onGenerateUUID больше не передаются через пропсы - используются из контекста в UserCard
     }, 'prop', 'AdminPanel')
   }
@@ -164,7 +160,7 @@ const AdminPanel = ({
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [showImportNocoDBModal, setShowImportNocoDBModal] = useState(false)
 
-  // Обновляем selectedUser при изменении users, чтобы карточка показывала актуальные данные
+  // Обновляем selectedUser при изменении чтобы карточка показывала актуальные данные
   useEffect(() => {
     if (selectedUser) {
       const updatedUser = users.find(u => u.id === selectedUser.id)
@@ -177,7 +173,7 @@ const AdminPanel = ({
         }
       }
     }
-  }, [users, selectedUser?.id])
+  }, [ selectedUser?.id])
 
   // Обработчик открытия карточки пользователя
   const handleUserRowClick = useCallback((user) => {
