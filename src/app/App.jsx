@@ -927,13 +927,69 @@ export default function VPNServiceApp() {
                 setCurrentUser(null)
               }
             } else {
-              // Не Google — пробуем кеш localStorage
-              try {
-                const savedUserStr = localStorage.getItem('vpn_current_user')
-                if (savedUserStr) {
-                  const savedUser = JSON.parse(savedUserStr)
-                  if (savedUser.id === firebaseUser.uid) {
-                    logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
+              let fallbackHandled = false
+              // Не Google — пробуем создать документ клиентом (fallback при недоступности API ensure-firestore-user)
+              const dbForFallback = getDb()
+              if (dbForFallback && firebaseUser.email) {
+                try {
+                  logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback для email)', { uid: firebaseUser.uid, email: firebaseUser.email })
+                  const generatedUUID = ThreeXUI.generateUUID()
+                  const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
+                  const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
+                  const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
+                  const newUserData = {
+                    email: firebaseUser.email || '',
+                    name: safeName,
+                    phone: '',
+                    role: 'user',
+                    plan: 'free',
+                    uuid: generatedUUID,
+                    subId: generatedSubId,
+                    expiresAt: null,
+                    tariffName: '',
+                    tariffId: '',
+                    photoURL: firebaseUser.photoURL || null,
+                    language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  }
+                  await setDoc(userDocRef, newUserData)
+                  let effectiveRole = 'user'
+                  const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
+                  if (isAdminEmail(normalizedEmail)) {
+                    try {
+                      await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
+                      effectiveRole = 'admin'
+                    } catch (roleErr) {
+                      logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
+                    }
+                  }
+                  const currentUserData = {
+                    id: firebaseUser.uid,
+                    ...newUserData,
+                    email: firebaseUser.email || '',
+                    photoURL: firebaseUser.photoURL || null,
+                    name: firebaseUser.displayName || '',
+                    role: effectiveRole,
+                  }
+                  setCurrentUser(currentUserData)
+                  applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
+                  setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
+                  if (effectiveRole !== 'admin') setDashboardTab('subscription')
+                  logger.info('Auth', 'Вход через email восстановлен в onAuthStateChanged (client fallback)', { uid: firebaseUser.uid, role: effectiveRole })
+                  fallbackHandled = true
+                } catch (emailFallbackErr) {
+                  logger.warn('Auth', 'Не удалось создать документ для email-пользователя (client fallback)', { uid: firebaseUser.uid }, emailFallbackErr)
+                }
+              }
+              if (!fallbackHandled) {
+                // Пробуем кеш localStorage (если fallback выше не сработал)
+                try {
+                  const savedUserStr = localStorage.getItem('vpn_current_user')
+                  if (savedUserStr) {
+                    const savedUser = JSON.parse(savedUserStr)
+                    if (savedUser.id === firebaseUser.uid) {
+                      logger.info('Firebase', 'Используем кешированные данные из localStorage', { uid: firebaseUser.uid, email: savedUser.email })
                     setCurrentUser(savedUser)
                     applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
                     setTimeout(async () => {
@@ -1223,14 +1279,15 @@ export default function VPNServiceApp() {
     }
   }, [view]) // Только view, чтобы избежать лишних перерендеров
 
-  // Один аккаунт на браузер: если пользователь уже авторизован (Firebase), не даём открывать логин/регистрацию/лендинг
+  // Один аккаунт на браузер: если пользователь уже авторизован (Firebase + Firestore), редирект с экрана входа
+  // Не редиректим при firebaseUser без currentUser — иначе зацикливание (dashboard без пользователя показывает welcome)
   useEffect(() => {
-    if (firebaseUser && (view === 'login' || view === 'register' || view === 'welcome')) {
-      const nextView = currentUser?.role === 'admin' ? 'admin' : 'dashboard'
+    if (currentUser && firebaseUser && (view === 'login' || view === 'register' || view === 'welcome')) {
+      const nextView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
       setView(nextView)
       logger.debug('App', 'Уже авторизован — редирект с экрана входа', { view, nextView })
     }
-  }, [firebaseUser, view, currentUser?.role, setView])
+  }, [firebaseUser, view, currentUser, setView])
 
   // Страховка: если currentUser есть, но view всё ещё экран входа — принудительно переключаем в ЛК (обход гонок после Google/email входа)
   useEffect(() => {
