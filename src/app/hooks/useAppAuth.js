@@ -404,8 +404,8 @@ export const useAppAuth = ({
         if (typeof window !== 'undefined') {
           const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
           const hash = (window.location.hash || '').toLowerCase()
-          if (path === '/review' || hash === '#review') setViewState('review')
-          else if (path === '/set-password') setViewState('set-password')
+          if (path === '/review' || hash === '#review') setView('review')
+          else if (path === '/set-password') setView('set-password')
         }
       }
 
@@ -414,7 +414,7 @@ export const useAppAuth = ({
     })
 
     return () => unsubscribe()
-  }, [auth, db, loadUserData, generateUniqueSubId])
+  }, [auth, db, loadUserData, generateUniqueSubId, setView])
 
 
   return { generateUniqueSubId, loadUserData }
