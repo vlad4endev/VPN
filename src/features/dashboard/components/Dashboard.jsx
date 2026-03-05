@@ -18,6 +18,8 @@ import notificationService from '../../../shared/services/notificationService.js
 import { formatTimeRemaining, getTimeRemaining } from '../../../shared/utils/formatDate.js'
 import TelegramBindCard from '../../telegram/components/TelegramBindCard.jsx'
 import SetPasswordForEmailCard from './SetPasswordForEmailCard.jsx'
+import SubscriptionInfoCard from './SubscriptionInfoCard.jsx'
+import VPNKeyControl from './VPNKeyControl.jsx'
 
 
 
