@@ -478,7 +478,52 @@ export default function VPNServiceApp() {
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('')
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
 
-  // Инициализация хука Telegram
+  // Обертка для setCurrentUser — объявляем ДО useAppAuth и useTelegramInit (избегаем TDZ)
+  const setCurrentUser = useCallback((user) => {
+    setCurrentUserState(user)
+    if (user) {
+      try {
+        localStorage.setItem('vpn_current_user', JSON.stringify(user))
+        logger.debug('App', 'Пользователь сохранен в localStorage:', user.email)
+      } catch (err) {
+        logger.error('App', 'Ошибка при сохранении пользователя в localStorage', { email: user?.email }, err)
+      }
+    } else {
+      const had = !!localStorage.getItem('vpn_current_user')
+      localStorage.removeItem('vpn_current_user')
+      localStorage.removeItem('vpn_current_view')
+      try {
+        queryClient.clear()
+      } catch (e) {
+        logger.warn('App', 'Очистка кеша React Query при выходе', null, e)
+      }
+      import('../lib/store/uiStore.js').then(({ useUIStore }) => {
+        try {
+          useUIStore.getState().setAdminTab('dashboard')
+          useUIStore.getState().setDashboardTab('subscription')
+        } catch (_) {}
+      }).catch((err) => console.warn('App:', err?.message))
+      if (had) logger.debug('App', 'Пользователь удален из localStorage')
+    }
+  }, [])
+
+  const { generateUniqueSubId, loadUserData } = useAppAuth({
+    appId,
+    db,
+    auth,
+    setCurrentUser,
+    setView,
+    setDashboardTab,
+    setLoading,
+    setError,
+    setAuthChecking,
+    getAllowedView,
+    firebaseUser,
+    setFirebaseUser,
+    signInInProgressRef
+  })
+
+  // Инициализация хука Telegram — после useAppAuth (нужен loadUserData)
   const {
     telegramSignInLoading,
     hasTmaInitData,
@@ -510,35 +555,6 @@ export default function VPNServiceApp() {
       const code = refCode.trim()
       setReferralCodePending(code)
       saveReferralCodePending(code)
-    }
-  }, [])
-
-  // Обертка для setCurrentUser с сохранением в localStorage (для обратной совместимости)
-  const setCurrentUser = useCallback((user) => {
-    setCurrentUserState(user)
-    if (user) {
-      try {
-        localStorage.setItem('vpn_current_user', JSON.stringify(user))
-        logger.debug('App', 'Пользователь сохранен в localStorage:', user.email)
-      } catch (err) {
-        logger.error('App', 'Ошибка при сохранении пользователя в localStorage', { email: user?.email }, err)
-      }
-    } else {
-      const had = !!localStorage.getItem('vpn_current_user')
-      localStorage.removeItem('vpn_current_user')
-      localStorage.removeItem('vpn_current_view')
-      try {
-        queryClient.clear()
-      } catch (e) {
-        logger.warn('App', 'Очистка кеша React Query при выходе', null, e)
-      }
-      import('../lib/store/uiStore.js').then(({ useUIStore }) => {
-        try {
-          useUIStore.getState().setAdminTab('dashboard')
-          useUIStore.getState().setDashboardTab('subscription')
-        } catch (_) {}
-      }).catch((err) => console.warn('App:', err?.message))
-      if (had) logger.debug('App', 'Пользователь удален из localStorage')
     }
   }, [])
 
@@ -698,22 +714,6 @@ export default function VPNServiceApp() {
    * @param {number} maxAttempts - Максимальное количество попыток генерации
    * @returns {Promise<string>} Уникальный subId
    */
-
-  const { generateUniqueSubId, loadUserData } = useAppAuth({
-    appId,
-    db,
-    auth,
-    setCurrentUser,
-    setView,
-    setDashboardTab,
-    setLoading,
-    setError,
-    setAuthChecking,
-    getAllowedView,
-    firebaseUser,
-    setFirebaseUser,
-    signInInProgressRef
-  })
 
   const TMA_SESSION_KEY = 'tma_session_token'
   const clearTmaSession = useCallback(() => {
