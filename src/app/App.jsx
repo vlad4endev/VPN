@@ -3998,7 +3998,9 @@ export default function VPNServiceApp() {
         view={view}
         onSetView={setView}
         onLogout={handleLogout}
-       
+        tariffs={tariffs ?? []}
+        settings={settings}
+        servers={servers ?? []}
         loadTariffs={loadTariffs}
         dashboardTab={dashboardTab}
         onSetDashboardTab={setDashboardTab}
