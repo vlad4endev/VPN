@@ -747,28 +747,9 @@ export const dashboardService = {
         logger.warn('Dashboard', 'Ошибка проверки существующих платежей', { userId: user.id }, err)
       }
 
-      // Загружаем настройки платежной системы из Firestore
-      let paymentSettings = {}
-      try {
-        const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
-        const settingsSnapshot = await getDoc(settingsDoc)
-        if (settingsSnapshot.exists()) {
-          const settingsData = settingsSnapshot.data()
-          paymentSettings = {
-            plategaMerchantId: settingsData.plategaMerchantId || null,
-            plategaSecretKey: settingsData.plategaSecretKey || null,
-          }
-          logger.info('Dashboard', 'Настройки платежной системы загружены', {
-            hasMerchantId: !!paymentSettings.plategaMerchantId,
-            hasSecretKey: !!paymentSettings.plategaSecretKey
-          })
-        } else {
-          logger.warn('Dashboard', 'Документ settings не найден в Firestore')
-        }
-      } catch (err) {
-        logger.error('Dashboard', 'Ошибка загрузки настроек платежной системы', null, err)
-        // Продолжаем работу без настроек, n8n может использовать свои настройки
-      }
+      // БЕЗОПАСНОСТЬ: Секреты Platega (plategaSecretKey, plategaMerchantId) НЕ загружаются на клиенте.
+      // Бэкенд получает их из server/data/platega-settings.json или PLATEGA_* env.
+      // Не передаём paymentSettings в generatePaymentLink — бэкенд сам подтянет настройки.
 
       // Вычисляем финальную сумму с учетом скидки (промокод)
       let finalAmount = amount
@@ -839,7 +820,7 @@ export const dashboardService = {
         user.id,
         finalAmount,
         tariff.id,
-        paymentSettings,
+        null, // paymentSettings: не передаём — бэкенд подтягивает ключи сам (безопасность)
         {
           uuid: user.uuid || null,
           email: user.email || null,

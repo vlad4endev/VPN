@@ -19,6 +19,7 @@ import { getPlategaSettings, savePlategaSettings } from '../services/plategaAdmi
 const PlategaPanel = ({ onSaveSettings }) => {
   const [merchantId, setMerchantId] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [hasSecretKey, setHasSecretKey] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -38,6 +39,7 @@ const PlategaPanel = ({ onSaveSettings }) => {
         const data = await getPlategaSettings()
         setMerchantId(data.plategaMerchantId || '')
         setApiKey(data.plategaSecretKey || '')
+        setHasSecretKey(data.hasSecretKey || false)
       } catch (err) {
         logger.error('Admin', 'Ошибка загрузки настроек Platega', null, err)
         setError(err.message || 'Ошибка загрузки настроек. Проверьте, что backend запущен и вы авторизованы как админ.')
@@ -202,7 +204,7 @@ const PlategaPanel = ({ onSaveSettings }) => {
                   type={showApiKey ? 'text' : 'password'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Секретный ключ из личного кабинета Platega"
+                  placeholder={hasSecretKey ? 'Оставьте пустым, чтобы не менять • или введите новый ключ' : 'Секретный ключ из личного кабинета Platega'}
                   className="w-full px-4 py-2 sm:py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm sm:text-base pr-12"
                 />
                 <button

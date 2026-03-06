@@ -30,7 +30,7 @@ class PaymentService {
         userId,
         amount: Number(amount),
         tariffId,
-        paymentSettings: paymentSettings || {},
+        // paymentSettings не передаём — бэкенд подтягивает ключи сам (безопасность: секреты только на сервере)
       }
       if (paymentDetails && typeof paymentDetails === 'object') {
         if (paymentDetails.tariffName != null) requestBody.tariffName = paymentDetails.tariffName

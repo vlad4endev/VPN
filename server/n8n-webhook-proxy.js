@@ -36,6 +36,7 @@ import { unifiedChat, PROVIDERS, PROVIDER_MODELS } from './lib/ai/index.js'
 import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 import { initStorage } from './storage.js'
 import { generateUniqueSubId } from './lib/generateUniqueSubId.js'
+import { generatePaymentLink as generatePaymentLinkFromService, generateOrderId, verifyYooMoneyWebhookSignature, buildRedirectUrl } from './payment/index.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -206,6 +207,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'http://[::1]:3000',
       'https://skypath.fun',
       'https://www.skypath.fun',
+      'https://admin.skypath.fun',
     ]
 
 const isDev = process.env.NODE_ENV !== 'production'
@@ -889,8 +891,13 @@ function cleanupAdminCache() {
  */
 async function ensureAdmin(req, res) {
   if (!admin || !db) {
-    res.status(503).json({ success: false, error: 'Сервис недоступен' })
-    return { ok: false }
+    try {
+      await initFirebaseAdmin()
+    } catch (_) {}
+    if (!admin || !db) {
+      res.status(503).json({ success: false, error: 'Сервис недоступен' })
+      return { ok: false }
+    }
   }
   const authHeader = req.headers.authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -4864,7 +4871,7 @@ app.delete('/api/admin/promocodes/:id', async (req, res) => {
   }
 })
 
-/** GET /api/admin/platega-settings — настройки Platega из локального файла (только админ). Данные никуда не передаются. */
+/** GET /api/admin/platega-settings — настройки Platega (legacy). Редирект на payment-settings. */
 app.get('/api/admin/platega-settings', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
@@ -4883,7 +4890,7 @@ app.get('/api/admin/platega-settings', async (req, res) => {
   }
 })
 
-/** PATCH /api/admin/platega-settings — сохранить настройки Platega в локальный файл (только на сервере, только админ). */
+/** PATCH /api/admin/platega-settings — legacy. */
 app.patch('/api/admin/platega-settings', express.json(), async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
   if (!adminOk?.ok) return
@@ -4907,6 +4914,143 @@ app.patch('/api/admin/platega-settings', express.json(), async (req, res) => {
   } catch (err) {
     console.error('❌ PATCH /api/admin/platega-settings:', err.message)
     res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * GET /api/admin/payment-settings — настройки Platega из server/data/platega-settings.json.
+ * Возвращает БЕЗ secretKey (только merchantId, hasMerchantId, hasSecretKey).
+ * Если файл отсутствует — 200 + пустой объект.
+ */
+app.get('/api/admin/payment-settings', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  try {
+    const data = await getPlategaSettingsFromLocal()
+    res.status(200).json({
+      success: true,
+      plategaMerchantId: data.plategaMerchantId || '',
+      hasMerchantId: !!data.plategaMerchantId,
+      hasSecretKey: !!data.plategaSecretKey,
+    })
+  } catch (err) {
+    console.error('❌ GET /api/admin/payment-settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * POST /api/admin/payment-settings — сохранить настройки Platega.
+ * Если plategaSecretKey пустой — сохраняем существующий (не перезаписываем).
+ */
+app.post('/api/admin/payment-settings', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  try {
+    const body = req.body || {}
+    console.log('[Admin API] Запрос на сохранение настроек:', {
+      plategaMerchantId: body.plategaMerchantId ?? body.platega_merchant_id ?? '(не указан)',
+      hasSecretKey: !!((body.plategaSecretKey ?? body.platega_secret_key ?? '').toString().trim()),
+    })
+    const plategaMerchantId = (body.plategaMerchantId ?? body.platega_merchant_id ?? '').toString().trim()
+    let plategaSecretKey = (body.plategaSecretKey ?? body.platega_secret_key ?? '').toString().trim()
+
+    if (plategaMerchantId && plategaMerchantId.length < 10) {
+      return res.status(400).json({ success: false, error: 'ID мерчанта слишком короткий' })
+    }
+    if (plategaSecretKey && plategaSecretKey.length < 10) {
+      return res.status(400).json({ success: false, error: 'API ключ слишком короткий' })
+    }
+
+    if (!plategaSecretKey) {
+      const existing = await getPlategaSettingsFromLocal()
+      plategaSecretKey = existing.plategaSecretKey || ''
+    }
+
+    await setPlategaSettingsToLocal({ plategaMerchantId, plategaSecretKey })
+    console.log('✅ Platega: настройки сохранены в server/data/platega-settings.json')
+    res.status(200).json({
+      success: true,
+      hasMerchantId: !!plategaMerchantId,
+      hasSecretKey: !!plategaSecretKey,
+    })
+  } catch (err) {
+    console.error('❌ POST /api/admin/payment-settings:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * ВРЕМЕННЫЙ: GET /api/payment/test-platega — тест генерации ссылки Platega.
+ * Сравните signatureSource (JSON payload) с документацией Platega.
+ * Удалить перед продакшеном.
+ */
+app.get('/api/payment/test-platega', async (req, res) => {
+  try {
+    const localPlatega = await getPlategaSettingsFromLocal()
+    const envMerchantId = process.env.PLATEGA_MERCHANT_ID || null
+    const envSecretKey = process.env.PLATEGA_SECRET_KEY || null
+    let merchantId = localPlatega.plategaMerchantId || envMerchantId
+    let secretKey = localPlatega.plategaSecretKey || envSecretKey
+    if (!merchantId || !secretKey) {
+      const settings = await loadPaymentSettingsFresh()
+      merchantId = merchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
+      secretKey = secretKey || settings.plategaSecretKey || settings.platega_secret_key || null
+    }
+
+    if (!merchantId || !secretKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Platega не настроен. Задайте ключи в админке или PLATEGA_MERCHANT_ID + PLATEGA_SECRET_KEY в .env',
+      })
+    }
+
+    const orderId = `test_${Date.now()}`
+    const baseUrl = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || 'https://www.skypath.fun')
+      .toString()
+      .trim()
+      .replace(/\/+$/, '') || null
+
+    const result = await generatePaymentLinkFromService(
+      {
+        userId: 'test-user-id',
+        amount: 100,
+        tariffId: 'test-tariff',
+        userData: null,
+        baseUrl,
+        orderId,
+      },
+      { merchantId, secretKey }
+    )
+
+    const returnUrl = buildRedirectUrl(baseUrl, '/payment/success', orderId)
+    const failedUrl = buildRedirectUrl(baseUrl, '/payment/fail', orderId)
+    const signatureSource = JSON.stringify({
+      paymentMethod: 2,
+      paymentDetails: { amount: '100.00', currency: 'RUB' },
+      description: 'VPN тариф test-tariff',
+      return: returnUrl,
+      failedUrl,
+      payload: JSON.stringify({ userId: 'test-user-id', tariffId: 'test-tariff', uuid: null, orderId }),
+    }, null, 2)
+
+    console.log('[Test Platega] Финальный URL:', result.paymentUrl)
+    console.log('[Test Platega] signatureSource (JSON payload, отправленный в Platega API):', signatureSource)
+
+    res.status(200).json({
+      success: true,
+      paymentUrl: result.paymentUrl,
+      orderId: result.orderId,
+      transactionId: result.transactionId || null,
+      signatureSource,
+    })
+  } catch (err) {
+    console.error('❌ GET /api/payment/test-platega:', err.message, err.response?.data)
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Ошибка генерации тестовой ссылки',
+      details: err.response?.data || null,
+    })
   }
 })
 
@@ -5008,6 +5152,13 @@ async function loadPaymentSettingsFresh() {
 
 /** Путь к локальному файлу с настройками Platega (только на сервере, никуда не передаётся). */
 const PLATEGA_LOCAL_SETTINGS_PATH = path.join(__dirname, 'data', 'platega-settings.json')
+const PLATEGA_DATA_DIR = path.dirname(PLATEGA_LOCAL_SETTINGS_PATH)
+
+try {
+  fs.mkdirSync(PLATEGA_DATA_DIR, { recursive: true })
+} catch (err) {
+  console.warn('⚠️ Не удалось создать server/data:', err.message)
+}
 
 /**
  * Прочитать настройки Platega из локального файла (server/data/platega-settings.json).
@@ -5044,9 +5195,6 @@ async function setPlategaSettingsToLocal(data) {
 }
 
 const PLATEGA_API_BASE = 'https://app.platega.io'
-const PLATEGA_API_URL = `${PLATEGA_API_BASE}/transaction/process`
-// Коды методов: 2 = СБП QR, 10 = карты RUB, 13 = криптовалюта. Можно задать PLATEGA_PAYMENT_METHOD в .env
-const PLATEGA_PAYMENT_METHOD_DEFAULT = 2
 
 /** Маппинг статусов Platega (PaymentStatus) в внутренний статус платежа */
 const PLATEGA_STATUS_MAP = {
@@ -5187,92 +5335,6 @@ async function runBackgroundPendingPaymentsCheck() {
 }
 
 /**
- * Создание платежа через Platega.io
- * @param {Object} params - merchantId, secretKey, amount (рубли), orderId, userId, tariffId, userData, baseUrl
- * @param {number} [paymentMethodOverride] - код метода (2=СБП, 13=крипто). Если не передан — из env или 2.
- * @returns {Promise<{ paymentUrl: string, transactionId?: string }>}
- */
-async function createPlategaPayment(params, paymentMethodOverride) {
-  const {
-    merchantId,
-    secretKey,
-    amount,
-    orderId,
-    userId,
-    tariffId,
-    userData,
-    baseUrl,
-  } = params
-
-  const returnUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payment/success?orderId=${encodeURIComponent(orderId)}` : null
-  const failedUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payment/fail?orderId=${encodeURIComponent(orderId)}` : null
-
-  const paymentMethod = paymentMethodOverride != null ? Number(paymentMethodOverride) : (Number(process.env.PLATEGA_PAYMENT_METHOD) || PLATEGA_PAYMENT_METHOD_DEFAULT)
-  const payload = {
-    paymentMethod,
-    paymentDetails: {
-      amount: Number(amount),
-      currency: 'RUB',
-    },
-    description: `VPN тариф ${tariffId || 'подписка'}`,
-    ...(returnUrl && { return: returnUrl }),
-    ...(failedUrl && { failedUrl }),
-    payload: JSON.stringify({
-      userId,
-      tariffId: tariffId || null,
-      uuid: userData?.uuid || null,
-      orderId,
-    }),
-  }
-
-  const plategaTimeoutMs = Number(process.env.PLATEGA_REQUEST_TIMEOUT_MS) || 30000
-  let response
-  try {
-    response = await axios.post(PLATEGA_API_URL, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-MerchantId': merchantId,
-        'X-Secret': secretKey,
-      },
-      timeout: plategaTimeoutMs,
-      validateStatus: () => true,
-    })
-  } catch (reqErr) {
-    const code = reqErr.code || ''
-    const msg = (reqErr.message || '').toLowerCase()
-    const isTimeout = code === 'ECONNABORTED' || msg.includes('timeout')
-    const isNetwork = ['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET', 'ENETUNREACH'].includes(code)
-    if (isTimeout || isNetwork) {
-      console.warn('⚠️ Platega не отвечает:', { code, message: reqErr.message, orderId })
-      throw new Error('Платёжная система временно не отвечает. Проверьте подключение к интернету и попробуйте позже.')
-    }
-    throw reqErr
-  }
-
-  function toUserMessage(raw) {
-    const s = (raw && String(raw).trim()) || ''
-    if (/providers are disabled|unhealthy/i.test(s)) {
-      return 'Платёжный провайдер Platega временно недоступен или в кабинете app.platega.io отключены/недоступны способы оплаты. Проверьте раздел «Методы оплаты» в настройках мерчанта; если всё активно — повторите попытку позже или напишите в поддержку Platega.'
-    }
-    return s || `HTTP ${response.status}`
-  }
-
-  if (response.status !== 200 || !response.data) {
-    console.warn('⚠️ Platega API ответ (ошибка):', { status: response.status, data: response.data, paymentMethod })
-    const msg = response.data?.message || response.data?.error || `HTTP ${response.status}`
-    throw new Error(toUserMessage(msg))
-  }
-
-  const data = response.data
-  if (data.redirect) {
-    return { paymentUrl: data.redirect, transactionId: data.transactionId }
-  }
-  console.warn('⚠️ Platega API ответ (нет redirect):', { data, paymentMethod })
-  const rawMessage = data.message || data.error || 'Нет ссылки на оплату в ответе Platega'
-  throw new Error(toUserMessage(rawMessage))
-}
-
-/**
  * Локальное создание заказа на оплату.
  * Если настроен Platega (PLATEGA_MERCHANT_ID + PLATEGA_SECRET_KEY или настройки в Firestore) — создаёт платёж в Platega и возвращает paymentUrl.
  * Иначе создаёт только запись в Firestore и возвращает пустой paymentUrl.
@@ -5301,7 +5363,7 @@ async function generatePaymentLinkLocal(body) {
     throw err
   }
 
-  const orderId = `vpn_${Date.now()}`
+  const orderId = generateOrderId()
   const amountNum = Number(amount)
   const baseUrl = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').toString().trim().replace(/\/+$/, '') || null
 
@@ -5333,44 +5395,26 @@ async function generatePaymentLinkLocal(body) {
   }
 
   if (effectiveMerchantId && effectiveSecretKey) {
-    const plategaParams = {
-      merchantId: effectiveMerchantId,
-      secretKey: effectiveSecretKey,
-      amount: amountNum,
-      orderId,
-      userId,
-      tariffId: tariffId || null,
-      userData: requestUserData || null,
-      baseUrl,
-    }
-    const primaryMethod = Number(process.env.PLATEGA_PAYMENT_METHOD) || PLATEGA_PAYMENT_METHOD_DEFAULT
-    const fallbackMethod = primaryMethod === 2 ? 13 : 2 // 2=СБП, 13=крипто — при ошибке «providers disabled» пробуем другой
-    let lastError = null
-    for (const method of [primaryMethod, fallbackMethod]) {
-      if (method === fallbackMethod && primaryMethod === fallbackMethod) continue
-      try {
-        const plategaResult = await createPlategaPayment(plategaParams, method)
-        paymentUrl = plategaResult.paymentUrl || ''
-        transactionId = plategaResult.transactionId || null
-        console.log('✅ Platega: платёж создан', { orderId, transactionId: transactionId || '—', paymentMethod: method })
-        break
-      } catch (apiError) {
-        lastError = apiError
-        const msg = (apiError.message || '').toLowerCase()
-        const isProvidersDisabled = msg.includes('providers are disabled') || msg.includes('отключены или недоступны')
-        if (isProvidersDisabled && method === primaryMethod) {
-          console.warn('⚠️ Platega: метод', primaryMethod, 'вернул «providers disabled», пробуем метод', fallbackMethod)
-          continue
-        }
-        console.error('❌ Ошибка Platega API:', { orderId, message: apiError.message, response: apiError.response?.data })
-        const err = new Error(apiError.message || apiError.response?.data?.message || apiError.response?.data?.error || 'Ошибка создания платежа в платёжной системе')
-        err.statusCode = 500
-        throw err
+    try {
+      const result = await generatePaymentLinkFromService(
+        {
+          userId,
+          amount: amountNum,
+          tariffId: tariffId || null,
+          userData: requestUserData || null,
+          baseUrl,
+          orderId,
+        },
+        { merchantId: effectiveMerchantId, secretKey: effectiveSecretKey }
+      )
+      paymentUrl = result.paymentUrl || ''
+      transactionId = result.transactionId || null
+      if (paymentUrl) {
+        console.log('✅ Platega: платёж создан', { orderId, transactionId: transactionId || '—' })
       }
-    }
-    if (!paymentUrl && lastError) {
-      console.error('❌ Ошибка Platega API (оба метода):', { orderId, message: lastError.message })
-      const err = new Error(lastError.message || 'Ошибка создания платежа в платёжной системе')
+    } catch (apiError) {
+      console.error('❌ Ошибка Platega API:', { orderId, message: apiError.message, response: apiError.response?.data })
+      const err = new Error(apiError.message || apiError.response?.data?.message || apiError.response?.data?.error || 'Ошибка создания платежа в платёжной системе')
       err.statusCode = 500
       throw err
     }
@@ -5662,6 +5706,15 @@ app.post('/api/payment/webhook', cors({ origin: false }), async (req, res) => {
     console.log('📥 n8n-webhook-proxy: Настройки платежей загружены', {
       hasPaymentSettings: !!paymentSettings && Object.keys(paymentSettings).length > 0
     })
+
+    // Проверка подписи YooMoney (SHA1) — если это webhook от YooMoney
+    if (req.body?.notification_type && paymentSettings?.yoomoneySecretKey) {
+      const { valid } = verifyYooMoneyWebhookSignature(req.body, paymentSettings.yoomoneySecretKey)
+      if (!valid) {
+        console.warn('⚠️ n8n-webhook-proxy: Неверная подпись webhook YooMoney', { label: req.body?.label })
+        return res.status(401).json({ success: false, error: 'Invalid YooMoney webhook signature' })
+      }
+    }
     
     // Формируем дату и время оплаты в формате DD-MM-YYYY и время ЧЧ:ММ
     const paymentDateTime = new Date()
