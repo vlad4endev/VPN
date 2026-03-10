@@ -20,7 +20,6 @@ class NotificationService {
     }
 
     this.permission = Notification.permission
-    logger.debug('Notification', 'Текущий статус разрешений', { permission: this.permission })
     return this.permission
   }
 
@@ -42,7 +41,7 @@ class NotificationService {
 
     if (Notification.permission === 'denied') {
       this.permission = 'denied'
-      logger.warn('Notification', 'Разрешение на уведомления отклонено пользователем')
+      logger.debug('Notification', 'Разрешение на уведомления ранее отклонено')
       return 'denied'
     }
 
@@ -53,7 +52,7 @@ class NotificationService {
       if (permission === 'granted') {
         logger.info('Notification', 'Разрешение на уведомления предоставлено')
       } else {
-        logger.info('Notification', 'Разрешение на уведомления отклонено', { permission })
+        logger.debug('Notification', 'Пользователь отклонил уведомления', { permission })
       }
       
       return permission

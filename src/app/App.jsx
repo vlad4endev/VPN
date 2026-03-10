@@ -125,11 +125,13 @@ const validateName = (name) => {
  * Возвращает view, допустимый для данной роли (многопользовательский режим: один браузер — один пользователь,
  * но при смене пользователя не показываем админку не-админу из сохранённого vpn_current_view).
  */
-function getAllowedView(preferredView, role) {
-  if (!role) return 'welcome'
-  const defaultView = canAccessAdmin(role) ? 'admin' : 'dashboard'
+function getAllowedView(preferredView, role, userOrEmail = null) {
+  const hasUser = role || (userOrEmail && (typeof userOrEmail === 'string' ? userOrEmail : userOrEmail.email))
+  if (!hasUser) return 'welcome'
+  const canAdmin = canAccessAdmin(role, userOrEmail)
+  const defaultView = canAdmin ? 'admin' : 'dashboard'
   if (!preferredView || preferredView === 'welcome' || preferredView === 'login' || preferredView === 'register') return defaultView
-  if (preferredView === 'admin' || preferredView === 'analytics') return canAccessAdmin(role) ? preferredView : 'dashboard'
+  if (preferredView === 'admin' || preferredView === 'analytics') return canAdmin ? preferredView : 'dashboard'
   if (preferredView === 'finances') return canAccessFinances(role) ? preferredView : 'dashboard'
   if (preferredView === 'dashboard') return 'dashboard'
   return defaultView
@@ -396,7 +398,7 @@ export default function VPNServiceApp() {
       }
       const savedUser = savedUserStr ? (() => { try { return JSON.parse(savedUserStr) } catch { return null } })() : null
       if (savedView && savedUser && savedView !== 'welcome' && savedView !== 'review') {
-        return getAllowedView(savedView, savedUser.role)
+        return getAllowedView(savedView, savedUser.role, savedUser)
       }
     } catch (err) {
       logger.debug('App', 'Ошибка чтения view из localStorage', null, err)
@@ -970,7 +972,7 @@ export default function VPNServiceApp() {
       setView('dashboard')
     } else if (view === 'support' && !currentUser) {
       setView('login')
-    } else if ((view === 'admin' || view === 'analytics') && (!currentUser || !canAccessAdmin(currentUser?.role))) {
+    } else if ((view === 'admin' || view === 'analytics') && (!currentUser || !canAccessAdmin(currentUser?.role, currentUser))) {
       setView('dashboard')
       setError('Недостаточно прав для доступа к админ-панели')
     }
@@ -1239,8 +1241,10 @@ export default function VPNServiceApp() {
       try {
         const notificationService = (await import('../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
-        await notificationInstance.requestPermission()
-        logger.info('Auth', 'Запрос разрешения на уведомления выполнен после регистрации')
+        const perm = await notificationInstance.requestPermission()
+        if (perm === 'granted') {
+          logger.info('Auth', 'Разрешение на уведомления предоставлено')
+        }
       } catch (notificationError) {
         logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
         // Не блокируем регистрацию из-за ошибки уведомлений
@@ -3834,7 +3838,7 @@ export default function VPNServiceApp() {
         </div>
       )
     }
-    if (!currentUser || !canAccessAdmin(currentUser.role)) return null
+    if (!currentUser || !canAccessAdmin(currentUser.role, currentUser)) return null
     const analyticsTab = 'analytics-funnel'
     const setAdminTabOrSwitchView = (tab) => {
       setAdminTab(tab)
@@ -3934,8 +3938,8 @@ export default function VPNServiceApp() {
         </div>
       )
     }
-    // Доступ к админ-панели только у роли admin
-    if (!currentUser || !canAccessAdmin(currentUser.role)) {
+    // Доступ к админ-панели: роль admin или email в VITE_ADMIN_EMAILS
+    if (!currentUser || !canAccessAdmin(currentUser.role, currentUser)) {
       logger.warn('Auth', 'Попытка доступа к админ-панели без прав администратора', { 
         userId: currentUser?.id, 
         role: currentUser?.role 

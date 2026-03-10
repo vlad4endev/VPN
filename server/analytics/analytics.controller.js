@@ -3,6 +3,8 @@
  */
 
 import * as analyticsService from './analytics.service.js'
+
+const ERR_DB_UNAVAILABLE = 'Firebase не настроен. Добавьте server/firebase-service-account.json или FIREBASE_SERVICE_ACCOUNT_KEY в server/.env и перезапустите backend.'
 import { getPaymentAndTicketHistory } from './metrics.service.js'
 
 /**
@@ -118,7 +120,7 @@ async function runAiStrategy(req, res) {
   const sendToTelegram = req.body?.sendToTelegram === true
   const includeMetricsSummary = req.body?.includeMetricsSummary === true
   if (!userId) return res.status(400).json({ success: false, error: 'Укажите userId' })
-  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  if (!db) return res.status(503).json({ success: false, error: ERR_DB_UNAVAILABLE })
 
   try {
     const [userSnap, analytics, globalContext] = await Promise.all([
@@ -236,7 +238,7 @@ export async function getFunnel(req, res) {
   const redisSet = req.redisSet || (() => Promise.resolve())
 
   if (!db) {
-    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return res.status(503).json({ success: false, error: ERR_DB_UNAVAILABLE })
   }
   try {
     const funnel = await analyticsService.getFunnel(db, appId, redisGet, redisSet)
@@ -284,7 +286,7 @@ export async function refreshMetrics(req, res) {
   const limit = Math.min(5000, Math.max(0, parseInt(req.body?.limit || '2000', 10) || 2000))
 
   if (!db) {
-    return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+    return res.status(503).json({ success: false, error: ERR_DB_UNAVAILABLE })
   }
   try {
     const count = await analyticsService.refreshMetrics(db, appId, { limit })
@@ -383,7 +385,7 @@ export async function aiFunnelAnalysis(req, res) {
   if (!config?.apiKey) {
     return res.status(503).json({ success: false, error: 'ИИ не настроен: задайте API-ключ в разделе «Интеграции → ИИ»' })
   }
-  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+  if (!db) return res.status(503).json({ success: false, error: ERR_DB_UNAVAILABLE })
 
   const limit = Math.min(35, Math.max(1, parseInt(req.body?.limit || '30', 10) || 30))
 

@@ -73,8 +73,10 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
         const notificationInstance = notificationService.getInstance()
         // Запрашиваем только если разрешения еще нет
         if (!notificationInstance.hasPermission()) {
-          await notificationInstance.requestPermission()
-          logger.info('Auth', 'Запрос разрешения на уведомления выполнен после входа')
+          const perm = await notificationInstance.requestPermission()
+          if (perm === 'granted') {
+            logger.info('Auth', 'Разрешение на уведомления предоставлено')
+          }
         }
       } catch (notificationError) {
         logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
@@ -134,8 +136,10 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       try {
         const notificationService = (await import('../../../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
-        await notificationInstance.requestPermission()
-        logger.info('Auth', 'Запрос разрешения на уведомления выполнен после регистрации')
+        const perm = await notificationInstance.requestPermission()
+        if (perm === 'granted') {
+          logger.info('Auth', 'Разрешение на уведомления предоставлено')
+        }
       } catch (notificationError) {
         logger.warn('Auth', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
         // Не блокируем регистрацию из-за ошибки уведомлений

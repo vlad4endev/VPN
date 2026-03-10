@@ -184,8 +184,10 @@ export const useAppAuth = ({
                 const notificationInstance = notificationService.getInstance()
                 // Запрашиваем только если разрешения еще нет
                 if (!notificationInstance.hasPermission()) {
-                  await notificationInstance.requestPermission()
-                  logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для существующего пользователя')
+                  const perm = await notificationInstance.requestPermission()
+                  if (perm === 'granted') {
+                    logger.info('Firebase', 'Разрешение на уведомления предоставлено')
+                  }
                 }
               } catch (notificationError) {
                 logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
@@ -196,7 +198,7 @@ export const useAppAuth = ({
             // Устанавливаем view с учётом роли (многопользовательский режим: не показывать админку не-админу)
             const savedView = localStorage.getItem('vpn_current_view')
             // Всегда редирект с экрана логина после успешной загрузки пользователя (email, Google, customToken)
-            const nextView = getAllowedView(savedView, effectiveRole)
+            const nextView = getAllowedView(savedView, effectiveRole, currentUserData)
             setView(nextView)
             if (isBrowserAuthPath(path)) {
               logger.debug('App', 'onAuthStateChanged: редирект на dashboard/admin', { nextView, role: effectiveRole })
@@ -333,15 +335,17 @@ export const useAppAuth = ({
                           const notificationService = (await import('../../shared/services/notificationService.js')).default
                           const notificationInstance = notificationService.getInstance()
                           if (!notificationInstance.hasPermission()) {
-                            await notificationInstance.requestPermission()
-                            logger.info('Firebase', 'Запрос разрешения на уведомления выполнен для пользователя из кеша')
+                            const perm = await notificationInstance.requestPermission()
+                            if (perm === 'granted') {
+                              logger.info('Firebase', 'Разрешение на уведомления предоставлено')
+                            }
                           }
                         } catch (notificationError) {
                           logger.warn('Firebase', 'Ошибка при запросе разрешения на уведомления', null, notificationError)
                         }
                       }, 2000)
                       const savedView = localStorage.getItem('vpn_current_view')
-                      setView(getAllowedView(savedView, savedUser.role))
+                      setView(getAllowedView(savedView, savedUser.role, savedUser))
                     } else {
                       logger.warn('Firebase', 'Пользователь авторизован, но данные в Firestore не найдены', { uid: firebaseUser.uid })
                       setCurrentUser(null)
@@ -377,7 +381,7 @@ export const useAppAuth = ({
                   setCurrentUser(savedUser)
                   applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
                   const savedView = localStorage.getItem('vpn_current_view')
-                  setView(getAllowedView(savedView, savedUser.role))
+                  setView(getAllowedView(savedView, savedUser.role, savedUser))
                 } else {
                   setCurrentUser(null)
                 }

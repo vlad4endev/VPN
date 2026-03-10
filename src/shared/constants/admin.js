@@ -67,11 +67,16 @@ export const getRoleBadgeClass = (role) => {
 }
 
 /**
- * Доступ к админ-панели только у роли admin
+ * Доступ к админ-панели: роль admin или email в VITE_ADMIN_EMAILS
  * @param {string} [role]
+ * @param {{ email?: string } | string} [userOrEmail] — объект пользователя или email (fallback, если роль не успела обновиться в Firestore)
  * @returns {boolean}
  */
-export const canAccessAdmin = (role) => role === 'admin'
+export const canAccessAdmin = (role, userOrEmail = null) => {
+  if (role === 'admin') return true
+  const email = typeof userOrEmail === 'string' ? userOrEmail : userOrEmail?.email
+  return email ? isAdminEmail(email) : false
+}
 
 /**
  * Доступ к разделу «Финансы» у ролей Админ и Бухгалтер

@@ -93,22 +93,22 @@ export function useView({ currentUser, onViewChange } = {}) {
 
     // Если текущий view - welcome/login/register, переключаемся на dashboard или admin
     if (view === 'welcome' || view === 'login' || view === 'register') {
-      correctView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
+      correctView = canAccessAdmin(currentUser.role, currentUser) ? 'admin' : 'dashboard'
     }
 
     // Если админ пытается зайти в dashboard, перенаправляем в admin
-    if (canAccessAdmin(currentUser.role) && view === 'dashboard') {
+    if (canAccessAdmin(currentUser.role, currentUser) && view === 'dashboard') {
       correctView = 'admin'
     }
 
-    // Доступ в admin — только у роли admin; в finances — у admin и бухгалтера; analytics — как admin
-    if (view === 'admin' && !canAccessAdmin(currentUser.role)) {
+    // Доступ в admin — только у роли admin или email в VITE_ADMIN_EMAILS; в finances — у admin и бухгалтера; analytics — как admin
+    if (view === 'admin' && !canAccessAdmin(currentUser.role, currentUser)) {
       correctView = 'dashboard'
     }
     if (view === 'finances' && !canAccessFinances(currentUser.role)) {
       correctView = 'dashboard'
     }
-    if (view === 'analytics' && !canAccessAdmin(currentUser.role)) {
+    if (view === 'analytics' && !canAccessAdmin(currentUser.role, currentUser)) {
       correctView = 'dashboard'
     }
 
