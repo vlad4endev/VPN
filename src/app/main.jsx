@@ -3,18 +3,25 @@ import ReactDOM from 'react-dom/client'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '../lib/react-query/config.js'
 import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
+import PwaUpdateBanner from '../shared/components/PwaUpdateBanner.jsx'
 import App from './App.jsx'
 import './index.css'
 import '../i18n'
 import { i18nReady } from '../i18n'
 import logger from '../shared/utils/logger.js'
 import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
+import { registerServiceWorker, setOnUpdateAvailable } from '../shared/services/pwaService.js'
 logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
   logLevel: logger.getLogLevel(),
 })
 
 initGlobalErrorReporting()
+
+registerServiceWorker().catch(() => {})
+setOnUpdateAvailable((reg) => {
+  window.dispatchEvent(new CustomEvent('pwa-update-available', { detail: reg }))
+})
 
 const root = ReactDOM.createRoot(document.getElementById('root'))
 
@@ -37,6 +44,7 @@ const renderApp = () => {
       <QueryClientProvider client={queryClient}>
         <ErrorBoundary showReset={true}>
           <App />
+          <PwaUpdateBanner />
         </ErrorBoundary>
       </QueryClientProvider>
     </React.StrictMode>,

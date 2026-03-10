@@ -15,7 +15,7 @@ export function useView({ currentUser, onViewChange } = {}) {
   // Приоритет: hash из URL (/#login, /#register) → localStorage → welcome
   const [view, setViewState] = useState(() => {
     if (typeof window !== 'undefined') {
-      const hash = window.location.hash?.toLowerCase()
+      const hash = window.location.hash?.toLowerCase().replace(/\?.*$/, '')
       if (hash === '#login') {
         logger.debug('useView', 'Начальный view из URL hash', { view: 'login' })
         return 'login'
@@ -23,6 +23,14 @@ export function useView({ currentUser, onViewChange } = {}) {
       if (hash === '#register') {
         logger.debug('useView', 'Начальный view из URL hash', { view: 'register' })
         return 'register'
+      }
+      if (hash === '#cabinet' || hash === '#dashboard') {
+        logger.debug('useView', 'Начальный view из URL hash', { view: 'dashboard' })
+        return 'dashboard'
+      }
+      if (hash === '#support') {
+        logger.debug('useView', 'Начальный view из URL hash', { view: 'support' })
+        return 'support'
       }
     }
     try {

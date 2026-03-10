@@ -1,9 +1,18 @@
 # Иконки для PWA и магазинов
 
-Для манифеста и «Добавить на экран» нужны PNG-иконки:
+Для манифеста и «Добавить на экран» нужны PNG-иконки.
 
-- **icon-192.png** — 192×192 px  
-- **icon-512.png** — 512×512 px (рекомендуется maskable: важное содержимое в центре в круге ~80%)
+**Быстрая генерация** (требует `sharp`):
+```bash
+npm run pwa:icons
+```
 
-Создайте их из `../favicon.svg` с помощью любого конвертера (например [realfavicongenerator.net](https://realfavicongenerator.net/)) или ImageMagick / rsvg-convert и положите в эту папку.  
-Если файлов нет, манифест всё равно валиден — используется только `favicon.svg`.
+Создаст: icon-72.png, icon-96.png, icon-128.png, icon-192.png, icon-384.png, icon-512.png из `../favicon.svg`.
+
+**Вручную** — конвертер [realfavicongenerator.net](https://realfavicongenerator.net/) или:
+```bash
+rsvg-convert -w 192 -h 192 public/favicon.svg -o public/icons/icon-192.png
+rsvg-convert -w 512 -h 512 public/favicon.svg -o public/icons/icon-512.png
+```
+
+Для maskable: важно сохранять содержимое в центральном круге ~80% площади.

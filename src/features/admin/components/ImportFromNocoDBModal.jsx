@@ -132,9 +132,11 @@ const ImportFromNocoDBModal = ({ onClose }) => {
     setSavedRestored(true)
   }, [savedRestored])
 
+  const configFetchedRef = React.useRef(false)
   // Подставить сохранённый на сервере конфиг (для автозагрузки) — приоритет над localStorage
   useEffect(() => {
-    if (!savedRestored) return
+    if (!savedRestored || configFetchedRef.current) return
+    configFetchedRef.current = true
     let cancelled = false
     getSavedNocoDBImportConfig().then(({ config }) => {
       if (cancelled || !config) return
@@ -167,7 +169,9 @@ const ImportFromNocoDBModal = ({ onClose }) => {
       }
       if (config.updateExistingUsers !== undefined) setUpdateExistingUsers(!!config.updateExistingUsers)
       if (config.writeBackLoginPasswordOnUpdate !== undefined) setWriteBackLoginPasswordOnUpdate(!!config.writeBackLoginPasswordOnUpdate)
-    }).catch((err) => console.warn('ImportFromNocoDBModal:', err?.message))
+    }).catch((err) => {
+      if (import.meta.env.DEV) console.warn('ImportFromNocoDBModal:', err?.message)
+    })
     return () => { cancelled = true }
   }, [savedRestored, getSavedNocoDBImportConfig])
 

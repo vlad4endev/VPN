@@ -51,7 +51,13 @@ export const usersApiService = {
    * @returns {Promise<{ list: Object[], columns: string[] }>}
    */
   async fetchNocoDBPreview(params) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/import-from-nocodb/preview`, {
+    const baseUrl = getBaseUrl()
+    if (!baseUrl) {
+      throw new Error(
+        'API не настроен. Задайте VITE_API_BASE_URL в .env (URL вашего backend).',
+      )
+    }
+    const res = await fetch(`${baseUrl}/api/admin/import-from-nocodb/preview`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(params),
@@ -112,7 +118,9 @@ export const usersApiService = {
    * @returns {Promise<{ config: Object | null }>}
    */
   async getSavedNocoDBImportConfig() {
-    const res = await fetch(`${getBaseUrl()}/api/admin/import-from-nocodb/saved-config`, {
+    const baseUrl = getBaseUrl()
+    if (!baseUrl) return { config: null }
+    const res = await fetch(`${baseUrl}/api/admin/import-from-nocodb/saved-config`, {
       method: 'GET',
       headers: await getAuthHeaders(),
     })

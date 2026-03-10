@@ -431,7 +431,12 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       return await usersApiService.fetchNocoDBPreview(params)
     } catch (err) {
       const errorMessage = handleFirestoreError(err)
-      logError('Admin', 'fetchNocoDBPreview', err)
+      const msg = err?.message || ''
+      const isExpected =
+        msg.includes('Сервис недоступен') ||
+        msg.includes('VITE_API_BASE_URL') ||
+        msg.includes('404')
+      if (!isExpected) logError('Admin', 'fetchNocoDBPreview', err)
       setError(errorMessage)
       throw err
     }
@@ -467,7 +472,20 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
     try {
       return await usersApiService.getSavedNocoDBImportConfig()
     } catch (err) {
-      logError('Admin', 'getSavedNocoDBImportConfig', err)
+      const msg = err?.message || ''
+      const isExpected =
+        msg.includes('Сервис недоступен') ||
+        msg.includes('Сервис временно недоступен') ||
+        msg.includes('network') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('VITE_API_BASE_URL')
+      if (isExpected) {
+        if (import.meta.env.DEV) {
+          console.warn('[Admin] getSavedNocoDBImportConfig:', msg)
+        }
+      } else {
+        logError('Admin', 'getSavedNocoDBImportConfig', err)
+      }
       return { config: null }
     }
   }, [currentUser])

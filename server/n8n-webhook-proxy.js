@@ -4987,16 +4987,7 @@ app.post('/api/admin/payment-settings', express.json(), async (req, res) => {
  */
 app.get('/api/payment/test-platega', async (req, res) => {
   try {
-    const localPlatega = await getPlategaSettingsFromLocal()
-    const envMerchantId = process.env.PLATEGA_MERCHANT_ID || null
-    const envSecretKey = process.env.PLATEGA_SECRET_KEY || null
-    let merchantId = localPlatega.plategaMerchantId || envMerchantId
-    let secretKey = localPlatega.plategaSecretKey || envSecretKey
-    if (!merchantId || !secretKey) {
-      const settings = await loadPaymentSettingsFresh()
-      merchantId = merchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
-      secretKey = secretKey || settings.plategaSecretKey || settings.platega_secret_key || null
-    }
+    const { merchantId, secretKey } = await getPlategaCredentials()
 
     if (!merchantId || !secretKey) {
       return res.status(400).json({
@@ -5150,6 +5141,27 @@ async function loadPaymentSettingsFresh() {
   return data
 }
 
+/**
+ * Загрузить учётные данные Platega для генерации ссылки.
+ * Приоритет: Firestore (основная БД) → локальный файл → env.
+ * @returns {Promise<{ merchantId: string|null, secretKey: string|null }>}
+ */
+async function getPlategaCredentials() {
+  const settings = await loadPaymentSettingsFresh()
+  let merchantId = settings.plategaMerchantId || settings.platega_merchant_id || null
+  let secretKey = settings.plategaSecretKey || settings.platega_secret_key || null
+  if (!merchantId || !secretKey) {
+    const local = await getPlategaSettingsFromLocal()
+    merchantId = merchantId || local.plategaMerchantId || null
+    secretKey = secretKey || local.plategaSecretKey || null
+  }
+  if (!merchantId || !secretKey) {
+    merchantId = merchantId || process.env.PLATEGA_MERCHANT_ID || null
+    secretKey = secretKey || process.env.PLATEGA_SECRET_KEY || null
+  }
+  return { merchantId, secretKey }
+}
+
 /** Путь к локальному файлу с настройками Platega (только на сервере, никуда не передаётся). */
 const PLATEGA_LOCAL_SETTINGS_PATH = path.join(__dirname, 'data', 'platega-settings.json')
 const PLATEGA_DATA_DIR = path.dirname(PLATEGA_LOCAL_SETTINGS_PATH)
@@ -5300,9 +5312,7 @@ async function syncPaymentStatusFromPlatega(paymentDocRef, paymentData, merchant
 async function runBackgroundPendingPaymentsCheck() {
   if (!db) return
   const APP_ID = process.env.APP_ID || 'skyputh'
-  const paymentSettings = await loadPaymentSettings()
-  const merchantId = process.env.PLATEGA_MERCHANT_ID || paymentSettings.plategaMerchantId || null
-  const secretKey = process.env.PLATEGA_SECRET_KEY || paymentSettings.plategaSecretKey || null
+  const { merchantId, secretKey } = await getPlategaCredentials()
   if (!merchantId || !secretKey) return
 
   const paymentsRef = db.collection(`artifacts/${APP_ID}/public/data/payments`)
@@ -5370,28 +5380,10 @@ async function generatePaymentLinkLocal(body) {
   let paymentUrl = ''
   let transactionId = null
 
-  // Приоритет: локальный файл (server/data/platega-settings.json) → env → Firestore
-  const localPlatega = await getPlategaSettingsFromLocal()
-  const envMerchantId = process.env.PLATEGA_MERCHANT_ID || null
-  const envSecretKey = process.env.PLATEGA_SECRET_KEY || null
-  let effectiveMerchantId = localPlatega.plategaMerchantId || envMerchantId
-  let effectiveSecretKey = localPlatega.plategaSecretKey || envSecretKey
-  if (!effectiveMerchantId || !effectiveSecretKey) {
-    const settings = await loadPaymentSettingsFresh()
-    effectiveMerchantId = effectiveMerchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
-    effectiveSecretKey = effectiveSecretKey || settings.plategaSecretKey || settings.platega_secret_key || null
-  }
+  const { merchantId: effectiveMerchantId, secretKey: effectiveSecretKey } = await getPlategaCredentials()
 
   if (!effectiveMerchantId || !effectiveSecretKey) {
-    const fromLocal = !!(localPlatega.plategaMerchantId || localPlatega.plategaSecretKey)
-    console.log('ℹ️ Platega не настроен — создаём только заказ в Firestore. Диагностика:', {
-      APP_ID: process.env.APP_ID || 'skyputh',
-      fromLocalFile: fromLocal,
-      hasEnvMerchantId: !!envMerchantId,
-      hasEnvSecretKey: !!envSecretKey,
-      hasEffectiveMerchantId: !!effectiveMerchantId,
-      hasEffectiveSecretKey: !!effectiveSecretKey,
-    })
+    console.log('ℹ️ Platega не настроен — создаём только заказ в Firestore. Добавьте ключи в Firestore (artifacts/APP_ID/public/settings) или в админке.')
   }
 
   if (effectiveMerchantId && effectiveSecretKey) {
