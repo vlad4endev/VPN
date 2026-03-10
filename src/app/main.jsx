@@ -4,13 +4,14 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '../lib/react-query/config.js'
 import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
 import PwaUpdateBanner from '../shared/components/PwaUpdateBanner.jsx'
+import PwaInstallBanner from '../shared/components/PwaInstallBanner.jsx'
 import App from './App.jsx'
 import './index.css'
 import '../i18n'
 import { i18nReady } from '../i18n'
 import logger from '../shared/utils/logger.js'
 import { initGlobalErrorReporting } from '../shared/services/reportErrorService.js'
-import { registerServiceWorker, setOnUpdateAvailable } from '../shared/services/pwaService.js'
+import { registerServiceWorker, setOnUpdateAvailable, setupInstallPrompt } from '../shared/services/pwaService.js'
 logger.debug('App', 'Запуск приложения', {
   timestamp: new Date().toISOString(),
   logLevel: logger.getLogLevel(),
@@ -19,6 +20,7 @@ logger.debug('App', 'Запуск приложения', {
 initGlobalErrorReporting()
 
 registerServiceWorker().catch(() => {})
+setupInstallPrompt()
 setOnUpdateAvailable((reg) => {
   window.dispatchEvent(new CustomEvent('pwa-update-available', { detail: reg }))
 })
@@ -44,6 +46,7 @@ const renderApp = () => {
       <QueryClientProvider client={queryClient}>
         <ErrorBoundary showReset={true}>
           <App />
+          <PwaInstallBanner />
           <PwaUpdateBanner />
         </ErrorBoundary>
       </QueryClientProvider>
