@@ -5,14 +5,9 @@
 
 import { auth } from '../../lib/firebase/config.js'
 import { APP_ID } from '../constants/app.js'
+import { getApiBaseUrl } from '../utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 let reportedIds = new Set()
 const MAX_TRACKED = 100
@@ -37,7 +32,7 @@ export async function reportErrorToAdmin(opts) {
   if (token) headers.Authorization = `Bearer ${token}`
 
   try {
-    const res = await fetch(`${getBaseUrl()}/api/report-error`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/report-error`, {
       method: 'POST',
       headers,
       body: JSON.stringify({

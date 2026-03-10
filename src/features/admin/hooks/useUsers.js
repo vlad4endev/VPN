@@ -434,7 +434,6 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
       const msg = err?.message || ''
       const isExpected =
         msg.includes('Сервис недоступен') ||
-        msg.includes('VITE_API_BASE_URL') ||
         msg.includes('404')
       if (!isExpected) logError('Admin', 'fetchNocoDBPreview', err)
       setError(errorMessage)
@@ -477,8 +476,7 @@ export function useUsers(currentUser, users, setUsers, setCurrentUser, settings,
         msg.includes('Сервис недоступен') ||
         msg.includes('Сервис временно недоступен') ||
         msg.includes('network') ||
-        msg.includes('Failed to fetch') ||
-        msg.includes('VITE_API_BASE_URL')
+        msg.includes('Failed to fetch')
       if (isExpected) {
         if (import.meta.env.DEV) {
           console.warn('[Admin] getSavedNocoDBImportConfig:', msg)

@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -23,7 +18,7 @@ async function getAuthHeaders() {
  * @returns {Promise<{ segments: object, topByPriority: array, avgChurnScore: number, churnForecast: object, totalUsers: number }>}
  */
 export async function getFunnel() {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/analytics/funnel`, { headers })
   if (!res.ok) {
@@ -45,7 +40,7 @@ export async function getFunnel() {
  * @param {{ refresh?: boolean }} [opts]
  */
 export async function getUserAnalytics(userId, opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const qs = opts.refresh ? '?refresh=true' : ''
   const res = await fetch(`${base}/api/analytics/user/${encodeURIComponent(userId)}${qs}`, { headers })
@@ -61,7 +56,7 @@ export async function getUserAnalytics(userId, opts = {}) {
  * @param {{ limit?: number }} [body]
  */
 export async function refreshMetrics(body = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/analytics/refresh-metrics`, {
     method: 'POST',
@@ -80,7 +75,7 @@ export async function refreshMetrics(body = {}) {
  * @param {string} userId
  */
 export async function sendChurnOffer(userId) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/analytics/send-churn-offer/${encodeURIComponent(userId)}`, {
     method: 'POST',
@@ -100,7 +95,7 @@ export async function sendChurnOffer(userId) {
  * @returns {Promise<{ success: boolean, updated: boolean, telegramSent?: boolean, reason?: string }>}
  */
 export async function assignDiscount(userId, opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/admin/users/${encodeURIComponent(userId)}/assign-discount`, {
     method: 'POST',
@@ -125,7 +120,7 @@ export async function assignDiscount(userId, opts = {}) {
  * @param {{ buttonText?: string }} [opts] — текст кнопки (по умолчанию «Перейти в личный кабинет»). Например: «Воспользоваться предложением», «Подключить подписку».
  */
 export async function sendUserTelegram(userId, text, opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const body = { userId: String(userId || '').trim(), text: String(text || '').trim() }
   if (opts.buttonText != null && String(opts.buttonText).trim()) body.buttonText = String(opts.buttonText).trim()
@@ -146,7 +141,7 @@ export async function sendUserTelegram(userId, text, opts = {}) {
  * @returns {Promise<{ strategy: string, steps: string[], offerType: string, suggestedOfferMessage: string, sentToTelegram?: boolean }>}
  */
 export async function getAiStrategy(userId, opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const url = `${base}/api/analytics/ai-strategy`.replace(/\/+/g, '/')
   const headers = await getAuthHeaders()
   const res = await fetch(url, {
@@ -174,7 +169,7 @@ export async function getAiStrategy(userId, opts = {}) {
   if (!isJson) {
     throw new Error(res.status === 502
       ? 'Сервис ИИ недоступен (502). Проверьте настройки ИИ и повторите позже.'
-      : 'Сервер вернул не JSON. Убедитесь, что backend запущен на порту из VITE_API_BASE_URL (или через proxy).')
+      : 'Сервер вернул не JSON. Убедитесь, что backend запущен (или через proxy).')
   }
   const data = await res.json()
   return data
@@ -187,7 +182,7 @@ export async function getAiStrategy(userId, opts = {}) {
  * @returns {Promise<{ success: boolean, rows: array, segments: object, totalUsers: number, churnForecast: object, avgChurnScore: number }>}
  */
 export async function runAiFunnelAnalysis(opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/analytics/ai-funnel-analysis`.replace(/\/+/g, '/'), {
     method: 'POST',
@@ -208,7 +203,7 @@ export async function runAiFunnelAnalysis(opts = {}) {
  * POST /api/analytics/finance-analysis — ИИ анализирует доходы и расходы, даёт рекомендации и шаги для роста выручки и подписок.
  */
 export async function runFinanceAnalysis(opts = {}) {
-  const base = getBaseUrl()
+  const base = getApiBaseUrl()
   const headers = await getAuthHeaders()
   const res = await fetch(`${base}/api/analytics/finance-analysis`.replace(/\/+/g, '/'), {
     method: 'POST',

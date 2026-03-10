@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -26,7 +21,7 @@ async function getAuthHeaders() {
  */
 export async function getAdminErrors(opts = {}) {
   const limit = opts.limit != null ? Math.min(Math.max(0, opts.limit), 200) : 100
-  const url = `${getBaseUrl()}/api/admin/errors${limit ? `?limit=${limit}` : ''}`
+  const url = `${getApiBaseUrl()}/api/admin/errors${limit ? `?limit=${limit}` : ''}`
   const res = await fetch(url, {
     method: 'GET',
     headers: await getAuthHeaders(),

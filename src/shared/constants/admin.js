@@ -66,14 +66,18 @@ export const getRoleBadgeClass = (role) => {
   return 'bg-slate-700 text-slate-300'
 }
 
+/** Роли, дающие доступ к админ-панели (учитываем label «Админ» из Firestore/NocoDB) */
+const ADMIN_ROLES = ['admin', 'Админ', 'Admin']
+
 /**
- * Доступ к админ-панели: роль admin или email в VITE_ADMIN_EMAILS
+ * Доступ к админ-панели: роль admin/Админ или email в VITE_ADMIN_EMAILS
  * @param {string} [role]
  * @param {{ email?: string } | string} [userOrEmail] — объект пользователя или email (fallback, если роль не успела обновиться в Firestore)
  * @returns {boolean}
  */
 export const canAccessAdmin = (role, userOrEmail = null) => {
-  if (role === 'admin') return true
+  const normRole = typeof role === 'string' ? role.trim() : ''
+  if (ADMIN_ROLES.includes(normRole)) return true
   const email = typeof userOrEmail === 'string' ? userOrEmail : userOrEmail?.email
   return email ? isAdminEmail(email) : false
 }

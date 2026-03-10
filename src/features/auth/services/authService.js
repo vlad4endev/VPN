@@ -8,6 +8,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
 
@@ -148,9 +149,7 @@ export const authService = {
    */
   async ensureFirestoreUserIfMissing(firebaseUser, dbOverride = null) {
     if (!firebaseUser?.uid) return null
-    const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
-      ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
-      : (typeof window !== 'undefined' && window.location?.origin) || ''
+    const baseUrl = getApiBaseUrl()
     try {
       const idToken = await firebaseUser.getIdToken()
       const res = await fetch(`${baseUrl}/api/auth/ensure-firestore-user`, {

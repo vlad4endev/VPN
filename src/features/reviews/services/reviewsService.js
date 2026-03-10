@@ -1,6 +1,7 @@
 import { collection, getDocs, doc, setDoc, updateDoc, query, orderBy, where } from 'firebase/firestore'
 import { db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 import logger from '../../../shared/utils/logger.js'
 
 const REVIEWS_COLLECTION = `artifacts/${APP_ID}/public/data/reviews`
@@ -141,7 +142,7 @@ export const reviewsService = {
    * @returns {Promise<{ id: string, message?: string }>}
    */
   async submitPublicReview({ author, rating, text }) {
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/public/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

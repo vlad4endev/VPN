@@ -31,7 +31,12 @@ export const sanitizeUser = (userData) => {
       email: String(userData.email).trim().toLowerCase().substring(0, 255),
       name: String(userData.name || '').trim().substring(0, 100),
       phone: String(userData.phone || '').trim().substring(0, 20),
-      role: ['user', 'admin', 'accountant', 'бухгалтер'].includes(userData.role) ? userData.role : 'user',
+      role: (() => {
+        const r = String(userData.role ?? '').trim().toLowerCase()
+        if (r === 'админ') return 'admin'
+        if (['user', 'admin', 'accountant', 'бухгалтер'].includes(r)) return r
+        return 'user'
+      })(),
       plan: ['free', 'premium', 'super', 'multi'].includes(userData.plan) ? userData.plan : 'free',
       uuid: userData.uuid ? String(userData.uuid).trim().substring(0, 128) : '',
       tariffName: String(userData.tariffName || '').trim().substring(0, 100),

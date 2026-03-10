@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore'
 import { db, auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
 import logger from '../../../shared/utils/logger.js'
@@ -127,7 +128,7 @@ export const notificationsService = {
   async getTemplates() {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates`, {
       headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
     })
@@ -139,7 +140,7 @@ export const notificationsService = {
   async createTemplate(payload) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates`, {
       method: 'POST',
       headers: {
@@ -160,7 +161,7 @@ export const notificationsService = {
   async updateTemplate(id, payload) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
       method: 'PATCH',
       headers: {
@@ -179,7 +180,7 @@ export const notificationsService = {
   async deleteTemplate(id) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
@@ -198,7 +199,7 @@ export const notificationsService = {
   async broadcastViaApi(userIds, payload) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const body = {
       type: payload.type || 'admin_broadcast',
       title: payload.title != null ? String(payload.title).trim() : '',
@@ -238,7 +239,7 @@ export const notificationsService = {
   async sendToOne(userId, payload) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const body = {
       userId: String(userId || '').trim(),
       templateId: payload.templateId || undefined,
@@ -272,7 +273,7 @@ export const notificationsService = {
   async getScheduled(params = {}) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const q = new URLSearchParams()
     if (params.from) q.set('from', params.from)
     if (params.to) q.set('to', params.to)
@@ -290,7 +291,7 @@ export const notificationsService = {
   async createScheduled(payload) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled`, {
       method: 'POST',
       headers: {
@@ -314,7 +315,7 @@ export const notificationsService = {
   async updateScheduled(id, updates) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
       method: 'PATCH',
       headers: {
@@ -336,7 +337,7 @@ export const notificationsService = {
   async deleteScheduled(id) {
     const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
     if (!token) throw new Error('Требуется авторизация')
-    const base = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL : ''
+    const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },

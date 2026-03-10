@@ -3,11 +3,7 @@
  * Регистрирует Service Worker, подписывается на push и отправляет подписку на сервер.
  */
 
-function getApiBase() {
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -25,7 +21,7 @@ function urlBase64ToUint8Array(base64String) {
  * @returns {Promise<string|null>}
  */
 export async function getVapidPublicKey() {
-  const base = getApiBase()
+  const base = getApiBaseUrl()
   const res = await fetch(`${base}/api/push-vapid-public`)
   const json = await res.json().catch(() => ({}))
   return json.publicKey || null
@@ -37,7 +33,7 @@ export async function getVapidPublicKey() {
  * @param {() => Promise<string>} getIdToken
  */
 export async function savePushSubscription(subscription, getIdToken) {
-  const base = getApiBase()
+  const base = getApiBaseUrl()
   const token = await getIdToken()
   if (!token) throw new Error('Требуется авторизация')
   const sub = subscription.toJSON ? subscription.toJSON() : subscription

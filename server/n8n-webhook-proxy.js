@@ -931,7 +931,10 @@ async function ensureAdmin(req, res) {
     process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
   ].filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i)
 
-  const isAdminRole = (value) => String(value ?? '').trim().toLowerCase() === 'admin'
+  const isAdminRole = (value) => {
+    const v = String(value ?? '').trim().toLowerCase()
+    return v === 'admin' || v === 'админ'
+  }
 
   for (const appId of appIdsToTry) {
     try {

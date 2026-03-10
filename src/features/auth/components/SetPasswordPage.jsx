@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { validatePassword } from '../utils/validatePassword.js'
-
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL : ''
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 export default function SetPasswordPage({ onSetView }) {
   const [login, setLogin] = useState('')
@@ -31,7 +30,7 @@ export default function SetPasswordPage({ onSetView }) {
     }
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/auth/set-password-by-login`, {
+      const res = await fetch(`${getApiBaseUrl()}/api/auth/set-password-by-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ login: loginTrim, newPassword: password }),

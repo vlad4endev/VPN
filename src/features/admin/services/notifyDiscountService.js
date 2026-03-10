@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -26,7 +21,7 @@ async function getAuthHeaders() {
  */
 export async function notifyDiscountAssigned(opts) {
   const { userId, percent, validFrom, validTo } = opts
-  const res = await fetch(`${getBaseUrl()}/api/notify/discount-assigned`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/notify/discount-assigned`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({

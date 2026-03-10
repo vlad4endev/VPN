@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -24,7 +19,7 @@ async function getAuthHeaders() {
  * @returns {Promise<{ configured: boolean, provider: string, providers: Array<{id, name}>, model: string, models: Array<{value, label}>, temperature: number, maxTokens: number, timeoutSeconds: number, systemPromptPreset: string }>}
  */
 export async function getAiStatus() {
-  const res = await fetch(`${getBaseUrl()}/api/admin/ai/status`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/ai/status`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   })
@@ -67,7 +62,7 @@ export async function saveAiSettings(opts = {}) {
   if (opts.maxTokens !== undefined) body.maxTokens = opts.maxTokens
   if (opts.timeoutSeconds !== undefined) body.timeoutSeconds = opts.timeoutSeconds
   if (opts.systemPromptPreset !== undefined) body.systemPromptPreset = opts.systemPromptPreset != null ? String(opts.systemPromptPreset) : ''
-  const res = await fetch(`${getBaseUrl()}/api/admin/ai/settings`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/ai/settings`, {
     method: 'PATCH',
     headers: await getAuthHeaders(),
     body: JSON.stringify(body),
@@ -93,7 +88,7 @@ export async function saveAiSettings(opts = {}) {
  * @returns {Promise<{ success: boolean, content?: string, usage?: object, error?: string }>}
  */
 export async function sendAiChat(opts = {}) {
-  const res = await fetch(`${getBaseUrl()}/api/ai/chat`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/ai/chat`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({
@@ -122,7 +117,7 @@ export async function sendAiChat(opts = {}) {
  * @returns {Promise<{ success: boolean, reply?: string, escalate?: boolean, userWarning?: string, escalateReason?: string, error?: string }>}
  */
 export async function getSupportSuggestReply(ticketId) {
-  const res = await fetch(`${getBaseUrl()}/api/ai/support-suggest`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/ai/support-suggest`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ ticketId: String(ticketId).trim() }),

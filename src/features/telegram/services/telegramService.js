@@ -1,14 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL
-  }
-  return ''
-}
 
 /**
  * Получить ссылку для привязки Telegram (открыть бота с токеном).
@@ -20,7 +14,7 @@ export async function getBindLink() {
   if (!token) {
     return { success: false, error: 'Требуется авторизация' }
   }
-  const res = await fetch(`${getBaseUrl()}/api/telegram/bind-link`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/telegram/bind-link`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -47,7 +41,7 @@ export async function unbindTelegram() {
   if (!token) {
     return { success: false, error: 'Требуется авторизация' }
   }
-  const res = await fetch(`${getBaseUrl()}/api/telegram/unbind`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/telegram/unbind`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -30,7 +25,7 @@ export const usersApiService = {
    * @returns {Promise<Object>} Созданный пользователь ({ id, ...fields })
    */
   async createUser(data) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/users`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/users`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(data),
@@ -51,12 +46,7 @@ export const usersApiService = {
    * @returns {Promise<{ list: Object[], columns: string[] }>}
    */
   async fetchNocoDBPreview(params) {
-    const baseUrl = getBaseUrl()
-    if (!baseUrl) {
-      throw new Error(
-        'API не настроен. Задайте VITE_API_BASE_URL в .env (URL вашего backend).',
-      )
-    }
+    const baseUrl = getApiBaseUrl()
     const res = await fetch(`${baseUrl}/api/admin/import-from-nocodb/preview`, {
       method: 'POST',
       headers: await getAuthHeaders(),
@@ -65,7 +55,7 @@ export const usersApiService = {
     const json = await res.json().catch(() => ({}))
     if (res.status === 404) {
       throw new Error(
-        'Эндпоинт импорта не найден (404). Убедитесь, что backend обновлён и запущен, а в .env задан правильный VITE_API_BASE_URL (URL вашего API).',
+        'Эндпоинт импорта не найден (404). Убедитесь, что backend обновлён и запущен.',
       )
     }
     if (!res.ok || !json.success) {
@@ -83,7 +73,7 @@ export const usersApiService = {
    * @returns {Promise<{ created, skipped, emptyRows, errors, writeBackOk?, writeBackErrors?, details }>}
    */
   async importFromNocoDB(params) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/import-from-nocodb`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/import-from-nocodb`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(params),
@@ -93,7 +83,7 @@ export const usersApiService = {
 
     if (res.status === 404) {
       throw new Error(
-        'Эндпоинт импорта не найден (404). Убедитесь, что backend обновлён и запущен, в .env задан VITE_API_BASE_URL.',
+        'Эндпоинт импорта не найден (404). Убедитесь, что backend обновлён и запущен.',
       )
     }
     if (!res.ok || !json.success) {
@@ -118,8 +108,7 @@ export const usersApiService = {
    * @returns {Promise<{ config: Object | null }>}
    */
   async getSavedNocoDBImportConfig() {
-    const baseUrl = getBaseUrl()
-    if (!baseUrl) return { config: null }
+    const baseUrl = getApiBaseUrl()
     const res = await fetch(`${baseUrl}/api/admin/import-from-nocodb/saved-config`, {
       method: 'GET',
       headers: await getAuthHeaders(),
@@ -134,7 +123,7 @@ export const usersApiService = {
    * @param {Object} params — те же поля, что у importFromNocoDB (baseUrl, apiToken, tableId, маппинг колонок, writeBack)
    */
   async saveNocoDBImportConfig(params) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/import-from-nocodb/save-config`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/import-from-nocodb/save-config`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(params),

@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -25,7 +20,7 @@ async function getAuthHeaders() {
  */
 export const promocodesApiService = {
   async loadPromocodes() {
-    const res = await fetch(`${getBaseUrl()}/api/admin/promocodes`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/promocodes`, {
       method: 'GET',
       headers: await getAuthHeaders(),
     })
@@ -38,7 +33,7 @@ export const promocodesApiService = {
   },
 
   async createPromocode(data) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/promocodes`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/promocodes`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(data),
@@ -51,7 +46,7 @@ export const promocodesApiService = {
   },
 
   async updatePromocode(id, data) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/promocodes/${id}`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/promocodes/${id}`, {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(data),
@@ -64,7 +59,7 @@ export const promocodesApiService = {
   },
 
   async deletePromocode(id) {
-    const res = await fetch(`${getBaseUrl()}/api/admin/promocodes/${id}`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/admin/promocodes/${id}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
     })

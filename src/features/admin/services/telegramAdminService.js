@@ -1,13 +1,8 @@
 import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
-
-function getBaseUrl() {
-  return typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
 
 async function getAuthHeaders() {
   const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
@@ -24,7 +19,7 @@ async function getAuthHeaders() {
  * @returns {Promise<{ configured: boolean, adminChatIdSet?: boolean, adminChatId?: string | null, botUsername?: string | null }>}
  */
 export async function getTelegramStatus() {
-  const url = `${getBaseUrl()}/api/admin/telegram/status`
+  const url = `${getApiBaseUrl()}/api/admin/telegram/status`
   const res = await fetch(url, {
     method: 'GET',
     headers: await getAuthHeaders(),
@@ -65,7 +60,7 @@ export async function saveTelegramSettings(opts = {}) {
   const body = {}
   if (opts.token !== undefined) body.token = opts.token ? String(opts.token).trim() : ''
   if (opts.adminChatId !== undefined) body.adminChatId = opts.adminChatId ? String(opts.adminChatId).trim() : ''
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/settings`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/settings`, {
     method: 'PATCH',
     headers: await getAuthHeaders(),
     body: JSON.stringify(body),
@@ -85,7 +80,7 @@ export async function saveTelegramSettings(opts = {}) {
  * @returns {Promise<{ webhookUrl?: string }>}
  */
 export async function setTelegramWebhook() {
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/set-webhook`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/set-webhook`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   })
@@ -104,7 +99,7 @@ export async function setTelegramWebhook() {
  * @returns {Promise<{ webhookInfo?: object }>}
  */
 export async function getWebhookStatus() {
-  const url = `${getBaseUrl()}/api/admin/telegram/webhook-status`
+  const url = `${getApiBaseUrl()}/api/admin/telegram/webhook-status`
   const res = await fetch(url, {
     method: 'GET',
     headers: await getAuthHeaders(),
@@ -125,7 +120,7 @@ export async function getWebhookStatus() {
  * @returns {Promise<{ logs: Array<{ ts: string, event: string, ... }> }>}
  */
 export async function getTelegramLogs(limit = 100) {
-  const url = `${getBaseUrl()}/api/admin/telegram/logs${limit ? `?limit=${Math.min(limit, 200)}` : ''}`
+  const url = `${getApiBaseUrl()}/api/admin/telegram/logs${limit ? `?limit=${Math.min(limit, 200)}` : ''}`
   const res = await fetch(url, {
     method: 'GET',
     headers: await getAuthHeaders(),
@@ -143,7 +138,7 @@ export async function getTelegramLogs(limit = 100) {
  * @returns {Promise<{ chat: { id, type, title?, username?, first_name?, last_name? } | null, error?: string }>}
  */
 export async function getTelegramChatInfo() {
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/chat-info`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/chat-info`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   })
@@ -165,7 +160,7 @@ export async function getTelegramChatInfo() {
 export async function sendTestMessage(chatId) {
   const id = (chatId != null && chatId !== '') ? String(chatId).trim() : ''
   if (!id) throw new Error('Укажите Telegram ID (chat_id)')
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/send-test`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/send-test`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ chatId: id }),
@@ -192,7 +187,7 @@ const DEFAULT_SCENARIO = {
  * @returns {Promise<{ scenario: { welcomeMessage: string, menuMessage: string, menuButtons: Array, callbackResponses: Object } }>}
  */
 export async function getTelegramScenario() {
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/scenario`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/scenario`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   })
@@ -210,7 +205,7 @@ export async function getTelegramScenario() {
  * @returns {Promise<{ success: boolean }>}
  */
 export async function saveTelegramScenario(scenario) {
-  const res = await fetch(`${getBaseUrl()}/api/admin/telegram/scenario`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/admin/telegram/scenario`, {
     method: 'PATCH',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ scenario: scenario || DEFAULT_SCENARIO }),

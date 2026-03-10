@@ -3,14 +3,10 @@
  * - админу в Telegram (новый тикет, новое сообщение от пользователя);
  * - пользователю в Telegram и браузерный push (ответ поддержки).
  */
-function getApiBase() {
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL)
-    ? import.meta.env.VITE_API_BASE_URL
-    : ''
-}
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 async function postNotifySupportTicket(payload) {
-  const base = getApiBase()
+  const base = getApiBaseUrl()
   try {
     const res = await fetch(`${base}/api/notify/support-ticket`, {
       method: 'POST',
@@ -29,7 +25,7 @@ async function postNotifySupportTicket(payload) {
 }
 
 async function postNotifySupportReply(payload) {
-  const base = getApiBase()
+  const base = getApiBaseUrl()
   try {
     const res = await fetch(`${base}/api/notify/support-reply`, {
       method: 'POST',
@@ -90,7 +86,7 @@ export const supportNotifyService = {
    * @returns {Promise<{ ok: boolean, replied?: boolean, reason?: string }>}
    */
   async triggerAutoReply(ticketId, getToken) {
-    const base = getApiBase()
+    const base = getApiBaseUrl()
     if (!ticketId) {
       console.warn('[SupportNotify] triggerAutoReply: нет ticketId')
       return { ok: false }
