@@ -1,68 +1,66 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore'
-import { useFirebase } from '../../../shared/hooks/useFirebase.js'
+import { supabase } from '../../../lib/supabase/client.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import logger from '../../../shared/utils/logger.js'
 
-/**
- * Хук для получения тарифов
- */
 export function useTariffs() {
-  const { db } = useFirebase()
-
   return useQuery({
     queryKey: ['tariffs'],
     queryFn: async () => {
-      if (!db) throw new Error('Firebase не инициализирован')
+      if (!supabase) throw new Error('Supabase не инициализирован')
 
-      // Загружаем тарифы из коллекции, настроенной админом
-      // Путь: artifacts/{APP_ID}/public/data/tariffs
-      const tariffsRef = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
-      const snapshot = await getDocs(tariffsRef)
+      const { data, error } = await supabase
+        .from('vpn_tariffs')
+        .select('*')
+        .eq('app_id', APP_ID)
 
-      const tariffs = []
-      snapshot.forEach((doc) => {
-        tariffs.push({ id: doc.id, ...doc.data() })
-      })
+      if (error) throw error
 
-      // Показываем все активные тарифы (добавленные в админке отображаются в личном кабинете)
+      const tariffs = (data || []).map((t) => ({
+        id: t.id,
+        name: t.name,
+        price: t.price,
+        durationDays: t.duration_days,
+        isActive: t.is_active,
+        ...(t.raw || {}),
+      }))
+
       const activeTariffs = tariffs
-        .filter((t) => t.active !== false)
+        .filter((t) => t.active !== false && t.isActive !== false)
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 
-      logger.info('Tariffs', 'Тарифы загружены', { 
-        total: tariffs.length, 
-        active: activeTariffs.length 
-      })
+      logger.info('Tariffs', 'Тарифы загружены', { total: tariffs.length, active: activeTariffs.length })
       return activeTariffs
     },
-    enabled: !!db,
-    staleTime: 10 * 60 * 1000, // 10 минут (тарифы редко меняются)
+    enabled: !!supabase,
+    staleTime: 10 * 60 * 1000,
   })
 }
 
-/**
- * Хук для сохранения тарифа
- */
 export function useSaveTariff() {
-  const { db, auth } = useFirebase()
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async ({ tariffId, tariff }) => {
-      if (!db || !auth.currentUser) {
-        throw new Error('Не авторизован или Firebase не инициализирован')
-      }
+      if (!supabase) throw new Error('Supabase не инициализирован')
 
-      // Сохраняем тариф в коллекцию, настроенную админом
-      // Путь: artifacts/{APP_ID}/public/data/tariffs
-      const tariffRef = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tariffId)
-      await setDoc(tariffRef, {
-        ...tariff,
-        updatedAt: new Date().toISOString(),
-        updatedBy: auth.currentUser.uid,
-      }, { merge: true })
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Не авторизован')
 
+      const { error } = await supabase
+        .from('vpn_tariffs')
+        .upsert({
+          id: tariffId,
+          app_id: APP_ID,
+          name: tariff.name,
+          price: tariff.price,
+          duration_days: tariff.durationDays || tariff.days,
+          is_active: tariff.active !== false,
+          raw: { ...tariff, updatedAt: new Date().toISOString(), updatedBy: user.id },
+          source_updated_at: new Date().toISOString(),
+        }, { onConflict: 'app_id,id' })
+
+      if (error) throw error
       logger.info('Tariffs', 'Тариф сохранен', { tariffId })
       return { tariffId, tariff }
     },
@@ -72,22 +70,20 @@ export function useSaveTariff() {
   })
 }
 
-/**
- * Хук для удаления тарифа
- */
 export function useDeleteTariff() {
-  const { db } = useFirebase()
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async ({ tariffId }) => {
-      if (!db) throw new Error('Firebase не инициализирован')
+      if (!supabase) throw new Error('Supabase не инициализирован')
 
-      // Удаляем тариф из коллекции, настроенной админом
-      // Путь: artifacts/{APP_ID}/public/data/tariffs
-      const tariffRef = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, tariffId)
-      await deleteDoc(tariffRef)
+      const { error } = await supabase
+        .from('vpn_tariffs')
+        .delete()
+        .eq('app_id', APP_ID)
+        .eq('id', tariffId)
 
+      if (error) throw error
       logger.info('Tariffs', 'Тариф удален', { tariffId })
       return { tariffId }
     },
@@ -96,4 +92,3 @@ export function useDeleteTariff() {
     },
   })
 }
-

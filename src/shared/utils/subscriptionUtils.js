@@ -1,96 +1,68 @@
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
+import { supabase } from '../../lib/supabase/client.js'
 import { APP_ID } from '../constants/app.js'
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ['pending_payment', 'test_period', 'activating', 'active']
 
-/**
- * Получение активной подписки пользователя из Firestore
- * @param {Object} db - Экземпляр Firestore
- * @param {string} subscriptionId - ID подписки
- * @returns {Promise<Object|null>} Данные подписки или null
- */
 export async function getSubscriptionById(db, subscriptionId) {
-  if (!db || !subscriptionId) {
-    return null
-  }
+  if (!supabase || !subscriptionId) return null
 
   try {
-    const subscriptionRef = doc(db, `artifacts/${APP_ID}/public/data/subscriptions`, subscriptionId)
-    const subscriptionDoc = await getDoc(subscriptionRef)
-    
-    if (!subscriptionDoc.exists()) {
-      return null
+    const { data, error } = await supabase
+      .from('vpn_firestore_documents')
+      .select('*')
+      .eq('app_id', APP_ID)
+      .eq('collection_name', 'subscriptions')
+      .eq('document_id', subscriptionId)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') return null
+      throw error
     }
-    
-    return {
-      id: subscriptionDoc.id,
-      ...subscriptionDoc.data()
-    }
+
+    return data ? { id: data.document_id, ...data.data } : null
   } catch (error) {
-    console.error('❌ subscriptionUtils: Ошибка получения подписки', {
-      subscriptionId,
-      error: error.message
-    })
+    console.error('subscriptionUtils: Ошибка получения подписки', { subscriptionId, error: error.message })
     return null
   }
 }
 
-/**
- * Получение активной подписки пользователя по userId
- * @param {Object} db - Экземпляр Firestore
- * @param {string} userId - ID пользователя
- * @returns {Promise<Object|null>} Данные активной подписки или null
- */
 export async function getActiveSubscriptionByUserId(db, userId) {
-  if (!db || !userId) {
-    return null
-  }
+  if (!supabase || !userId) return null
 
   try {
-    // Сначала пытаемся получить по subscriptionId из user
-    // Если у пользователя есть subscriptionId, используем его
-    const userRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, userId)
-    const userDoc = await getDoc(userRef)
-    
-    if (userDoc.exists()) {
-      const userData = userDoc.data()
-      if (userData.subscriptionId) {
-        const subscription = await getSubscriptionById(db, userData.subscriptionId)
-        if (subscription && ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-          return subscription
-        }
+    const { data: userData, error: userErr } = await supabase
+      .from('vpn_users')
+      .select('raw')
+      .eq('uid', userId)
+      .eq('app_id', APP_ID)
+      .single()
+
+    if (!userErr && userData?.raw?.subscriptionId) {
+      const subscription = await getSubscriptionById(db, userData.raw.subscriptionId)
+      if (subscription && ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+        return subscription
       }
     }
 
-    // Резерв: подписка по subscriptionId не найдена или неактивна — ищем в коллекции по userId
-    const subscriptionsRef = collection(db, `artifacts/${APP_ID}/public/data/subscriptions`)
-    const q = query(subscriptionsRef, where('userId', '==', userId))
-    const snapshot = await getDocs(q)
-    const subs = []
-    snapshot.forEach((d) => {
-      const data = d.data()
-      if (ACTIVE_SUBSCRIPTION_STATUSES.includes(data.status)) {
-        subs.push({ id: d.id, ...data })
-      }
-    })
-    if (subs.length === 0) return null
-    subs.sort((a, b) => {
-      const at = (a.updatedAt || a.createdAt || 0)
-      const bt = (b.updatedAt || b.createdAt || 0)
-      return new Date(bt).getTime() - new Date(at).getTime()
-    })
-    return subs[0]
+    const { data: subs, error: subsErr } = await supabase
+      .from('vpn_firestore_documents')
+      .select('*')
+      .eq('app_id', APP_ID)
+      .eq('collection_name', 'subscriptions')
+      .contains('data', { userId })
+
+    if (subsErr) throw subsErr
+
+    const activeSubs = (subs || [])
+      .filter((s) => ACTIVE_SUBSCRIPTION_STATUSES.includes(s.data?.status))
+      .map((s) => ({ id: s.document_id, ...s.data }))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime())
+
+    return activeSubs[0] || null
   } catch (error) {
     const msg = error?.message || String(error)
-    const code = error?.code || error?.name
-    console.error('❌ subscriptionUtils: Ошибка получения активной подписки', {
-      userId,
-      error: msg,
-      code,
-    })
-    if (msg.includes('permission') || msg.includes('insufficient') || code === 'permission-denied') {
-      console.warn('💡 subscriptionUtils: Если запросы идут с localhost — добавьте localhost в Firebase Console → Authentication → Authorized domains и проверьте правила Firestore для коллекции subscriptions.')
-    }
+    console.error('subscriptionUtils: Ошибка получения активной подписки', { userId, error: msg })
     return null
   }
 }

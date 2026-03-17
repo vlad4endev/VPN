@@ -1,48 +1,34 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  limit,
-  updateDoc,
-  onSnapshot,
-  addDoc,
-  writeBatch,
-  getDoc,
-} from 'firebase/firestore'
-import { db, auth } from '../../../lib/firebase/config.js'
+import { supabase } from '../../../lib/supabase/client.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const APP_ID_HEADER = 'X-App-Id'
 import logger from '../../../shared/utils/logger.js'
 
-const NOTIFICATIONS_PATH = `artifacts/${APP_ID}/public/data/notifications`
+const TABLE = 'vpn_firestore_documents'
 
-/**
- * Сервис уведомлений: список, пометить прочитанным, подписка в реальном времени, создание (админ).
- */
+async function getAuthToken() {
+  if (!supabase) return null
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token || null
+}
+
 export const notificationsService = {
-  /**
-   * Получить список уведомлений пользователя (последние сначала).
-   * @param {string} userId
-   * @param {{ limit?: number, unreadOnly?: boolean }} options
-   */
   async getList(userId, options = {}) {
-    if (!db || !userId) return []
+    if (!supabase || !userId) return []
     const { limit: limitCount = 50, unreadOnly = false } = options
     try {
-      const coll = collection(db, NOTIFICATIONS_PATH)
-      const q = query(
-        coll,
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc'),
-        limit(Math.min(limitCount, 100))
-      )
-      const snapshot = await getDocs(q)
-      let items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select('*')
+        .eq('app_id', APP_ID)
+        .eq('collection_name', 'notifications')
+        .contains('data', { userId })
+        .order('source_created_at', { ascending: false })
+        .limit(Math.min(limitCount, 100))
+
+      if (error) throw error
+      let items = (data || []).map((d) => ({ id: d.document_id, ...d.data }))
       if (unreadOnly) items = items.filter((n) => !n.read)
       return items
     } catch (err) {
@@ -51,82 +37,74 @@ export const notificationsService = {
     }
   },
 
-  /**
-   * Пометить уведомление как прочитанное.
-   * @param {string} notificationId
-   */
   async markAsRead(notificationId) {
-    if (!db || !notificationId) return
+    if (!supabase || !notificationId) return
     try {
-      const ref = doc(db, NOTIFICATIONS_PATH, notificationId)
-      await updateDoc(ref, { read: true })
+      const { data: existing } = await supabase
+        .from(TABLE)
+        .select('data')
+        .eq('document_id', notificationId)
+        .eq('collection_name', 'notifications')
+        .eq('app_id', APP_ID)
+        .single()
+
+      if (existing) {
+        await supabase
+          .from(TABLE)
+          .update({ data: { ...existing.data, read: true } })
+          .eq('document_id', notificationId)
+          .eq('collection_name', 'notifications')
+          .eq('app_id', APP_ID)
+      }
     } catch (err) {
       logger.error('Notifications', 'Ошибка пометки прочитанным', { notificationId }, err)
     }
   },
 
-  /**
-   * Подписка на уведомления пользователя в реальном времени.
-   * @param {string} userId
-   * @param {(notifications: Array<{ id: string, ... }>) => void} callback
-   * @returns {() => void} отписка
-   */
   subscribe(userId, callback) {
-    if (!db || !userId || typeof callback !== 'function') return () => {}
-    const coll = collection(db, NOTIFICATIONS_PATH)
-    const q = query(
-      coll,
-      where('userId', '==', userId),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    )
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
-        callback(list)
-      },
-      (err) => {
-        const code = err?.code || err?.message
-        logger.warn(
-          'Notifications',
-          code === 'failed-precondition'
-            ? 'Подписка недоступна: нужен составной индекс Firestore (userId + createdAt). Выполните: firebase deploy --only firestore:indexes'
-            : 'Подписка недоступна (правила или индекс Firestore)',
-          { userId, code }
-        )
-        callback([])
-      }
-    )
-    return unsubscribe
+    if (!supabase || !userId || typeof callback !== 'function') return () => {}
+
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled) return
+      const items = await notificationsService.getList(userId)
+      if (!cancelled) callback(items)
+    }
+    poll()
+    const interval = setInterval(poll, 10000)
+    return () => { cancelled = true; clearInterval(interval) }
   },
 
-  /**
-   * Создать одно уведомление (только админ; Firestore rules проверяют isAdmin).
-   * @param {{ userId: string, type: string, title: string, body: string, overview?: string, data?: object }} payload
-   */
   async createOne(payload) {
-    if (!db) throw new Error('Firestore недоступен')
+    if (!supabase) throw new Error('Supabase недоступен')
     const { userId, type, title, body, overview = null, data = null } = payload
     if (!userId || !type || !title || !body) throw new Error('userId, type, title, body обязательны')
-    const coll = collection(db, NOTIFICATIONS_PATH)
-    await addDoc(coll, {
-      userId: String(userId),
-      type: String(type),
-      title: String(title),
-      body: String(body),
-      overview: overview != null ? String(overview) : null,
-      read: false,
-      createdAt: new Date().toISOString(),
-      data: data && typeof data === 'object' ? data : null,
+
+    const notifId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const { error } = await supabase.from(TABLE).insert({
+      app_id: APP_ID,
+      document_path: `artifacts/${APP_ID}/public/data/notifications/${notifId}`,
+      collection_path: `artifacts/${APP_ID}/public/data/notifications`,
+      collection_name: 'notifications',
+      document_id: notifId,
+      data: {
+        userId: String(userId),
+        type: String(type),
+        title: String(title),
+        body: String(body),
+        overview: overview != null ? String(overview) : null,
+        read: false,
+        createdAt: now,
+        data: data && typeof data === 'object' ? data : null,
+      },
+      source_created_at: now,
     })
+    if (error) throw error
   },
 
-  /**
-   * Список шаблонов уведомлений (админ).
-   */
   async getTemplates() {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates`, {
@@ -138,66 +116,43 @@ export const notificationsService = {
   },
 
   async createTemplate(payload) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
-    const data = await res.json()
-    return data.id
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    return (await res.json()).id
   },
 
   async updateTemplate(id, payload) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   },
 
   async deleteTemplate(id) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/templates/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   },
 
-  /**
-   * Рассылка уведомлений через бэкенд (шаблоны, фильтры, кнопки).
-   * @param {string[]} [userIds] - при recipientFilter === 'userIds'
-   * @param {{ type?: string, title?: string, body?: string, overview?: string, templateId?: string, recipientFilter?: 'userIds'|'all'|'plan'|'tariff', plan?: string, tariffId?: string, buttons?: { label: string, url: string }[] }} payload
-   */
   async broadcastViaApi(userIds, payload) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const body = {
@@ -211,33 +166,20 @@ export const notificationsService = {
       tariffId: payload.tariffId || undefined,
       buttons: Array.isArray(payload.buttons) ? payload.buttons : undefined,
     }
-    if (body.recipientFilter === 'userIds' && Array.isArray(userIds) && userIds.length > 0) {
-      body.userIds = userIds
-    }
+    if (body.recipientFilter === 'userIds' && Array.isArray(userIds) && userIds.length > 0) body.userIds = userIds
     if (!body.templateId && (!body.title || !body.body)) throw new Error('Укажите title и body или выберите шаблон')
+
     const res = await fetch(`${base}/api/admin/notifications/broadcast`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(body),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText || 'Ошибка рассылки')
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText || 'Ошибка рассылки')
     return res.json()
   },
 
-  /**
-   * Отправить одно уведомление пользователю (из карточки пользователя).
-   * @param {string} userId
-   * @param {{ templateId?: string, type?: string, title?: string, body?: string, overview?: string, buttons?: { label: string, url: string }[] }} payload
-   */
   async sendToOne(userId, payload) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const body = {
@@ -250,134 +192,100 @@ export const notificationsService = {
       buttons: Array.isArray(payload.buttons) ? payload.buttons : undefined,
     }
     if (!body.templateId && (!body.title || !body.body)) throw new Error('Укажите title и body или выберите шаблон')
+
     const res = await fetch(`${base}/api/admin/notifications/send-one`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(body),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText || 'Ошибка отправки')
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText || 'Ошибка отправки')
     return res.json()
   },
 
-  /**
-   * Список отложенных/запланированных рассылок.
-   * @param {{ from?: string, to?: string, status?: 'pending'|'sent'|'cancelled'|'failed' }} params — ISO даты для календаря
-   */
   async getScheduled(params = {}) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const q = new URLSearchParams()
     if (params.from) q.set('from', params.from)
     if (params.to) q.set('to', params.to)
     if (params.status) q.set('status', params.status)
-    const url = `${base}/api/admin/notifications/scheduled${q.toString() ? `?${q.toString()}` : ''}`
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID } })
+    const res = await fetch(`${base}/api/admin/notifications/scheduled${q.toString() ? `?${q.toString()}` : ''}`, {
+      headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
+    })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
-    const data = await res.json()
-    return data.scheduled || []
+    return (await res.json()).scheduled || []
   },
 
-  /**
-   * Создать отложенную рассылку (как broadcast + scheduledAt ISO и опционально name).
-   */
   async createScheduled(payload) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
-    const data = await res.json()
-    return data.id
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    return (await res.json()).id
   },
 
-  /**
-   * Обновить отложенную рассылку (только pending): status: 'cancelled', scheduledAt, name.
-   */
   async updateScheduled(id, updates) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        [APP_ID_HEADER]: APP_ID,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
       body: JSON.stringify(updates),
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   },
 
-  /**
-   * Отменить отложенную рассылку.
-   */
   async deleteScheduled(id) {
-    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null
+    const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')
     const base = getApiBaseUrl()
     const res = await fetch(`${base}/api/admin/notifications/scheduled/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || res.statusText)
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   },
 
-  /**
-   * Рассылка уведомлений нескольким пользователям напрямую в Firestore (админ; требует правил Firestore).
-   * @param {string[]} userIds
-   * @param {{ type: string, title: string, body: string, overview?: string, data?: object }} payload
-   */
   async broadcast(userIds, payload) {
-    if (!db) throw new Error('Firestore недоступен')
+    if (!supabase) throw new Error('Supabase недоступен')
     if (!Array.isArray(userIds) || userIds.length === 0) throw new Error('userIds обязателен')
     const { type, title, body, overview = null, data = null } = payload
     if (!type || !title || !body) throw new Error('type, title, body обязательны')
-    const BATCH_SIZE = 500
-    const coll = collection(db, NOTIFICATIONS_PATH)
-    const createdAt = new Date().toISOString()
-    for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
-      const batch = writeBatch(db)
-      const chunk = userIds.slice(i, i + BATCH_SIZE)
-      for (const uid of chunk) {
-        const ref = doc(coll)
-        batch.set(ref, {
+    const now = new Date().toISOString()
+
+    const rows = userIds.map((uid) => {
+      const notifId = crypto.randomUUID()
+      return {
+        app_id: APP_ID,
+        document_path: `artifacts/${APP_ID}/public/data/notifications/${notifId}`,
+        collection_path: `artifacts/${APP_ID}/public/data/notifications`,
+        collection_name: 'notifications',
+        document_id: notifId,
+        data: {
           userId: String(uid),
           type: String(type),
           title: String(title),
           body: String(body),
           overview: overview != null ? String(overview) : null,
           read: false,
-          createdAt,
+          createdAt: now,
           data: data && typeof data === 'object' ? data : null,
-        })
+        },
+        source_created_at: now,
       }
-      await batch.commit()
+    })
+
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500)
+      const { error } = await supabase.from(TABLE).insert(chunk)
+      if (error) throw error
     }
   },
 }

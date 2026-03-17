@@ -3,14 +3,9 @@ import { supportService } from '../services/supportService.js'
 import { supportNotifyService } from '../services/supportNotifyService.js'
 import { registerAndSubscribe } from '../services/pushSubscribeService.js'
 import notificationService from '../../../shared/services/notificationService.js'
-import { auth } from '../../../lib/firebase/config.js'
+import { supabase } from '../../../lib/supabase/client.js'
 import { canAccessAdmin } from '../../../shared/constants/admin.js'
 
-/**
- * Хук для работы с тикетами техподдержки.
- * @param {Object} currentUser - текущий пользователь { id, email, name, role }
- * @returns {Object} тикеты, выбранный тикет, сообщения, действия, загрузка, ошибки
- */
 export function useSupport(currentUser) {
   const [tickets, setTickets] = useState([])
   const [selectedTicketId, setSelectedTicketId] = useState(null)
@@ -19,17 +14,20 @@ export function useSupport(currentUser) {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
-  const [ticketFilter, setTicketFilter] = useState('active') // 'all' | 'active' | 'archived'
+  const [ticketFilter, setTicketFilter] = useState('active')
   const lastNotifiedCountRef = useRef(0)
   const pushSubscribedRef = useRef(false)
 
   const isAdmin = canAccessAdmin(currentUser?.role, currentUser)
 
-  // Подписка на Web Push для уведомлений в фоне (вкладка закрыта). Один раз при открытии поддержки.
   useEffect(() => {
     if (!currentUser?.id || isAdmin || pushSubscribedRef.current) return
     if (typeof window === 'undefined' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
-    const getToken = () => (auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null))
+    const getToken = async () => {
+      if (!supabase) return null
+      const { data: { session } } = await supabase.auth.getSession()
+      return session?.access_token || null
+    }
     registerAndSubscribe(getToken).then((ok) => {
       if (ok) pushSubscribedRef.current = true
     })
@@ -52,11 +50,8 @@ export function useSupport(currentUser) {
     }
   }, [currentUser?.id, isAdmin, ticketFilter])
 
-  useEffect(() => {
-    loadTickets()
-  }, [loadTickets])
+  useEffect(() => { loadTickets() }, [loadTickets])
 
-  // Открыть тикет из URL ?ticket=ID или #support?ticket=ID (ссылка из Telegram или push)
   useEffect(() => {
     if (tickets.length === 0 || !currentUser?.id || typeof window === 'undefined') return
     let ticketId = new URLSearchParams(window.location.search).get('ticket')
@@ -64,37 +59,24 @@ export function useSupport(currentUser) {
       const hashPart = window.location.hash.split('?')[1]
       if (hashPart) ticketId = new URLSearchParams(hashPart).get('ticket')
     }
-    if (ticketId && tickets.some((t) => t.id === ticketId)) {
-      setSelectedTicketId(ticketId)
-    }
+    if (ticketId && tickets.some((t) => t.id === ticketId)) setSelectedTicketId(ticketId)
   }, [tickets, currentUser?.id])
 
-  // Сброс счётчика уведомлений при смене тикета
-  useEffect(() => {
-    lastNotifiedCountRef.current = 0
-  }, [selectedTicketId])
+  useEffect(() => { lastNotifiedCountRef.current = 0 }, [selectedTicketId])
 
-  // Подписка на выбранный тикет в реальном времени
   useEffect(() => {
     if (!selectedTicketId || !currentUser?.id) {
       setTicket(null)
       setMessages([])
       return
     }
-
-    const unsub = supportService.subscribeTicket(
-      selectedTicketId,
-      currentUser.id,
-      isAdmin,
-      (t, msgs) => {
-        setTicket(t)
-        setMessages(msgs || [])
-      }
-    )
+    const unsub = supportService.subscribeTicket(selectedTicketId, currentUser.id, isAdmin, (t, msgs) => {
+      setTicket(t)
+      setMessages(msgs || [])
+    })
     return () => unsub()
   }, [selectedTicketId, currentUser?.id, isAdmin])
 
-  // Браузерный push при новом ответе поддержки; по клику открывается этот тикет
   useEffect(() => {
     if (isAdmin || !messages.length) return
     const last = messages[messages.length - 1]
@@ -112,159 +94,93 @@ export function useSupport(currentUser) {
     }
   }, [messages, isAdmin, selectedTicketId])
 
-  const createTicket = useCallback(
-    async (subject, message) => {
-      if (!currentUser?.id) return null
-      setSending(true)
-      setError(null)
-      try {
-        const { id } = await supportService.createTicket(
-          currentUser,
-          subject,
-          message
-        )
-        await loadTickets()
-        setSelectedTicketId(id)
-        supportNotifyService.notifyNewTicket(
-          id,
-          currentUser.email,
-          currentUser.name,
-          subject,
-          message
-        )
-        // Автоответ ИИ по первому сообщению в новом тикете
-        supportNotifyService
-          .triggerAutoReply(id, () =>
-            auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
-          )
-          .catch((err) => console.warn('useSupport:', err?.message))
-        return id
-      } catch (err) {
-        setError(err.message || 'Не удалось создать тикет')
-        return null
-      } finally {
-        setSending(false)
+  const createTicket = useCallback(async (subject, message) => {
+    if (!currentUser?.id) return null
+    setSending(true)
+    setError(null)
+    try {
+      const { id } = await supportService.createTicket(currentUser, subject, message)
+      await loadTickets()
+      setSelectedTicketId(id)
+      supportNotifyService.notifyNewTicket(id, currentUser.email, currentUser.name, subject, message)
+      const getToken = async () => {
+        if (!supabase) return null
+        const { data: { session } } = await supabase.auth.getSession()
+        return session?.access_token || null
       }
-    },
-    [currentUser, loadTickets]
-  )
+      supportNotifyService.triggerAutoReply(id, getToken).catch((err) => console.warn('useSupport:', err?.message))
+      return id
+    } catch (err) {
+      setError(err.message || 'Не удалось создать тикет')
+      return null
+    } finally {
+      setSending(false)
+    }
+  }, [currentUser, loadTickets])
 
-  const createTicketAsAdmin = useCallback(
-    async (targetUser, subject, message) => {
-      if (!isAdmin || !currentUser?.id || !targetUser?.id) return null
-      setSending(true)
-      setError(null)
-      try {
-        const { id } = await supportService.createTicketAsAdmin(
-          currentUser,
-          targetUser,
-          subject,
-          message
-        )
-        supportNotifyService.notifySupportReply(
-          targetUser.id,
-          id,
-          (subject || '').trim(),
-          (message || '').trim()
-        )
-        await loadTickets()
-        setSelectedTicketId(id)
-        return id
-      } catch (err) {
-        setError(err.message || 'Не удалось открыть тикет')
-        return null
-      } finally {
-        setSending(false)
-      }
-    },
-    [currentUser, isAdmin, loadTickets]
-  )
+  const createTicketAsAdmin = useCallback(async (targetUser, subject, message) => {
+    if (!isAdmin || !currentUser?.id || !targetUser?.id) return null
+    setSending(true)
+    setError(null)
+    try {
+      const { id } = await supportService.createTicketAsAdmin(currentUser, targetUser, subject, message)
+      supportNotifyService.notifySupportReply(targetUser.id, id, (subject || '').trim(), (message || '').trim())
+      await loadTickets()
+      setSelectedTicketId(id)
+      return id
+    } catch (err) {
+      setError(err.message || 'Не удалось открыть тикет')
+      return null
+    } finally {
+      setSending(false)
+    }
+  }, [currentUser, isAdmin, loadTickets])
 
-  const sendMessage = useCallback(
-    async (text, ticketSnapshot) => {
-      if (!selectedTicketId || !currentUser?.id) return
-      setSending(true)
-      setError(null)
-      const fromSupport = isAdmin
-      try {
-        await supportService.addMessage(
-          selectedTicketId,
-          currentUser,
-          text,
-          fromSupport ? 'support' : 'user'
-        )
-        const t = ticketSnapshot || ticket
-        if (t) {
-          if (fromSupport) {
-            supportNotifyService.notifySupportReply(
-              t.userId,
-              selectedTicketId,
-              t.subject,
-              text
-            )
-          } else {
-            supportNotifyService.notifyNewMessageToAdmin(
-              selectedTicketId,
-              currentUser.email,
-              currentUser.name,
-              t.subject,
-              text
-            )
-            // Автоответ ИИ: ИИ сам ответит в тикете или отправит админу уведомление о живой консультации
-            supportNotifyService
-              .triggerAutoReply(selectedTicketId, () =>
-                auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
-              )
-              .catch((err) => console.warn('useSupport:', err?.message))
+  const sendMessage = useCallback(async (text, ticketSnapshot) => {
+    if (!selectedTicketId || !currentUser?.id) return
+    setSending(true)
+    setError(null)
+    const fromSupport = isAdmin
+    try {
+      await supportService.addMessage(selectedTicketId, currentUser, text, fromSupport ? 'support' : 'user')
+      const t = ticketSnapshot || ticket
+      if (t) {
+        if (fromSupport) {
+          supportNotifyService.notifySupportReply(t.userId, selectedTicketId, t.subject, text)
+        } else {
+          supportNotifyService.notifyNewMessageToAdmin(selectedTicketId, currentUser.email, currentUser.name, t.subject, text)
+          const getToken = async () => {
+            if (!supabase) return null
+            const { data: { session } } = await supabase.auth.getSession()
+            return session?.access_token || null
           }
+          supportNotifyService.triggerAutoReply(selectedTicketId, getToken).catch((err) => console.warn('useSupport:', err?.message))
         }
-      } catch (err) {
-        setError(err.message || 'Не удалось отправить сообщение')
-      } finally {
-        setSending(false)
       }
-    },
-    [selectedTicketId, currentUser, isAdmin, ticket]
-  )
+    } catch (err) {
+      setError(err.message || 'Не удалось отправить сообщение')
+    } finally {
+      setSending(false)
+    }
+  }, [selectedTicketId, currentUser, isAdmin, ticket])
 
-  const updateStatus = useCallback(
-    async (ticketId, status) => {
-      if (!isAdmin || !ticketId) return
-      setError(null)
-      try {
-        await supportService.updateTicketStatus(ticketId, status)
-        await loadTickets()
-        if (selectedTicketId === ticketId) {
-          setTicket((prev) => (prev ? { ...prev, status } : null))
-        }
-      } catch (err) {
-        setError(err.message || 'Не удалось обновить статус')
-      }
-    },
-    [isAdmin, selectedTicketId, loadTickets]
-  )
+  const updateStatus = useCallback(async (ticketId, status) => {
+    if (!isAdmin || !ticketId) return
+    setError(null)
+    try {
+      await supportService.updateTicketStatus(ticketId, status)
+      await loadTickets()
+      if (selectedTicketId === ticketId) setTicket((prev) => (prev ? { ...prev, status } : null))
+    } catch (err) {
+      setError(err.message || 'Не удалось обновить статус')
+    }
+  }, [isAdmin, selectedTicketId, loadTickets])
 
-  const selectTicket = useCallback((id) => {
-    setSelectedTicketId(id || null)
-  }, [])
+  const selectTicket = useCallback((id) => { setSelectedTicketId(id || null) }, [])
 
   return {
-    tickets,
-    ticket,
-    messages,
-    selectedTicketId,
-    loading,
-    sending,
-    error,
-    isAdmin,
-    ticketFilter,
-    setTicketFilter,
-    loadTickets,
-    createTicket,
-    createTicketAsAdmin,
-    sendMessage,
-    updateStatus,
-    selectTicket,
-    setError,
+    tickets, ticket, messages, selectedTicketId, loading, sending, error, isAdmin,
+    ticketFilter, setTicketFilter, loadTickets, createTicket, createTicketAsAdmin,
+    sendMessage, updateStatus, selectTicket, setError,
   }
 }

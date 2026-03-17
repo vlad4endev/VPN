@@ -5,6 +5,7 @@
 import express from 'express'
 import crypto from 'crypto'
 import { generateUniqueSubId } from '../lib/generateUniqueSubId.js'
+import { syncUserToSupabase } from '../lib/supabaseSync.js'
 
 function randomUUIDFallback() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -126,7 +127,15 @@ export function createAuthApiRouter(deps) {
     const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${uid}`)
     try {
       const snap = await userRef.get()
-      if (snap.exists) return res.json({ success: true, alreadyExists: true, user: { id: uid, ...snap.data() } })
+      if (snap.exists) {
+        const existingUser = { id: uid, ...snap.data() }
+        try {
+          await syncUserToSupabase({ uid, appId: APP_ID, userData: existingUser })
+        } catch (syncErr) {
+          console.warn('⚠️ ensure-firestore-user: sync to Supabase failed for existing user', uid, syncErr.message)
+        }
+        return res.json({ success: true, alreadyExists: true, user: existingUser })
+      }
       const authUser = await admin.auth().getUser(uid)
       const subId = await generateUniqueSubId(db, APP_ID)
       const now = new Date().toISOString()
@@ -147,6 +156,11 @@ export function createAuthApiRouter(deps) {
         updatedAt: now,
       }
       await userRef.set(newUserData)
+      try {
+        await syncUserToSupabase({ uid, appId: APP_ID, userData: newUserData })
+      } catch (syncErr) {
+        console.warn('⚠️ ensure-firestore-user: sync to Supabase failed for new user', uid, syncErr.message)
+      }
       console.log('✅ ensure-firestore-user: создан документ для uid', uid, authUser.email || '(no email)')
       return res.json({ success: true, created: true, user: { id: uid, ...newUserData } })
     } catch (err) {

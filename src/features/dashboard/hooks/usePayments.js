@@ -1,36 +1,36 @@
 import { useQuery } from '@tanstack/react-query'
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore'
-import { useFirebase } from '../../../shared/hooks/useFirebase.js'
+import { supabase } from '../../../lib/supabase/client.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 
-/**
- * Хук для получения платежей пользователя
- */
 export function usePayments(userId) {
-  const { db } = useFirebase()
-
   return useQuery({
     queryKey: ['payments', userId],
     queryFn: async () => {
-      if (!db || !userId) return []
+      if (!supabase || !userId) return []
 
-      const paymentsRef = collection(db, `artifacts/${APP_ID}/payments`)
-      const q = query(
-        paymentsRef,
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      )
+      const { data, error } = await supabase
+        .from('vpn_payments')
+        .select('*')
+        .eq('app_id', APP_ID)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50)
 
-      const snapshot = await getDocs(q)
-      const payments = []
-      snapshot.forEach((doc) => {
-        payments.push({ id: doc.id, ...doc.data() })
-      })
+      if (error) throw error
 
-      return payments
+      return (data || []).map((p) => ({
+        id: p.id,
+        userId: p.user_id,
+        amount: p.amount,
+        status: p.status,
+        provider: p.provider,
+        tariffId: p.tariff_id,
+        createdAt: p.created_at,
+        paidAt: p.paid_at,
+        ...(p.raw || {}),
+      }))
     },
-    enabled: !!db && !!userId,
-    staleTime: 2 * 60 * 1000, // 2 минуты
+    enabled: !!supabase && !!userId,
+    staleTime: 2 * 60 * 1000,
   })
 }

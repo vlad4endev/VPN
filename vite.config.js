@@ -141,9 +141,13 @@ export default defineConfig(() => {
         '@shared': path.resolve(__dirname, './src/shared'),
         '@lib': path.resolve(__dirname, './src/lib'),
         '@app': path.resolve(__dirname, './src/app'),
-        // Один экземпляр React на всё приложение — устраняет "Invalid hook call" в AdminProvider
         react: path.resolve(__dirname, 'node_modules/react'),
         'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+        'firebase/firestore': path.resolve(__dirname, './src/lib/firebase/firestore-compat.js'),
+        'firebase/auth': path.resolve(__dirname, './src/lib/firebase/auth-compat.js'),
+        'firebase/database': path.resolve(__dirname, './src/lib/firebase/database-compat.js'),
+        'firebase/app-check': path.resolve(__dirname, './src/lib/firebase/config.js'),
+        'firebase/app': path.resolve(__dirname, './src/lib/firebase/config.js'),
       },
       dedupe: ['react', 'react-dom'],
     },
@@ -162,8 +166,8 @@ export default defineConfig(() => {
               if (id.includes('react') || id.includes('react-dom')) {
                 return undefined
               }
-              if (id.includes('firebase')) {
-                return 'firebase'
+              if (id.includes('supabase')) {
+                return 'supabase'
               }
               return 'vendor'
             }

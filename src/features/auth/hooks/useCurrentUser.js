@@ -1,62 +1,78 @@
 import { useQuery } from '@tanstack/react-query'
-import { doc, getDoc } from 'firebase/firestore'
-import { onAuthStateChanged } from 'firebase/auth'
 import { useEffect, useState } from 'react'
-import { useFirebase } from '../../../shared/hooks/useFirebase.js'
+import { supabase } from '../../../lib/supabase/client.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 
-/**
- * Хук для получения текущего пользователя
- */
 export function useCurrentUser() {
-  const { auth, db } = useFirebase()
-  const [firebaseUser, setFirebaseUser] = useState(null)
+  const [supabaseUser, setSupabaseUser] = useState(null)
 
-  // Отслеживаем изменения авторизации
   useEffect(() => {
-    if (!auth) return
+    if (!supabase) return
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user)
+    supabase.auth.getUser().then(({ data }) => {
+      setSupabaseUser(data.user ?? null)
     })
 
-    return unsubscribe
-  }, [auth])
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSupabaseUser(session?.user ?? null)
+    })
 
-  // Загружаем данные пользователя из Firestore
+    return () => subscription.unsubscribe()
+  }, [])
+
   const { data: userData, isLoading, error } = useQuery({
-    queryKey: ['currentUser', firebaseUser?.uid],
+    queryKey: ['currentUser', supabaseUser?.id],
     queryFn: async () => {
-      if (!firebaseUser || !db) return null
+      if (!supabaseUser || !supabase) return null
 
-      const userRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
-      const snapshot = await getDoc(userRef)
+      const { data, error } = await supabase
+        .from('vpn_users')
+        .select('*')
+        .eq('uid', supabaseUser.id)
+        .eq('app_id', APP_ID)
+        .single()
 
-      if (!snapshot.exists()) {
-        return {
-          id: firebaseUser.uid,
-          email: firebaseUser.email,
-          name: firebaseUser.displayName || '',
-          role: 'user',
-          plan: 'free',
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return {
+            id: supabaseUser.id,
+            email: supabaseUser.email,
+            name: supabaseUser.user_metadata?.full_name || '',
+            role: 'user',
+            plan: 'free',
+          }
         }
+        throw error
       }
 
       return {
-        id: firebaseUser.uid,
-        email: firebaseUser.email,
-        ...snapshot.data(),
+        id: data.uid,
+        email: data.email || supabaseUser.email,
+        name: data.name,
+        phone: data.phone,
+        role: data.role,
+        plan: data.plan,
+        uuid: data.uuid,
+        subId: data.sub_id,
+        expiresAt: data.expires_at,
+        tariffId: data.tariff_id,
+        tariffName: data.tariff_name,
+        photoURL: data.photo_url,
+        language: data.language,
+        referredBy: data.referred_by,
+        createdAt: data.source_created_at,
+        updatedAt: data.source_updated_at,
+        ...(data.raw || {}),
       }
     },
-    enabled: !!firebaseUser && !!db,
-    staleTime: 1 * 60 * 1000, // 1 минута
+    enabled: !!supabaseUser,
+    staleTime: 60_000,
   })
 
   return {
     user: userData,
     isLoading,
     error,
-    firebaseUser,
+    firebaseUser: supabaseUser,
   }
 }
-
