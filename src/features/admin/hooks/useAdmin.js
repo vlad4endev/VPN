@@ -4,6 +4,7 @@ import { useServers } from './useServers.js'
 import { useTariffs } from './useTariffs.js'
 import { useSettings } from './useSettings.js'
 import { useReviews } from './useReviews.js'
+import { useAppStore } from '../../../lib/store/appStore.js'
 
 /**
  * Главный хук для управления Admin панелью
@@ -37,12 +38,16 @@ export function useAdmin({
 
   // Хуки для различных частей Admin панели
   const settingsHook = useSettings(currentUser, setError, setSuccess)
+  const storeServers = useAppStore((s) => s.servers)
+  const setStoreServers = useAppStore((s) => s.setServers)
+  const serversForUseServers = Array.isArray(storeServers) && storeServers.length > 0 ? storeServers : settingsHook.servers
   const serversHook = useServers(
     currentUser,
-    settingsHook.servers,
+    serversForUseServers,
     (newServers) => {
       settingsHook.setServers(newServers)
       settingsHook.setSettings(prev => prev ? { ...prev, servers: newServers } : null)
+      setStoreServers(newServers)
     },
     settingsHook.settings,
     settingsHook.setSettings,

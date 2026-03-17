@@ -30,6 +30,16 @@ export async function getAiStatus() {
         'API ИИ не найден (404). Запустите или перезапустите backend (n8n-webhook-proxy) на порту 3001 и убедитесь, что в проекте есть маршруты /api/admin/ai/*.',
       )
     }
+    if (res.status === 503) {
+      throw new Error(
+        json.error || 'Сервис ИИ временно недоступен (503). Проверьте, что backend запущен и Firebase Admin SDK настроен в server/.env или server/firebase-service-account.json.',
+      )
+    }
+    if (res.status === 502) {
+      throw new Error(
+        json.error || 'Backend недоступен (502). Убедитесь, что n8n-webhook-proxy запущен на порту 3001.',
+      )
+    }
     if (res.status === 403) {
       throw new Error(json.hint || json.error || 'Доступ запрещён.')
     }
@@ -72,6 +82,16 @@ export async function saveAiSettings(opts = {}) {
     if (res.status === 404) {
       throw new Error(
         'API ИИ не найден (404). Запустите backend (n8n-webhook-proxy) на порту 3001.',
+      )
+    }
+    if (res.status === 503) {
+      throw new Error(
+        json.error || 'Сервис ИИ временно недоступен (503). Проверьте, что backend запущен и Firebase Admin SDK настроен.',
+      )
+    }
+    if (res.status === 502) {
+      throw new Error(
+        json.error || 'Backend недоступен (502). Убедитесь, что n8n-webhook-proxy запущен на порту 3001.',
       )
     }
     if (res.status === 403) {
