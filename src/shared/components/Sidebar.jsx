@@ -152,7 +152,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   /** На мобильных при нижней панели — только переключатель раздела (Кабинет/Админ/Финансы/Аналитика) и Выйти, без подразделов */
   const compactNav = (
     <nav className="flex-1 space-y-1.5 sm:space-y-2 overflow-y-auto min-h-0">
-      {canAccessAdmin(currentUser?.role) && (
+      {canAccessAdmin(currentUser?.role, currentUser) && (
         <button
           onClick={() => handleNavClick('admin')}
           className={navItemClass(view === 'admin')}
@@ -174,7 +174,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.finances')}</span>
         </button>
       )}
-      {canAccessAdmin(currentUser?.role) && (
+      {canAccessAdmin(currentUser?.role, currentUser) && (
         <button
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}
@@ -200,7 +200,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
   const fullNav = (
     <nav className="flex-1 space-y-1.5 sm:space-y-2 overflow-y-auto min-h-0">
       {/* Админ-панель и её подразделы — только для роли admin */}
-      {canAccessAdmin(currentUser?.role) && (
+      {canAccessAdmin(currentUser?.role, currentUser) && (
         <div className="space-y-1 sm:space-y-1.5">
           <button
             onClick={() => handleNavClick('admin')}
@@ -271,7 +271,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
       )}
 
       {/* Аналитика — для роли Админ (AI-воронка) */}
-      {canAccessAdmin(currentUser?.role) && (
+      {canAccessAdmin(currentUser?.role, currentUser) && (
         <button
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}

@@ -115,12 +115,20 @@ const VirtualizedUserTable = ({
     return () => window.removeEventListener('resize', updateDimensions)
   }, [])
 
-  // Высота области списка: замер после layout и при изменении размера (десктоп — убрать пустое место под таблицей)
+  // Высота области списка: замер после layout и при изменении размера
+  // Debounce + порог изменения: ResizeObserver срабатывает при появлении/скрытии скроллбара при прокрутке,
+  // что вызывало постоянные setState и «живую свою жизнью» таблицы
+  const lastHeightRef = useRef(600)
+  const HEIGHT_CHANGE_THRESHOLD = 5 // не обновлять при микроколебаниях < 5px
+
   const measureListHeight = useCallback(() => {
     const el = listAreaRef.current
     if (!el) return
-    const h = el.getBoundingClientRect().height
-    if (h > 0) setListAreaHeight(h)
+    const h = Math.round(el.getBoundingClientRect().height)
+    if (h > 0 && Math.abs(h - lastHeightRef.current) >= HEIGHT_CHANGE_THRESHOLD) {
+      lastHeightRef.current = h
+      setListAreaHeight(h)
+    }
   }, [])
 
   useLayoutEffect(() => {
@@ -128,9 +136,21 @@ const VirtualizedUserTable = ({
     if (!el) return
     measureListHeight()
     requestAnimationFrame(measureListHeight)
-    const ro = new ResizeObserver(measureListHeight)
+
+    let timeoutId = null
+    const debouncedMeasure = () => {
+      if (timeoutId) clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => {
+        requestAnimationFrame(measureListHeight)
+        timeoutId = null
+      }, 120)
+    }
+    const ro = new ResizeObserver(debouncedMeasure)
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      if (timeoutId) clearTimeout(timeoutId)
+    }
   }, [isMobile, filtersExpanded, measureListHeight])
 
   // Мемоизация данных для передачи в виртуализированный список (используем отфильтрованный список)

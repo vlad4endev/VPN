@@ -3,17 +3,25 @@
  * Email админов загружаются из переменных окружения
  */
 
+/** Email главного администратора — всегда в списке доступа */
+const DEFAULT_ADMIN_EMAIL = 'vladislav4endev@gmail.com'
+
 /**
  * Получает список email админов из переменных окружения
  * Формат: VITE_ADMIN_EMAILS=email1@example.com,email2@example.com
+ * vladislav4endev@gmail.com всегда включён в список.
  * @returns {string[]} Массив нормализованных email адресов
  */
 export const getAdminEmails = () => {
-  const adminEmailsStr = import.meta.env.VITE_ADMIN_EMAILS || 'vladislav4endev@gmail.com'
-  return adminEmailsStr
+  const adminEmailsStr = import.meta.env.VITE_ADMIN_EMAILS || DEFAULT_ADMIN_EMAIL
+  const list = adminEmailsStr
     .split(',')
     .map(email => email.trim().toLowerCase())
     .filter(email => email.length > 0)
+  if (!list.includes(DEFAULT_ADMIN_EMAIL)) {
+    list.push(DEFAULT_ADMIN_EMAIL)
+  }
+  return list
 }
 
 /**

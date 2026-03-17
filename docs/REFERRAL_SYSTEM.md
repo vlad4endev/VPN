@@ -17,6 +17,11 @@
 
 ### Бэкенд
 
+- **GET /api/referral/resolve?code=ABC12345**  
+  - Публичный endpoint (без аутентификации).  
+  - Возвращает `{ inviterId: "uid..." }` или 404.  
+  - Используется при регистрации — до создания пользователя Firestore query даёт permission-denied.
+
 - **POST /api/referral/process**  
   - Header: `Authorization: Bearer <Firebase ID token>` (токен приглашённого).  
   - Body: `{ referredUserId, inviterId }`.  

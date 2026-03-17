@@ -1578,12 +1578,12 @@ const UserCard = ({
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
-                {canAccessAdmin(editingUser.role) && (
+                {canAccessAdmin(editingUser.role, editingUser) && (
                   <p className="text-blue-400 text-xs mt-1">
                     Доступ к админ-панели и финансам
                   </p>
                 )}
-                {(editingUser.role === 'accountant' || editingUser.role === 'бухгалтер') && !canAccessAdmin(editingUser.role) && (
+                {(editingUser.role === 'accountant' || editingUser.role === 'бухгалтер') && !canAccessAdmin(editingUser.role, editingUser) && (
                   <p className="text-emerald-400 text-xs mt-1">
                     Доступ только к разделу «Финансы»
                   </p>

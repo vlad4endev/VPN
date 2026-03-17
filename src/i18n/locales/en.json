@@ -127,6 +127,8 @@
     "emailPlaceholder": "optional, sign in with login",
     "name": "Name",
     "namePlaceholder": "Your name",
+    "referralCode": "Referral code",
+    "referralCodePlaceholder": "if you have one — enter friend's code",
     "password": "Password",
     "forgotPassword": "Forgot password?",
     "backToLogin": "Back to sign-in",
@@ -388,7 +390,9 @@
     "linkLabel": "Link",
     "referralLinkAria": "Referral link",
     "copyLinkAria": "Copy link",
-    "copyCodeAria": "Copy code"
+    "copyCodeAria": "Copy code",
+    "shareLinkAria": "Share link",
+    "referralShareText": "Try this VPN!"
   },
   "keyModal": {
     "title": "Connect",

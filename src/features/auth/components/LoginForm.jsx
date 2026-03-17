@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { getReferralCodePending } from '../../referral/services/referralService.js'
 import { ChevronDown, ChevronUp, Send } from 'lucide-react'
 import Footer from '../../../shared/components/Footer.jsx'
 import TelegramLoginWidget from './TelegramLoginWidget.jsx'
@@ -17,6 +18,8 @@ const AUTH_FALLBACKS = {
   'auth.emailPlaceholder': 'можно не указывать, вход по логину',
   'auth.name': 'Имя',
   'auth.namePlaceholder': 'Ваше имя',
+  'auth.referralCode': 'Реферальный код',
+  'auth.referralCodePlaceholder': 'если есть — введите код друга',
   'auth.password': 'Пароль',
   'auth.submitLogin': 'Войти',
   'auth.submitRegister': 'Зарегистрироваться',
@@ -67,11 +70,18 @@ const LoginForm = ({
   googleSignInLoading = false,
   telegramSignInLoading = false,
   isTelegramApp = false,
+  /** Реферальный код из URL/storage — показывается в поле, можно отредактировать */
+  referralCodePending = '',
 }) => {
   const { t } = useTranslation()
   const isMobileView = typeof window !== 'undefined' && window.innerWidth < 768
   const forceFallbackLabels = isTelegramApp || isMobileView
   const [consentChecked, setConsentChecked] = useState(false)
+  const [referralInput, setReferralInput] = useState(() => referralCodePending || getReferralCodePending(false) || '')
+  useEffect(() => {
+    const fromUrl = referralCodePending || getReferralCodePending(false)
+    if (fromUrl) setReferralInput(fromUrl)
+  }, [referralCodePending])
   const [consentError, setConsentError] = useState('')
   const [consentExpanded, setConsentExpanded] = useState(false)
   const [showPrivacyModal, setShowPrivacyModal] = useState(false)
@@ -195,6 +205,19 @@ const LoginForm = ({
                 placeholder={labelT(t, 'auth.namePlaceholder', forceFallbackLabels)}
                 required
               />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="register-referral" className="text-xs font-black text-slate-500 ml-1 sm:ml-2 uppercase tracking-widest">{labelT(t, 'auth.referralCode', forceFallbackLabels)}</label>
+                <input
+                  id="register-referral"
+                  type="text"
+                  name="referralCode"
+                  autoComplete="off"
+                  value={referralInput}
+                  onChange={(e) => setReferralInput(e.target.value.trim().toUpperCase())}
+                  className="w-full min-h-[44px] bg-slate-950/50 border border-slate-800 p-4 sm:p-5 rounded-2xl sm:rounded-3xl outline-none focus:ring-2 focus:ring-blue-500/50 text-white transition-all text-base touch-manipulation font-mono uppercase"
+                  placeholder={labelT(t, 'auth.referralCodePlaceholder', forceFallbackLabels)}
+                />
               </div>
             </>
           )}

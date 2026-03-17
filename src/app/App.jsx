@@ -50,7 +50,7 @@ import { queryClient } from '../lib/react-query/config.js'
 import ConfigErrorScreen from '../shared/components/ConfigErrorScreen.jsx'
 import { stripUndefinedForFirestore } from '../shared/utils/firestoreSafe.js'
 import { reviewsService } from '../features/reviews/services/reviewsService.js'
-import { resolveReferralCode, processReferralBonus, saveReferralCodePending, getReferralCodePending, getOrCreateReferralCode } from '../features/referral/services/referralService.js'
+import { resolveReferralCodeViaApi, processReferralBonus, saveReferralCodePending, getReferralCodePending, getOrCreateReferralCode } from '../features/referral/services/referralService.js'
 import { app, auth, db, getDb, firebaseInitError, envValidation } from '../lib/firebase/config.js'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
@@ -548,13 +548,23 @@ export default function VPNServiceApp() {
 
 // TMA: таймаут ожидания initData (7 с) обрабатывается в эффекте авто-входа; при таймауте показывается экран «Откройте из бота»
 
-  // Читаем ?ref= из URL при загрузке и сохраняем для реферальной системы
+  // Читаем ref из URL (?ref=, &ref=, #ref=) при загрузке и сохраняем для реферальной системы
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    const refCode = params.get('ref')
-    if (refCode && refCode.trim()) {
-      const code = refCode.trim()
+    let refCode = new URLSearchParams(window.location.search).get('ref')
+    if (!refCode && window.location.hash) {
+      try {
+        const hashPart = window.location.hash.replace(/^#/, '')
+        const queryPart = hashPart.includes('?') ? hashPart.split('?')[1] : hashPart
+        refCode = new URLSearchParams(queryPart || '').get('ref') || (hashPart.match(/ref=([^&]+)/i)?.[1] ?? null)
+      } catch (_) {}
+    }
+    if (!refCode && window.location.href) {
+      const m = window.location.href.match(/[?&#]ref=([^&#]+)/i)
+      if (m) refCode = decodeURIComponent(m[1])
+    }
+    if (refCode && String(refCode).trim()) {
+      const code = String(refCode).trim()
       setReferralCodePending(code)
       saveReferralCodePending(code)
     }
@@ -1154,10 +1164,11 @@ export default function VPNServiceApp() {
       logger.warn('Auth', 'Проверка логина/email недоступна', err)
     }
 
-    const refCode = referralCodePending || getReferralCodePending(false)
+    const refFromForm = (formData.get('referralCode') || e.target.querySelector('input[name="referralCode"]')?.value || '').trim()
+    const refCode = referralCodePending || getReferralCodePending(false) || refFromForm || null
     let inviterId = null
-    if (refCode && refCode.trim()) {
-      inviterId = await resolveReferralCode(db, refCode.trim())
+    if (refCode && String(refCode).trim()) {
+      inviterId = await resolveReferralCodeViaApi(String(refCode).trim())
       if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке', { inviterId })
     }
 
@@ -1271,7 +1282,7 @@ export default function VPNServiceApp() {
       const refCode = referralCodePending || getReferralCodePending(false)
       let inviterId = null
       if (refCode?.trim()) {
-        inviterId = await resolveReferralCode(db, refCode.trim())
+        inviterId = await resolveReferralCodeViaApi(refCode.trim())
         if (inviterId) logger.info('Auth', 'Регистрация по реферальной ссылке (Google)', { inviterId })
       }
       const generatedUUID = ThreeXUI.generateUUID()
@@ -2313,7 +2324,7 @@ export default function VPNServiceApp() {
   const adminPanelLoadedRef = useRef(false)
   const financesLoadedRef = useRef(false)
   useEffect(() => {
-    if (view === 'admin' && canAccessAdmin(currentUser?.role)) {
+    if (view === 'admin' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
         loadUsers()
@@ -2322,7 +2333,7 @@ export default function VPNServiceApp() {
         adminPanelLoadedRef.current = true
       }
       financesLoadedRef.current = false
-    } else if (view === 'analytics' && canAccessAdmin(currentUser?.role)) {
+    } else if (view === 'analytics' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка данных для раздела Аналитика (AI-воронка)', { adminId: currentUser.id })
         loadUsers()
@@ -3590,9 +3601,12 @@ export default function VPNServiceApp() {
 
   // Страницы результата оплаты (успех / неудача) по пути /payment/success и /payment/fail
   const path = (typeof window !== 'undefined' && (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')) || ''
-  const goToDashboard = () => {
+  const goToDashboard = (orderId) => {
     setView('dashboard')
-    if (typeof window !== 'undefined') window.history.replaceState(null, '', '/')
+    if (typeof window !== 'undefined') {
+      const url = orderId ? `/?orderId=${encodeURIComponent(orderId)}` : '/'
+      window.history.replaceState(null, '', url)
+    }
   }
   if (path === '/payment/success') {
     return <PaymentResultPage success onGoToDashboard={goToDashboard} />
@@ -3747,6 +3761,7 @@ export default function VPNServiceApp() {
           loginData={loginData}
           error={error}
           success={success}
+          referralCodePending={referralCodePending || getReferralCodePending(false) || ''}
           onEmailChange={handleEmailChange}
           onLoginChange={handleLoginChange}
           onPasswordChange={handlePasswordChange}

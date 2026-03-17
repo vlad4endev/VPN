@@ -206,7 +206,7 @@ export default function VPNServiceApp() {
   const adminPanelLoadedRef = useRef(false)
   const financesLoadedRef = useRef(false)
   useEffect(() => {
-    if (view === 'admin' && canAccessAdmin(currentUser?.role)) {
+    if (view === 'admin' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
         adminHandlers.loadUsers()
@@ -1648,7 +1648,7 @@ export default function VPNServiceApp() {
 
   // Если пользователь в админ-панели (доступ только у роли admin)
   if (view === 'admin') {
-    if (!currentUser || !canAccessAdmin(currentUser.role)) {
+    if (!currentUser || !canAccessAdmin(currentUser.role, currentUser)) {
       logger.warn('Auth', 'Попытка доступа к админ-панели без прав администратора', { 
         userId: currentUser?.id, 
         role: currentUser?.role 

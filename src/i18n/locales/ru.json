@@ -127,6 +127,8 @@
     "emailPlaceholder": "можно не указывать, вход по логину",
     "name": "Имя",
     "namePlaceholder": "Ваше имя",
+    "referralCode": "Реферальный код",
+    "referralCodePlaceholder": "если есть — введите код друга",
     "password": "Пароль",
     "forgotPassword": "Забыли пароль?",
     "backToLogin": "Назад к входу",
@@ -396,7 +398,9 @@
     "linkLabel": "Ссылка",
     "referralLinkAria": "Реферальная ссылка",
     "copyLinkAria": "Копировать ссылку",
-    "copyCodeAria": "Копировать код"
+    "copyCodeAria": "Копировать код",
+    "shareLinkAria": "Поделиться ссылкой",
+    "referralShareText": "Приглашаю попробовать VPN!"
   },
   "keyModal": {
     "title": "Подключайся",

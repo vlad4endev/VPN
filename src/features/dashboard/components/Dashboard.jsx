@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw, ArrowLeftRight, Lock } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw, ArrowLeftRight, Lock, Share2 } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
 import Footer from '../../../shared/components/Footer.jsx'
 import KeyModal from './KeyModal.jsx'
@@ -337,35 +337,25 @@ const Dashboard = ({
                 logger.error('Dashboard', 'Ошибка применения добавления устройств', { orderId: paymentOrderId }, addDevErr)
               }
             }
+            // Platega: бэкенд уже активировал подписку в syncPaymentStatusFromPlatega (Firestore + 3x-ui).
+            // Не вызываем onHandleCreateSubscription — это приведёт к дублированию. Только обновляем UI.
             try {
-              await onHandleCreateSubscriptionRef.current(
-                tariff,
-                payment.devices || 1,
-                null,
-                payment.periodMonths || 1,
-                false,
-                'paid',
-                payment.discount || 0
-              )
-              try {
-                const notificationInstance = notificationService.getInstance()
-                if (notificationInstance.hasPermission()) {
-                  await notificationInstance.notifyPaymentSuccess(
-                    payment.tariffName || tariff.name || t('dashboard.subscriptionFallback'),
-                    payment.amount || 0
-                  )
-                }
-              } catch (_) { }
-              setShowPaymentProcessing(false)
-              setPaymentOrderId(null)
-              setPaymentWindowRef(null)
-              setShowSuccessModal(false)
-              setSubscriptionSuccess(null)
-              setTimeout(() => window.location.reload(), 1500)
-            } catch (err) {
-              logger.error('Dashboard', 'Ошибка создания подписки после оплаты', { orderId: paymentOrderId }, err)
-              setTimeout(() => window.location.reload(), 1000)
-            }
+              const notificationInstance = notificationService.getInstance()
+              if (notificationInstance?.hasPermission?.()) {
+                await notificationInstance.notifyPaymentSuccess(
+                  payment.tariffName || tariff.name || t('dashboard.subscriptionFallback'),
+                  payment.amount || 0
+                ).catch(() => {})
+              }
+            } catch (_) { }
+            subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
+            setShowPaymentProcessing(false)
+            setPaymentOrderId(null)
+            setPaymentWindowRef(null)
+            setShowSuccessModal(false)
+            setSubscriptionSuccess(null)
+            await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
+            setTimeout(() => window.location.reload(), 1500)
             return true
           }
           if (statusResult.success && ['cancelled', 'failed', 'chargebacked'].includes(statusResult.status)) {
@@ -508,31 +498,13 @@ const Dashboard = ({
               const payment = statusResult?.success && statusResult?.status === 'completed' ? statusResult.payment : null
 
               if (payment && (payment.status === 'completed' || payment.status === 'paid')) {
-                logger.info('Dashboard', 'Платеж подтверждён (Platega, после закрытия окна), создаем подписку', {
+                logger.info('Dashboard', 'Платеж подтверждён (Platega, после закрытия окна)', {
                   orderId: paymentOrderId,
                   status: payment.status
                 })
 
-                // Находим тариф (используем refs для стабильности)
-                // Тариф только из платежа или subscriptionSuccess (выбранный при оплате)
-                const tariffsList = tariffsRef.current || []
                 const subscriptionData = subscriptionSuccessRef.current || {}
                 const currentUserData = currentUserRef.current
-                let tariff = payment.tariffId ? tariffsList.find(t => t.id === payment.tariffId) : null
-                if (!tariff && (payment.tariffName || subscriptionData.tariffName)) {
-                  const name = (payment.tariffName || subscriptionData.tariffName || '').trim()
-                  tariff = name ? tariffsList.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) : null
-                }
-                if (!tariff && subscriptionData.tariffId) {
-                  tariff = tariffsList.find(t => t.id === subscriptionData.tariffId)
-                }
-                if (!tariff && (payment.tariffId || payment.tariffName)) {
-                  logger.warn('Dashboard', 'Тариф из платежа не найден в списке тарифов (окно закрыто). Нажмите «Проверить статус» в истории платежей.', {
-                    orderId: paymentOrderId,
-                    paymentTariffId: payment.tariffId,
-                    paymentTariffName: payment.tariffName
-                  })
-                }
 
                 if (subscriptionData.operationType === 'add_devices' && subscriptionData.newDevicesCount != null && currentUserData) {
                   try {
@@ -547,41 +519,24 @@ const Dashboard = ({
                   }
                   return
                 }
-                if (tariff && onHandleCreateSubscriptionRef.current) {
-                  if (subscriptionCreatedForOrderIdsRef.current.has(paymentOrderId)) {
-                    logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (окно закрыто)', { orderId: paymentOrderId })
-                    return
-                  }
-                  subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
-                  try {
-                    const isFirstPaymentWebhook = !currentUserData?.uuid || !currentUserData?.tariffId
-                    await onHandleCreateSubscriptionRef.current(
-                      tariff,
-                      payment.devices || 1,
-                      null,
-                      payment.periodMonths || 1,
-                      false,
-                      'paid',
-                      payment.discount || 0
-                    )
-                    logger.info('Dashboard', 'Подписка создана после проверки webhook', {
-                      orderId: paymentOrderId,
-                      isFirstPayment: isFirstPaymentWebhook
-                    })
-                    if (isFirstPaymentWebhook && typeof onSetShowKeyModalRef.current === 'function') {
-                      await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
-                      setShowSuccessModal(false)
-                      setSubscriptionSuccess(null)
-                      onSetShowKeyModalRef.current(true)
-                    } else {
-                      setTimeout(() => { window.location.reload() }, 1000)
-                    }
-                  } catch (err) {
-                    subscriptionCreatedForOrderIdsRef.current.delete(paymentOrderId)
-                    throw err
-                  }
+                // Platega: бэкенд уже активировал подписку в syncPaymentStatusFromPlatega при вызове fetchPaymentStatus.
+                if (subscriptionCreatedForOrderIdsRef.current.has(paymentOrderId)) {
+                  logger.info('Dashboard', 'Пропуск дубликата: подписка уже создана/создаётся для этого заказа (окно закрыто)', { orderId: paymentOrderId })
                   return
                 }
+                subscriptionCreatedForOrderIdsRef.current.add(paymentOrderId)
+                const isFirstPaymentWebhook = !currentUserData?.uuid || !currentUserData?.tariffId
+                logger.info('Dashboard', 'Платёж подтверждён (Platega, после закрытия окна), подписка активирована на бэкенде', { orderId: paymentOrderId })
+                if (isFirstPaymentWebhook && typeof onSetShowKeyModalRef.current === 'function') {
+                  await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
+                  setShowSuccessModal(false)
+                  setSubscriptionSuccess(null)
+                  onSetShowKeyModalRef.current(true)
+                } else {
+                  await onRefreshUserAfterPaymentRef.current?.().catch((err) => console.warn('Dashboard:', err?.message))
+                  setTimeout(() => { window.location.reload() }, 1000)
+                }
+                return
               } else {
                 logger.info('Dashboard', 'Платеж еще не обработан, продолжаем polling', {
                   orderId: paymentOrderId,
@@ -1178,24 +1133,16 @@ const Dashboard = ({
             return
           }
           subscriptionCreatedForOrderIdsRef.current.add(orderId)
-          const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
-          await onHandleCreateSubscription(
-            tariff,
-            payment.devices || 1,
-            null, // natrockPort
-            payment.periodMonths || 1,
-            false, // testPeriod
-            'paid', // paymentMode: оплата уже проверена, создаём подписку без нового платежа
-            payment.discount || 0
-          )
-          logger.info('Dashboard', 'Подписка создана после ручной проверки оплаты')
-          await dashboardService.updatePaymentStatus(orderId, 'completed').catch((err) => console.warn('Dashboard:', err?.message))
+          // Platega: бэкенд уже активировал подписку в syncPaymentStatusFromPlatega при вызове fetchPaymentStatus.
+          // Не вызываем onHandleCreateSubscription — это приведёт к дублированию. Только обновляем UI.
+          logger.info('Dashboard', 'Платёж подтверждён (Platega), подписка активирована на бэкенде', { orderId })
           const cleanPath = (window.location.pathname || '/dashboard').split('?')[0] || '/dashboard'
           const cleanUrl = window.location.origin + cleanPath
           if (typeof window.history?.replaceState === 'function') {
             window.history.replaceState({}, '', cleanUrl)
           }
           await onRefreshUserAfterPayment?.().catch((err) => console.warn('Dashboard:', err?.message))
+          const isFirstPaymentManual = !currentUser?.uuid || !currentUser?.tariffId
           if (isFirstPaymentManual && typeof onSetShowKeyModal === 'function') {
             setShowSuccessModal(false)
             setSubscriptionSuccess(null)
@@ -1631,10 +1578,32 @@ const Dashboard = ({
                       <input
                         type="text"
                         readOnly
-                        value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : '…'}
+                        value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : t('common.loading')}
                         className="flex-1 min-h-[44px] px-3 py-2.5 bg-transparent text-slate-200 text-sm font-mono border-0 outline-none"
                         aria-label={t('dashboard.referralLinkAria')}
                       />
+                      {typeof navigator !== 'undefined' && navigator.share && currentUser.referralCode && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const url = `${window.location.origin + (window.location.pathname || '')}?ref=${currentUser.referralCode}`
+                            try {
+                              await navigator.share({
+                                title: t('dashboard.inviteFriend'),
+                                text: t('dashboard.referralShareText', { defaultValue: 'Приглашаю попробовать VPN!' }),
+                                url,
+                              })
+                              onCopy?.(url)
+                            } catch (err) {
+                              if (err?.name !== 'AbortError') onCopy?.(url)
+                            }
+                          }}
+                          className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center touch-manipulation"
+                          aria-label={t('dashboard.shareLinkAria', { defaultValue: 'Поделиться' })}
+                        >
+                          <Share2 className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => currentUser.referralCode && onCopy(`${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}`)}
@@ -1649,8 +1618,13 @@ const Dashboard = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-slate-500 text-sm">{t('dashboard.code')}</span>
                     <div className="inline-flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50">
-                      <code className="px-3 py-2 text-slate-200 font-mono text-sm font-bold">
-                        {currentUser.referralCode || '…'}
+                      <code className="px-3 py-2 text-slate-200 font-mono text-sm font-bold flex items-center gap-2">
+                        {currentUser.referralCode ? currentUser.referralCode : (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden />
+                            {t('common.loading')}
+                          </>
+                        )}
                       </code>
                       <button
                         type="button"

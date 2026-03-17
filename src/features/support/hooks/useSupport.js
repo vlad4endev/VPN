@@ -23,7 +23,7 @@ export function useSupport(currentUser) {
   const lastNotifiedCountRef = useRef(0)
   const pushSubscribedRef = useRef(false)
 
-  const isAdmin = canAccessAdmin(currentUser?.role)
+  const isAdmin = canAccessAdmin(currentUser?.role, currentUser)
 
   // Подписка на Web Push для уведомлений в фоне (вкладка закрыта). Один раз при открытии поддержки.
   useEffect(() => {

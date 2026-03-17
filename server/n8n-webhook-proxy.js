@@ -1034,6 +1034,31 @@ async function verifyIdToken(req, res) {
 const REFERRAL_BONUS_AMOUNT = Number(process.env.REFERRAL_BONUS_AMOUNT) || 100
 
 /**
+ * Реферальная система: резолв кода в inviterId (без аутентификации — для регистрации).
+ * GET /api/referral/resolve?code=ABC12345
+ */
+app.get('/api/referral/resolve', async (req, res) => {
+  if (!db) {
+    return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  }
+  const code = (req.query.code || '').trim()
+  if (!code || code.length < 6) {
+    return res.status(400).json({ success: false, error: 'Неверный или слишком короткий код' })
+  }
+  try {
+    const usersCol = `artifacts/${APP_ID}/public/data/users_v4`
+    const snap = await db.collection(usersCol).where('referralCode', '==', code).limit(1).get()
+    if (snap.empty) {
+      return res.status(404).json({ success: false, error: 'Код не найден' })
+    }
+    return res.json({ inviterId: snap.docs[0].id })
+  } catch (err) {
+    console.error('GET /api/referral/resolve:', err)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка сервера' })
+  }
+})
+
+/**
  * Реферальная система: начисление бонуса пригласителю после регистрации приглашённого (один раз на одного).
  * POST /api/referral/process
  * Body: { referredUserId: string, inviterId: string }

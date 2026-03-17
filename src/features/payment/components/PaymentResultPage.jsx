@@ -58,9 +58,9 @@ export default function PaymentResultPage({ success, onGoToDashboard }) {
 
   const handleGoToDashboard = () => {
     if (onGoToDashboard) {
-      onGoToDashboard()
+      onGoToDashboard(orderId)
     } else {
-      window.location.href = '/'
+      window.location.href = orderId ? `/?orderId=${encodeURIComponent(orderId)}` : '/'
     }
   }
 
