@@ -6019,9 +6019,7 @@ app.get('/api/payment/status/:orderId', async (req, res) => {
       // Для платежей Platega запрашиваем статус в API и при необходимости синхронизируем Firestore и активируем подписку
       const transactionId = paymentData.transactionId || paymentData.transaction_id
       if (transactionId && (paymentData.paymentProvider === 'platega' || !paymentData.paymentProvider)) {
-        const paymentSettings = await loadPaymentSettings()
-        const merchantId = process.env.PLATEGA_MERCHANT_ID || paymentSettings.plategaMerchantId || null
-        const secretKey = process.env.PLATEGA_SECRET_KEY || paymentSettings.plategaSecretKey || null
+        const { merchantId, secretKey } = await getPlategaCredentials()
         if (merchantId && secretKey) {
           console.log('📤 Отправка проверки статуса платежа в Platega', { orderId, transactionId })
           const syncResult = await syncPaymentStatusFromPlatega(paymentDocRef, paymentData, merchantId, secretKey)

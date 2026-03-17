@@ -4,7 +4,26 @@
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
-    "allowNavigation": ["https://skypath.fun", "https://*.skypath.fun", "https://*.google.com", "https://*.firebaseapp.com", "https://*.telegram.org"]
+    "allowNavigation": [
+      "https://skypath.fun",
+      "https://*.skypath.fun",
+      "https://*.google.com",
+      "https://*.googleapis.com",
+      "https://*.firebaseapp.com",
+      "https://*.firebaseio.com",
+      "https://*.firebasestorage.googleapis.com",
+      "https://*.telegram.org",
+      "https://*.t.me",
+      "https://mc.yandex.ru",
+      "https://*.yandex.ru",
+      "https://*.yandex.net",
+      "https://*.oauth.yandex.ru",
+      "capacitor://localhost",
+      "http://localhost:*",
+      "http://10.0.2.2:*",
+      "http://127.0.0.1:*",
+      "https://localhost:*"
+    ]
   },
   "plugins": {
     "SplashScreen": {
@@ -19,7 +38,8 @@
     }
   },
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": true,
+    "backgroundColor": "#020617"
   },
   "ios": {
     "contentInset": "automatic"

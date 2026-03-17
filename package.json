@@ -19,6 +19,8 @@
     "cap:android": "npx cap open android",
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
+    "build:apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "build:apk:release": "npm run build && npx cap sync android && cd android && ./gradlew assembleRelease",
     "pwa:icons": "node scripts/generate-pwa-icons.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
