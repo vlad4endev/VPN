@@ -108,11 +108,11 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       setServers(updatedServers)
       
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -159,11 +159,11 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       setServers(updatedServers)
       
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -199,31 +199,13 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     const currentServer = servers.find(s => s.id === server.id) || server
     
     const protocol = currentServer.protocol || (currentServer.serverPort === 443 || currentServer.serverPort === 40919 ? 'https' : 'http')
-    const normalizedPath = currentServer.randompath 
-      ? `/${currentServer.randompath.replace(/^\/+|\/+$/g, '')}` 
-      : ''
-    const baseURL = `${protocol}://${currentServer.serverIP}:${currentServer.serverPort}${normalizedPath}`.replace(/\/+$/, '')
-    const loginURL = `${baseURL}/login`
 
     try {
-      const username = (currentServer.xuiUsername || '').trim().replace(/^["']|["']$/g, '')
-      const password = currentServer.xuiPassword || ''
-      
-      if (!username || !password) {
-        const missingFields = []
-        if (!username) missingFields.push('Username')
-        if (!password) missingFields.push('Password')
-        
-        throw new Error(`Отсутствуют обязательные поля для авторизации: ${missingFields.join(', ')}`)
-      }
-      
       const requestPayload = {
         serverIP: server.serverIP,
         serverPort: server.serverPort,
         protocol: protocol,
         randompath: server.randompath || '',
-        username: username,
-        password: password,
       }
       
       const response = await axios.post('/api/test-session', requestPayload, {

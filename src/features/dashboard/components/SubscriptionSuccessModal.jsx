@@ -485,17 +485,26 @@ const SubscriptionSuccessModal = ({
             </div>
           )}
 
-          {/* Ссылка на подписку - одна или две с подписью Super/MULTI (объединённый тариф) */}
+          {/* Ссылка на подписку - Super/MULTI split только для Megamix (объединённый тариф Super+Multi) */}
           {!requiresPayment && subscriptionLink && (
             <div className="space-y-2">
             <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium">
-              {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2
-                ? (isMobileDevice ? 'Ссылка для телефона (Super)' : 'Ссылка для десктопа и ТВ (MULTI)') + ' — ниже обе:'
-                : subscriptionLinksList && subscriptionLinksList.length > 1
-                  ? 'Ссылки на подписку (по одной на каждый сервер):'
-                  : 'Ваша ссылка на подписку (скопируйте ссылку):'}
+              {(() => {
+                const hasSuper = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('super'))
+                const hasMulti = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('multi'))
+                const isMegamix = hasSuper && hasMulti
+                return isMegamix
+                  ? (isMobileDevice ? 'Ссылка для телефона (Super)' : 'Ссылка для десктопа и ТВ (MULTI)') + ' — ниже обе:'
+                  : subscriptionLinksList && subscriptionLinksList.length > 1
+                    ? 'Ссылки на подписку (по одной на каждый сервер):'
+                    : 'Ваша ссылка на подписку (скопируйте ссылку):'
+              })()}
             </label>
-            {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2 ? (
+            {(() => {
+              const hasSuper = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('super'))
+              const hasMulti = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('multi'))
+              const isMegamix = hasSuper && hasMulti
+              return isMegamix ? (
               <div className="space-y-3">
                 {subscriptionLinksWithPlan.map((item, idx) => {
                   const label = (item.plan || '').toLowerCase().includes('super') ? 'Super (телефон)' : (item.plan || '').toLowerCase().includes('multi') ? 'MULTI (десктоп, ТВ)' : `Сервер ${idx + 1}`
@@ -565,7 +574,8 @@ const SubscriptionSuccessModal = ({
                 )}
               </button>
             </div>
-            )}
+            )
+          })()}
           </div>
           )}
 

@@ -412,6 +412,28 @@
     "multipleLinksHint": "Subscription links for each server:",
     "serverLink": "Server {{n}}"
   },
+  "aiTariff": {
+    "title": "AI tariff finder",
+    "recommendation": "Recommendation",
+    "forYou": "Best fit for you",
+    "generatingExplanation": "AI is preparing an explanation...",
+    "recommendationHint": "Plan selected based on your answers. Click \"Select\" to subscribe.",
+    "selectTariff": "Select plan",
+    "startOver": "Start over",
+    "q1": "How many devices will you connect?",
+    "devices1": "Just one (phone or tablet)",
+    "devices2_3": "2–3 devices",
+    "devices4_5": "4–5 devices",
+    "devices5plus": "More than 5 devices",
+    "q2": "Where will you use the VPN?",
+    "usagePhone": "Phone/tablet only",
+    "usageHome": "At home (TV, PC, router)",
+    "usageBoth": "Both phone and home",
+    "q3": "What matters most to you?",
+    "priorityPrice": "Lowest price",
+    "prioritySupport": "Fast support",
+    "priorityDevices": "Maximum devices"
+  },
   "tariff": {
     "title": "Choose plan",
     "devicesCount": "Number of devices",

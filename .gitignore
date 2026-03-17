@@ -100,6 +100,11 @@ secrets/
 # 📦 BACKUP & ARCHIVE
 # ========================================
 
+.env.save
+*.gsheet
+*.gdoc
+public/icons/*.csv
+
 *.zip
 *.tar.gz
 Бекап*.zip

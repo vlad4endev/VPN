@@ -89,10 +89,10 @@ class SecretManager {
       : process.env
 
     this.credentials = {
-      username: env.VITE_XUI_USERNAME || env.XUI_USERNAME,
-      password: env.VITE_XUI_PASSWORD || env.XUI_PASSWORD,
+      username: env.XUI_USERNAME,
+      password: env.XUI_PASSWORD,
       host: env.XUI_HOST,
-      inboundId: env.VITE_XUI_INBOUND_ID || env.XUI_INBOUND_ID
+      inboundId: env.XUI_INBOUND_ID
     }
   }
 
@@ -208,10 +208,10 @@ class SecretManager {
       })
 
       this.credentials = {
-        username: secrets.VITE_XUI_USERNAME || secrets.XUI_USERNAME,
-        password: secrets.VITE_XUI_PASSWORD || secrets.XUI_PASSWORD,
+        username: secrets.XUI_USERNAME,
+        password: secrets.XUI_PASSWORD,
         host: secrets.XUI_HOST,
-        inboundId: secrets.VITE_XUI_INBOUND_ID || secrets.XUI_INBOUND_ID
+        inboundId: secrets.XUI_INBOUND_ID
       }
 
       logger.info('SecretManager', 'Credentials загружены из файла', {

@@ -626,7 +626,7 @@ const AdminPanel = ({
                                 <div className="space-y-1.5 sm:space-y-2 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 break-words">
                                   <p className="break-all"><strong className="text-slate-300">URL:</strong> <code className="font-mono text-xs sm:text-sm break-all">{serverURL}</code></p>
                                   <p><strong className="text-slate-300">Inbound ID:</strong> {server.xuiInboundId || '—'}</p>
-                                  {server.tariffIds && server.tariffIds.length > 0 && (
+                                  {Array.isArray(server.tariffIds) && server.tariffIds.length > 0 && (
                                     <p>
                                       <strong className="text-slate-300">Тарифы:</strong>{' '}
                                       {server.tariffIds.map(id => {

@@ -646,11 +646,11 @@ export default function VPNServiceApp() {
       // Сохраняем серверы в Firestore
       // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -723,11 +723,11 @@ export default function VPNServiceApp() {
       // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
       // Используем текущее состояние settings, если оно есть
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -885,7 +885,6 @@ export default function VPNServiceApp() {
         baseURL, 
         protocol,
         username: `${username.substring(0, Math.min(3, username.length))}***`,
-        usernameFull: username, // ВАЖНО: Логируем полный username для диагностики
         usernameLength: username.length,
         hasPassword: !!password,
         passwordLength: password.length,
@@ -894,21 +893,15 @@ export default function VPNServiceApp() {
         serverName: server.name
       })
 
-      // Авторизация через POST с JSON телом согласно документации 3x-ui
-      // ВАЖНО: Используем прокси для обхода CORS проблем
-      // Формат: -H "Content-Type: application/json" -d '{"username":"","password":""}'
-      // ВАЖНО: Используем username и password из объекта server (поля xuiUsername и xuiPassword)
-      // ВАЖНО: Передаем значения как есть, без дополнительной обработки
+      // Проверка сессии через backend: credentials берутся только из process.env на сервере
       const requestPayload = {
         serverIP: server.serverIP,
         serverPort: server.serverPort,
         protocol: protocol,
         randompath: server.randompath || '',
-        username: username, // Используем полученные значения из server.xuiUsername
-        password: password, // Используем полученные значения из server.xuiPassword
       }
       
-      // Логируем payload для диагностики (БЕЗ пароля и username)
+      // Логируем payload без credentials
       logger.debug('Admin', '📤 Payload запроса на получение данных', {
         serverId: server.id,
         serverName: server.name,
@@ -916,11 +909,6 @@ export default function VPNServiceApp() {
         serverPort: requestPayload.serverPort,
         protocol: requestPayload.protocol,
         randompath: requestPayload.randompath,
-        hasUsername: !!username,
-        usernameLength: username.length,
-        hasPassword: !!password,
-        passwordLength: password.length,
-        // НИКОГДА не логируем пароль и username полностью!
       })
       
       const response = await axios.post('/api/test-session', requestPayload, {
@@ -1418,7 +1406,7 @@ export default function VPNServiceApp() {
       // Если обновляем данные в 3x-ui (expiryTime, totalGB, limitIp)
       const user = users.find(u => u.id === userId)
       if (user && user.uuid && updates.expiresAt !== undefined) {
-        const inboundId = settings?.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID
+        const inboundId = settings?.xuiInboundId || '1'
         if (inboundId) {
           try {
             const expiryTime = updates.expiresAt ? new Date(updates.expiresAt).getTime() : 0

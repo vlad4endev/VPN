@@ -1,14 +1,9 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import https from 'https'
-import http from 'http'
 import path from 'path'
 import fs from 'fs'
 
-export default defineConfig(({ mode }) => {
-  // Загружаем переменные окружения
-  const env = loadEnv(mode, process.cwd(), '')
-  
+export default defineConfig(() => {
   // Проверяем наличие HTTPS сертификатов (опционально)
   const httpsEnabled =
     fs.existsSync('./certs/localhost.crt') &&
@@ -39,31 +34,15 @@ export default defineConfig(({ mode }) => {
       // типа /api/xui/panel/... попадают на бэкенд 3001 и дают 404.
       // Прокси для 3x-ui панели (обновление клиента из админки и т.д.)
       '/api/xui': {
-        target: env.XUI_HOST || 'http://localhost:2053',
+        target: 'http://localhost:3001',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => {
-          let apiPath = path.replace(/^\/api\/xui/, '')
-          if (!apiPath.startsWith('/')) {
-            apiPath = '/' + apiPath
-          }
-          const targetUrl = env.XUI_HOST || 'http://localhost:2053'
-          try {
-            const url = new URL(targetUrl)
-            const panelPath = url.pathname
-            const cleanPanelPath = panelPath.endsWith('/') ? panelPath.slice(0, -1) : panelPath
-            return cleanPanelPath + apiPath
-          } catch {
-            return apiPath
-          }
-        },
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
             console.error('❌ XUI Proxy error:', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            const targetUrl = env.XUI_HOST || 'http://localhost:2053'
-            console.log('🔄 XUI Proxy Request:', req.method, req.url, '→', targetUrl);
+            console.log('🔄 XUI Proxy Request:', req.method, req.url, '→', 'http://localhost:3001' + req.url);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
             console.log('✅ XUI Proxy Response:', proxyRes.statusCode, req.url);
@@ -170,198 +149,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
-      // Плагин для обработки запросов тестирования сессии через прокси
-      {
-        name: 'test-session-proxy',
-        configureServer(server) {
-          server.middlewares.use('/api/test-session', async (req, res, next) => {
-            // Обработка CORS preflight запросов
-            if (req.method === 'OPTIONS') {
-              res.writeHead(200, {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type',
-              })
-              res.end()
-              return
-            }
-            
-            // Только для POST запросов
-            if (req.method !== 'POST') {
-              return next()
-            }
-            
-            try {
-              // Читаем body запроса
-              let body = ''
-              req.on('data', chunk => {
-                body += chunk.toString()
-              })
-              
-              req.on('end', async () => {
-                try {
-                  if (!body) {
-                    res.writeHead(400, { 
-                      'Content-Type': 'application/json',
-                      'Access-Control-Allow-Origin': '*',
-                    })
-                    res.end(JSON.stringify({ success: false, msg: 'Тело запроса пусто' }))
-                    return
-                  }
-                  
-                  const requestData = JSON.parse(body)
-                  const { serverIP, serverPort, protocol, randompath, username, password } = requestData
-                  
-                  if (!serverIP || !serverPort) {
-                    res.writeHead(400, { 
-                      'Content-Type': 'application/json',
-                      'Access-Control-Allow-Origin': '*',
-                    })
-                    res.end(JSON.stringify({ success: false, msg: 'serverIP и serverPort обязательны' }))
-                    return
-                  }
-                  
-                  // Формируем целевой URL
-                  const normalizedPath = randompath 
-                    ? `/${randompath.replace(/^\/+|\/+$/g, '')}`
-                    : ''
-                  const baseUrl = `${protocol || 'http'}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
-                  const fullUrl = `${baseUrl}/login`
-                  
-                  console.log('🔄 Test Session Proxy:', req.method, '→', fullUrl)
-                  
-                  // Очищаем username от кавычек перед отправкой
-                  const cleanUsername = (username || '').trim().replace(/^["']|["']$/g, '')
-                  
-                  const requestBody = JSON.stringify({
-                    username: cleanUsername,
-                    password: password || '',
-                  })
-                  
-                  console.log('📤 Sending request to:', fullUrl)
-                  
-                  // Используем встроенные модули http/https для более надежной работы
-                  const response = await new Promise((resolve, reject) => {
-                    const urlObj = new URL(fullUrl)
-                    const requestModule = protocol === 'https' ? https : http
-                    
-                    const options = {
-                      hostname: urlObj.hostname,
-                      port: urlObj.port,
-                      path: urlObj.pathname + urlObj.search,
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'Content-Length': Buffer.byteLength(requestBody),
-                      },
-                    }
-                    
-                    // Для HTTPS с самоподписанными сертификатами отключаем проверку
-                    if (protocol === 'https') {
-                      options.rejectUnauthorized = false
-                    }
-                    
-                    const req = requestModule.request(options, (res) => {
-                      let responseData = ''
-                      
-                      res.on('data', (chunk) => {
-                        responseData += chunk.toString()
-                      })
-                      
-                      res.on('end', () => {
-                        resolve({
-                          status: res.statusCode,
-                          statusText: res.statusMessage,
-                          ok: res.statusCode >= 200 && res.statusCode < 300,
-                          headers: res.headers,
-                          text: async () => responseData,
-                          json: async () => {
-                            try {
-                              return JSON.parse(responseData)
-                            } catch (e) {
-                              throw new Error(`Failed to parse JSON: ${e.message}`)
-                            }
-                          },
-                        })
-                      })
-                    })
-                    
-                    req.on('error', (error) => {
-                      reject(error)
-                    })
-                    
-                    req.write(requestBody)
-                    req.end()
-                  })
-                  
-                  // Получаем текст ответа
-                  const responseText = await response.text()
-                  
-                  console.log('📥 Response status:', response.status)
-                  
-                  // Парсим ответ
-                  let responseData
-                  try {
-                    responseData = responseText ? JSON.parse(responseText) : {}
-                  } catch (parseError) {
-                    console.error('❌ Parse error:', parseError)
-                    res.writeHead(500, { 
-                      'Content-Type': 'application/json',
-                      'Access-Control-Allow-Origin': '*',
-                    })
-                    res.end(JSON.stringify({ 
-                      success: false, 
-                      msg: `Ошибка парсинга ответа: ${parseError.message}`,
-                    }))
-                    return
-                  }
-                  
-                  // Пробрасываем cookies из ответа 3x-ui
-                  const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie']
-                  const responseHeaders = {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Credentials': 'true',
-                  }
-                  
-                  if (setCookieHeader) {
-                    const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
-                    responseHeaders['Set-Cookie'] = cookieArray
-                    console.log('🍪 Пробрасываем cookies в браузер:', cookieArray.length, 'cookie(s)')
-                  }
-                  
-                  // Передаем ответ клиенту
-                  res.writeHead(response.status, responseHeaders)
-                  res.end(JSON.stringify(responseData))
-                  
-                  console.log('✅ Test Session Proxy Response:', response.status, fullUrl, 'success:', responseData.success)
-                } catch (fetchError) {
-                  console.error('❌ Fetch error:', fetchError)
-                  res.writeHead(500, { 
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                  })
-                  res.end(JSON.stringify({ 
-                    success: false, 
-                    msg: `Ошибка подключения: ${fetchError.message || 'Не удалось подключиться к серверу'}`,
-                  }))
-                  return
-                }
-              })
-            } catch (err) {
-              console.error('❌ Test Session Proxy error:', err)
-              res.writeHead(500, { 
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-              })
-              res.end(JSON.stringify({ success: false, msg: err.message || 'Ошибка прокси' }))
-            }
-          })
-        },
-      },
     ],
     server: serverConfig,
     build: {

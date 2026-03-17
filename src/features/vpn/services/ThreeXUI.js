@@ -535,7 +535,7 @@ class ThreeXUI {
       }
 
       // Проверяем доступность инбаунда
-      const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+      const inboundId = '1'
       if (inboundId) {
         try {
           const inbound = await this.getInbound(inboundId)
@@ -710,7 +710,7 @@ class ThreeXUI {
       }
 
       if (!inbound) {
-        const error = new Error(`Инбаунд с ID ${inboundId} не найден. Проверьте правильность VITE_XUI_INBOUND_ID`)
+        const error = new Error(`Инбаунд с ID ${inboundId} не найден. Проверьте настройки сервера в админ-панели`)
         logger.error('ThreeXUI', 'Инбаунд не найден', { inboundId }, error)
         throw error
       }
@@ -1057,16 +1057,16 @@ class ThreeXUI {
             return
           } catch (loginError) {
             logger.error('ThreeXUI', 'Ошибка авторизации после 404', null, loginError)
-            const xuiHost = import.meta.env.VITE_XUI_HOST || import.meta.env.XUI_HOST || 'не установлен'
+            const xuiHost = 'backend-proxy'
             const xuiUsername = this.username ? 'установлен' : 'не установлен'
             const xuiPassword = this.password ? 'установлен' : 'не установлен'
             throw new Error(
               `Не удалось подключиться к панели 3x-ui (404). ` +
               `Проверьте настройки в .env файле:\n` +
               `- XUI_HOST (для vite.config.js): ${xuiHost}\n` +
-              `- VITE_XUI_USERNAME: ${xuiUsername}\n` +
-              `- VITE_XUI_PASSWORD: ${xuiPassword}\n` +
-              `- VITE_XUI_INBOUND_ID: ${import.meta.env.VITE_XUI_INBOUND_ID || 'не установлен'}\n\n` +
+              `- XUI_USERNAME: ${xuiUsername}\n` +
+              `- XUI_PASSWORD: ${xuiPassword}\n` +
+              `- XUI_INBOUND_ID: задаётся на backend\n\n` +
               `Ошибка: ${loginError.message || checkError.message}\n\n` +
               `Убедитесь, что:\n` +
               `1. XUI_HOST в .env указывает на панель 3x-ui (например: http://localhost:2053 или http://your-server:2053/path)\n` +

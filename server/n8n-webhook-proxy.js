@@ -76,7 +76,7 @@ async function initFirebaseAdmin() {
 
     // Приоритет: файл (PATH или server/firebase-service-account.json) → KEY → CLIENT_EMAIL+PRIVATE_KEY
     let credential = null
-    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || ''
+    let projectId = process.env.FIREBASE_PROJECT_ID || ''
     let serviceAccount = null
 
     // Вариант 0: JSON-файл (PATH из env или файл по умолчанию server/firebase-service-account.json)
@@ -142,7 +142,7 @@ async function initFirebaseAdmin() {
           clientEmail,
           privateKey: normalizedPrivateKey,
         })
-        if (!projectId) projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'skypathvpn'
+        if (!projectId) projectId = process.env.FIREBASE_PROJECT_ID || 'skypathvpn'
         console.log('📝 Используется FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY')
       }
     }
@@ -928,7 +928,7 @@ async function ensureAdmin(req, res) {
     APP_ID,
     'skyputh',
     'skypathvpn',
-    process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
+    process.env.FIREBASE_PROJECT_ID,
   ].filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i)
 
   const isAdminRole = (value) => {
@@ -2407,6 +2407,45 @@ app.post('/api/ai/chat', express.json(), async (req, res) => {
   return res.status(status).json({ success: false, error: result.error, code: result.code })
 })
 
+/**
+ * POST /api/ai/tariff-suggest — подбор тарифа с ИИ (публичный).
+ * Body: { answers: object, tariffId?: string, tariffName?: string }
+ * Ответ: { success: true, explanation: string } или { success: false }
+ * Генерирует краткое объяснение, почему рекомендован тариф. Без API-ключа возвращает success: true, explanation: null.
+ */
+app.post('/api/ai/tariff-suggest', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {}
+    const answers = body.answers && typeof body.answers === 'object' ? body.answers : {}
+    const tariffName = (body.tariffName || '').toString().trim() || 'тариф'
+    const config = await getActiveAiConfig()
+    if (!config?.apiKey) {
+      return res.json({ success: true, explanation: null })
+    }
+    const userContext = `Ответы пользователя на вопросы подбора тарифа: ${JSON.stringify(answers)}. Рекомендованный тариф: ${tariffName}.`
+    const systemPrompt = `Ты — консультант VPN-сервиса. Пользователь прошёл короткий опрос для подбора тарифа. Напиши 2–3 предложения на русском: почему ему подойдёт этот тариф, исходя из его ответов. Будь дружелюбен и конкретен. Только текст без заголовков и списков.`
+    const chatConfig = {
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      temperature: 0.5,
+      max_tokens: 200,
+      timeout: 15,
+    }
+    const result = await unifiedChat(
+      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContext }],
+      chatConfig
+    )
+    if (result.ok && result.content) {
+      return res.json({ success: true, explanation: result.content.trim() })
+    }
+    return res.json({ success: true, explanation: null })
+  } catch (err) {
+    console.warn('POST /api/ai/tariff-suggest:', err.message)
+    return res.json({ success: true, explanation: null })
+  }
+})
+
 const SUPPORT_AI_SYSTEM_PROMPT = `Ты — оператор техподдержки Майкл, полноценный оператор в системе. Ты есть в базе пользователей (users_v4), в тикетах отвечаешь от своего имени. У тебя есть доступ к данным из базы (Firestore): подписка, тариф, срок действия, логин, email; и к данным из панели VPN (3x-ui): лимит трафика, использовано/остаток, срок в панели. Используй эти данные, чтобы консультировать пользователя по подписке, ключам, продлению и типовым вопросам.
 Задачи:
 1) Проанализировать вопрос пользователя и, опираясь на данные из базы и из 3x-ui, дать чёткий дружелюбный ответ на русском. Можешь ссылаться на конкретные цифры (остаток трафика, срок действия), если они есть.
@@ -2463,8 +2502,9 @@ app.post('/api/ai/support-suggest', express.json(), async (req, res) => {
       }
     }
 
-    const threadText = messagesList
-      .map((m) => `${m.from === 'support' ? 'Поддержка' : 'Пользователь'}: ${(m.text || '').trim()}`)
+    const threadMessages = messagesList.filter((m) => !m.isTyping)
+    const threadText = threadMessages
+      .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
       .join('\n\n')
     const uFor3x = userSnap.exists ? userSnap.data() : {}
     const context3xUi = await fetchOperatorContext3xUi(userId, uFor3x)
@@ -2745,7 +2785,8 @@ app.post('/api/ai/support-auto-reply', express.json(), async (req, res) => {
           }
         }
 
-        const threadText = messagesList
+        const threadMessages = messagesList.filter((m) => !m.isTyping)
+        const threadText = threadMessages
           .map((m) => `${m.from === 'support' ? (m.userId === AI_SUPPORT_USER_ID ? AI_SUPPORT_DISPLAY_NAME : 'Поддержка') : 'Пользователь'}: ${(m.text || '').trim()}`)
           .join('\n\n')
         const u = userSnap.data() || {}
@@ -7496,7 +7537,7 @@ app.get('/api/system/status', async (req, res) => {
 
     // Проверка доступности 3x-ui (XUI_HOST)
     let xuiStatus = { connected: false, responseTime: null, error: null, configured: false }
-    const xuiHost = process.env.XUI_HOST || process.env.VITE_XUI_HOST
+    const xuiHost = process.env.XUI_HOST
     if (xuiHost) {
       xuiStatus.configured = true
       const xuiStart = Date.now()

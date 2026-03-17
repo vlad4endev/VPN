@@ -769,11 +769,44 @@ export default function VPNServiceApp() {
           seo: data.seo && typeof data.seo === 'object' ? data.seo : {},
         }
         setSettings(merged)
-        const firestoreServers = (merged.servers || data.servers || []).map(server => ({
-          ...server,
-          xuiUsername: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
-          protocol: server.protocol || ((server.serverPort === 443 || server.serverPort === 40919) ? 'https' : 'http'),
-        }))
+        const rawServersCandidate = merged.servers ?? data.servers
+        if (rawServersCandidate !== undefined && !Array.isArray(rawServersCandidate)) {
+          const isObjectLike = rawServersCandidate && typeof rawServersCandidate === 'object'
+          const preview = isObjectLike
+            ? Object.fromEntries(Object.entries(rawServersCandidate).slice(0, 5))
+            : String(rawServersCandidate).slice(0, 200)
+          logger.warn('Firestore', 'Нормализация servers: ожидался массив в публичных настройках', {
+            receivedType: typeof rawServersCandidate,
+            isArray: Array.isArray(rawServersCandidate),
+            keys: isObjectLike ? Object.keys(rawServersCandidate).slice(0, 20) : [],
+            preview,
+            userId: currentUser?.id,
+          })
+        }
+        const rawServers = Array.isArray(rawServersCandidate) ? rawServersCandidate : []
+        const firestoreServers = rawServers.map(server => {
+          const normalizedTariffIds = Array.isArray(server.tariffIds) ? server.tariffIds : []
+          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds)) {
+            const idsIsObjectLike = server.tariffIds && typeof server.tariffIds === 'object'
+            const idsPreview = idsIsObjectLike
+              ? Object.fromEntries(Object.entries(server.tariffIds).slice(0, 5))
+              : String(server.tariffIds).slice(0, 200)
+            logger.warn('Firestore', 'Нормализация server.tariffIds: ожидался массив в публичных настройках', {
+              serverId: server?.id || null,
+              serverName: server?.name || null,
+              receivedType: typeof server.tariffIds,
+              isArray: Array.isArray(server.tariffIds),
+              keys: idsIsObjectLike ? Object.keys(server.tariffIds).slice(0, 20) : [],
+              preview: idsPreview,
+            })
+          }
+          return {
+            ...server,
+            xuiUsername: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+            protocol: server.protocol || ((server.serverPort === 443 || server.serverPort === 40919) ? 'https' : 'http'),
+            tariffIds: normalizedTariffIds,
+          }
+        })
         setServers(firestoreServers)
       }
     } catch (err) {
@@ -816,12 +849,44 @@ export default function VPNServiceApp() {
         setSettings(merged)
         // ВАЖНО: Объединяем серверы из Firestore с текущими локальными серверами
         // Это предотвращает потерю серверов, которые были добавлены/изменены локально, но еще не сохранены
-        const firestoreServers = (merged.servers || data.servers || []).map(server => {
+        const rawServersCandidate = merged.servers ?? data.servers
+        if (rawServersCandidate !== undefined && !Array.isArray(rawServersCandidate)) {
+          const isObjectLike = rawServersCandidate && typeof rawServersCandidate === 'object'
+          const preview = isObjectLike
+            ? Object.fromEntries(Object.entries(rawServersCandidate).slice(0, 5))
+            : String(rawServersCandidate).slice(0, 200)
+          logger.warn('Firestore', 'Нормализация servers: ожидался массив в глобальных настройках', {
+            receivedType: typeof rawServersCandidate,
+            isArray: Array.isArray(rawServersCandidate),
+            keys: isObjectLike ? Object.keys(rawServersCandidate).slice(0, 20) : [],
+            preview,
+            adminId: currentUser?.id,
+          })
+        }
+        const rawServers = Array.isArray(rawServersCandidate) ? rawServersCandidate : []
+        const firestoreServers = rawServers.map(server => {
           // КРИТИЧНО: Очищаем кавычки при загрузке из Firestore
           // Это исправляет проблему, если в Firestore сохранены данные с кавычками
+          const normalizedTariffIds = Array.isArray(server.tariffIds) ? server.tariffIds : []
+          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds)) {
+            const idsIsObjectLike = server.tariffIds && typeof server.tariffIds === 'object'
+            const idsPreview = idsIsObjectLike
+              ? Object.fromEntries(Object.entries(server.tariffIds).slice(0, 5))
+              : String(server.tariffIds).slice(0, 200)
+            logger.warn('Firestore', 'Нормализация server.tariffIds: ожидался массив в глобальных настройках', {
+              serverId: server?.id || null,
+              serverName: server?.name || null,
+              receivedType: typeof server.tariffIds,
+              isArray: Array.isArray(server.tariffIds),
+              keys: idsIsObjectLike ? Object.keys(server.tariffIds).slice(0, 20) : [],
+              preview: idsPreview,
+              adminId: currentUser?.id,
+            })
+          }
           const cleanServer = {
             ...server,
             xuiUsername: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+            tariffIds: normalizedTariffIds,
             // Пароль не трогаем - может содержать спецсимволы, включая кавычки
           }
           
@@ -832,14 +897,15 @@ export default function VPNServiceApp() {
           return cleanServer
         })
         setServers(prevServers => {
+          const safePrevServers = Array.isArray(prevServers) ? prevServers : []
           logger.debug('Firestore', 'Объединение серверов', { 
             firestoreCount: firestoreServers.length,
-            localCount: prevServers?.length || 0,
-            localServerIds: prevServers?.map(s => s.id) || []
+            localCount: safePrevServers.length,
+            localServerIds: safePrevServers.map(s => s.id)
           })
           
           // Если локальных серверов нет - используем из Firestore
-          if (!prevServers || prevServers.length === 0) {
+          if (safePrevServers.length === 0) {
             logger.debug('Firestore', 'Загружены серверы из Firestore (локальных нет)', { count: firestoreServers.length })
             return firestoreServers
           }
@@ -849,7 +915,7 @@ export default function VPNServiceApp() {
           let addedCount = 0
           let updatedCount = 0
           
-          prevServers.forEach(localServer => {
+          safePrevServers.forEach(localServer => {
             const existsInFirestore = firestoreServers.some(fs => fs.id === localServer.id)
             if (!existsInFirestore) {
               // Локальный сервер не сохранен в Firestore - добавляем его
@@ -904,11 +970,11 @@ export default function VPNServiceApp() {
       } else {
         // Создаем настройки по умолчанию (полная структура для админ-форм)
         const defaultSettings = {
-          serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-          serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-          xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-          xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-          xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+          serverIP: '',
+          serverPort: 2053,
+          xuiUsername: '',
+          xuiPassword: '',
+          xuiInboundId: '',
           servers: [],
           appLinks: { android: '', ios: '', macos: '', windows: '' },
           seo: {},
@@ -925,11 +991,11 @@ export default function VPNServiceApp() {
       if (isOffline) {
         logger.warn('Admin', 'Офлайн-режим: используем настройки по умолчанию', null)
         const defaultSettings = {
-          serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-          serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-          xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-          xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-          xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+          serverIP: '',
+          serverPort: 2053,
+          xuiUsername: '',
+          xuiPassword: '',
+          xuiInboundId: '',
           servers: [],
           appLinks: { android: '', ios: '', macos: '', windows: '' },
           seo: {},
@@ -1530,9 +1596,9 @@ export default function VPNServiceApp() {
     }
 
     // Получаем inboundId из переменных окружения
-    const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+    const inboundId = settings?.xuiInboundId || '1'
     if (!inboundId) {
-      setError('Не настроен VITE_XUI_INBOUND_ID в переменных окружения')
+      setError('Не настроен xuiInboundId в настройках сервера')
       return
     }
 
@@ -1823,7 +1889,7 @@ export default function VPNServiceApp() {
       // Удаляем клиента из 3x-ui, если есть UUID
       if (currentUser.uuid) {
         try {
-          const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+          const inboundId = settings?.xuiInboundId || '1'
           if (inboundId) {
             await ThreeXUI.deleteClient(inboundId, currentUser.email)
             logger.info('Dashboard', 'Клиент удален из 3x-ui', { email: currentUser.email })
@@ -2076,7 +2142,7 @@ export default function VPNServiceApp() {
         } else if (err.message.includes('XUI_HOST') || err.message.includes('прокси')) {
           errorMessage = err.message
         } else if (err.message.includes('не найден') || err.message.includes('not found')) {
-          errorMessage = `Ошибка: ${err.message}. Проверьте правильность VITE_XUI_INBOUND_ID.`
+          errorMessage = `Ошибка: ${err.message}. Проверьте xuiInboundId в настройках сервера.`
         } else {
           errorMessage = 'Ошибка: ' + err.message
         }
@@ -2695,11 +2761,11 @@ export default function VPNServiceApp() {
       // Сохраняем серверы в Firestore
       // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -2772,11 +2838,11 @@ export default function VPNServiceApp() {
       // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
       // Используем текущее состояние settings, если оно есть
       const currentSettings = settings || {
-        serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-        serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-        xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-        xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-        xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+        serverIP: '',
+        serverPort: 2053,
+        xuiUsername: '',
+        xuiPassword: '',
+        xuiInboundId: '',
         servers: [],
       }
       
@@ -2936,7 +3002,6 @@ export default function VPNServiceApp() {
         baseURL, 
         protocol,
         username: `${username.substring(0, Math.min(3, username.length))}***`,
-        usernameFull: username, // ВАЖНО: Логируем полный username для диагностики
         usernameLength: username.length,
         hasPassword: !!password,
         passwordLength: password.length,
@@ -2945,28 +3010,19 @@ export default function VPNServiceApp() {
         serverName: server.name
       })
 
-      // Авторизация через POST с JSON телом согласно документации 3x-ui
-      // ВАЖНО: Используем прокси для обхода CORS проблем
-      // Формат: -H "Content-Type: application/json" -d '{"username":"","password":""}'
-      // ВАЖНО: Используем username и password из объекта server (поля xuiUsername и xuiPassword)
-      // ВАЖНО: Передаем значения как есть, без дополнительной обработки
+      // Проверка сессии через backend: credentials берутся только из process.env на сервере
       const requestPayload = {
         serverIP: server.serverIP,
         serverPort: server.serverPort,
         protocol: protocol,
         randompath: server.randompath || '',
-        username: username, // Используем полученные значения из server.xuiUsername
-        password: password, // Используем полученные значения из server.xuiPassword
       }
       
-      // Логируем payload для диагностики (пароль маскируем)
+      // Логируем payload без credentials
       logger.debug('Admin', '📤 Payload запроса на получение данных', {
         serverId: server.id,
         serverName: server.name,
-        ...requestPayload,
-        password: '***', // Маскируем пароль в логах
-        passwordLength: password.length,
-        usernameLength: username.length
+        ...requestPayload
       })
       
       const response = await axios.post('/api/test-session', requestPayload, {
@@ -3028,14 +3084,7 @@ export default function VPNServiceApp() {
         statusText: response.statusText,
         loginURL: loginURL,
         hasCookies: !!setCookieHeader,
-        hasSessionCookie: !!sessionCookie,
-        // ВАЖНО: Логируем credentials, которые были использованы в запросе
-        credentialsUsed: {
-          username: username,
-          usernameLength: username.length,
-          passwordLength: password.length,
-          source: 'server.xuiUsername и server.xuiPassword'
-        }
+        hasSessionCookie: !!sessionCookie
       })
       
       if (data.success === false || data.success === 0) {
@@ -3462,7 +3511,7 @@ export default function VPNServiceApp() {
       // Если обновляем данные в 3x-ui (expiryTime, totalGB, limitIp)
       const user = users.find(u => u.id === userId)
       if (user && user.uuid && updates.expiresAt !== undefined) {
-        const inboundId = settings?.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID
+        const inboundId = settings?.xuiInboundId || '1'
         if (inboundId) {
           try {
             const expiryTime = updates.expiresAt ? new Date(updates.expiresAt).getTime() : 0

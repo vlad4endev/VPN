@@ -148,7 +148,7 @@ export const dashboardService = {
       // Удаляем клиента из 3x-ui, если есть UUID
       if (user.uuid) {
         try {
-          const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
+          const defaultInboundId = '1'
           
           // Получаем данные сервера для определения правильного inboundId
           let serverInboundId = defaultInboundId
@@ -307,7 +307,7 @@ export const dashboardService = {
     let totalGB = 0
     let expiryTime = user.expiresAt || 0
     let limitIp = user.devices || 1 // Количество устройств из профиля или тарифа
-    let inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+    let inboundId = null
     let tariff = null
 
     if (user.tariffId) {
@@ -401,7 +401,7 @@ export const dashboardService = {
     // Если inboundId не установлен в env, пытаемся получить из настроек
     if (!inboundId) {
       // Можно загрузить из settings или использовать дефолтное значение
-      logger.warn('Dashboard', 'VITE_XUI_INBOUND_ID не установлен, используем дефолтное значение', {})
+      logger.warn('Dashboard', 'xuiInboundId не задан, используем дефолтное значение', {})
       inboundId = '1' // Дефолтное значение
     }
 
@@ -967,7 +967,7 @@ export const dashboardService = {
       throw new Error('Недостаточно данных пользователя для применения добавления устройств')
     }
     const clientId = user.uuid
-    const inboundId = import.meta.env?.VITE_XUI_INBOUND_ID || '1'
+    const inboundId = '1'
 
     const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, user.id)
     await updateDoc(userDocRef, {
@@ -1237,9 +1237,9 @@ export const dashboardService = {
       throw new Error(`Недостаточно данных для создания подписки. Отсутствуют: ${missing.join(', ')}`)
     }
 
-    const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+    const inboundId = null
     if (!inboundId) {
-      console.warn('⚠️ dashboardService.createSubscription: VITE_XUI_INBOUND_ID не настроен, будет использоваться значение из сервера')
+      console.warn('⚠️ dashboardService.createSubscription: xuiInboundId не настроен, будет использоваться значение сервера')
     }
 
     console.log('🔄 dashboardService.createSubscription: Получение экземпляра XUIService...')
@@ -1424,7 +1424,7 @@ export const dashboardService = {
             const v = c === 'x' ? r : (r & 0x3) | 0x8
             return v.toString(16)
           })
-          const serverInboundId = server.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID || '1'
+          const serverInboundId = server.xuiInboundId || '1'
           // Формат как у одиночного тарифа, чтобы n8n получал и обрабатывал каждый вызов так же (webhook 1 раз для 1-го клиента, 2-й раз для 2-го)
           const addData = {
             operation: 'add_client',
@@ -2291,7 +2291,7 @@ export const dashboardService = {
     } else if (message.includes('404') || message.includes('Not Found')) {
       return 'Не удалось подключиться к панели VPN. Проверьте настройки XUI_HOST и прокси в vite.config.js'
     } else if (message.includes('не найден') || message.includes('not found')) {
-      return `Ошибка: ${message}. Проверьте правильность VITE_XUI_INBOUND_ID.`
+      return `Ошибка: ${message}. Проверьте правильность xuiInboundId в настройках сервера.`
     } else if (error.response?.status === 404) {
       return 'Панель VPN недоступна (404). Проверьте настройки XUI_HOST и прокси.'
     }
@@ -2657,7 +2657,7 @@ export const dashboardService = {
 
     try {
       const xuiService = XUIService.getInstance()
-      const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
+      const defaultInboundId = '1'
 
       // Получаем данные сервера
       const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
@@ -2907,7 +2907,7 @@ export const dashboardService = {
     }
 
     const xuiService = XUIService.getInstance()
-    const defaultInboundId = import.meta.env.VITE_XUI_INBOUND_ID || '1'
+    const defaultInboundId = '1'
 
     // Загружаем старый тариф
     const oldTariffRef = doc(db, `artifacts/${APP_ID}/public/data/tariffs`, user.tariffId)

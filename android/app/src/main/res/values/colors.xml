@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SKYFLOW theme: slate-950 #020617 -->
+    <color name="colorPrimary">#3b82f6</color>
+    <color name="colorPrimaryDark">#020617</color>
+    <color name="colorAccent">#3b82f6</color>
+    <color name="statusBarBackground">#020617</color>
+</resources>

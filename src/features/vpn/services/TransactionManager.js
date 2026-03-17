@@ -172,7 +172,7 @@ class TransactionManager {
 
     if (transaction.xuiCreated) {
       try {
-        await this.xui.deleteClient(transaction.inboundId || import.meta.env.VITE_XUI_INBOUND_ID, transaction.email)
+        await this.xui.deleteClient(transaction.inboundId || '1', transaction.email)
         logger.info('Transaction', 'Rollback: клиент 3x-ui удален', {
           email: transaction.email
         })

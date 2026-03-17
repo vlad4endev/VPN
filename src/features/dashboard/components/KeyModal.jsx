@@ -259,7 +259,11 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
           )}
           <div className="space-y-2">
             <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400 font-medium">{t('app.subscriptionLinkLabel')}</p>
-            {subscriptionLinksWithPlan && subscriptionLinksWithPlan.length >= 2 ? (
+            {(() => {
+              const hasSuper = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('super'))
+              const hasMulti = subscriptionLinksWithPlan?.some(p => (p.plan || '').toLowerCase().includes('multi'))
+              const isMegamix = hasSuper && hasMulti
+              return isMegamix ? (
               <div className="space-y-3">
                 <p className="text-slate-500 text-xs">{isMobileDevice ? t('keyModal.linkForPhone', 'Ссылка для телефона (Super) — ниже обе') : t('keyModal.linkForDesktop', 'Ссылка для десктопа и ТВ (MULTI) — ниже обе')}</p>
                 {subscriptionLinksWithPlan.map((item, idx) => {
@@ -317,7 +321,8 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
                   <span>{t('app.copyLink')}</span>
                 </button>
               </>
-            )}
+            )
+          })()}
           </div>
           
           {/* Кнопка скачивания приложения для текущей ОС */}

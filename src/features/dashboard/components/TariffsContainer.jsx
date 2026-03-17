@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
+import AITariffHelper from './AITariffHelper.jsx'
 
 const TariffsContainer = ({
     tariffs,
@@ -9,6 +10,7 @@ const TariffsContainer = ({
     handleTariffSelect
 }) => {
     const { t } = useTranslation()
+    const [showAITariffHelper, setShowAITariffHelper] = useState(false)
 
     if (!tariffs || tariffs.length === 0) {
         return (
@@ -20,9 +22,26 @@ const TariffsContainer = ({
 
     return (
         <div>
-            <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-2 sm:mb-3">
-                {t('dashboard.chooseTariff')}
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2 sm:mb-3">
+                <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200">
+                    {t('dashboard.chooseTariff')}
+                </h2>
+                <button
+                    type="button"
+                    onClick={() => setShowAITariffHelper(true)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 font-medium text-sm transition-colors"
+                >
+                    <Sparkles className="w-4 h-4" />
+                    {t('aiTariff.title', 'Подбор тарифа с ИИ')}
+                </button>
+            </div>
+            {showAITariffHelper && (
+                <AITariffHelper
+                    tariffs={tariffs}
+                    onSelectTariff={handleTariffSelect}
+                    onClose={() => setShowAITariffHelper(false)}
+                />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
                 {tariffs.filter(t => t.active !== false).map((tariff) => {
                     const planKey = (tariff.plan || tariff.name || '').toLowerCase()

@@ -18,7 +18,7 @@ export async function initFirebaseAdmin() {
     }
 
     let credential = null
-    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || ''
+    let projectId = process.env.FIREBASE_PROJECT_ID || ''
     let serviceAccount = null
 
     const keyPathEnv = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
@@ -69,7 +69,7 @@ export async function initFirebaseAdmin() {
           clientEmail,
           privateKey: privateKey.replace(/\\n/g, '\n'),
         })
-        if (!projectId) projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'skypathvpn'
+        if (!projectId) projectId = process.env.FIREBASE_PROJECT_ID || 'skypathvpn'
       }
     }
 

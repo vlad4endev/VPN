@@ -23,7 +23,7 @@ import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
-import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
+import { getXuiClient } from './lib/xuiClient.js'
 
 // Загружаем переменные окружения
 dotenv.config()
@@ -344,7 +344,7 @@ app.all('/api/xui/*', async (req, res) => {
 // Выполнение произвольного запроса к 3x-ui с учётом выбранного сервера из настроек (для раздела «HTTP запросы» в админке)
 app.post('/api/xui-request', async (req, res) => {
   try {
-    const { server, method, path, body } = req.body || {}
+    const { method, path, body } = req.body || {}
 
     if (!method || !path) {
       return res.status(400).json({
@@ -353,19 +353,8 @@ app.post('/api/xui-request', async (req, res) => {
       })
     }
 
-    const baseUrl = server?.baseUrl || (() => {
-      if (!server?.serverIP || !server?.serverPort) return process.env.XUI_HOST || ''
-      const protocol = (server.protocol || (server.serverPort === 443 ? 'https' : 'http')).replace(/\/+$/, '')
-      const pathPart = server.randompath ? `/${String(server.randompath).replace(/^\/+|\/+$/g, '')}` : ''
-      return `${protocol}://${server.serverIP}:${server.serverPort}${pathPart}`.replace(/\/+$/, '')
-    })()
-
-    const username = server?.xuiUsername ?? process.env.XUI_USERNAME ?? ''
-    const password = server?.xuiPassword ?? process.env.XUI_PASSWORD ?? ''
-
-    const xui = baseUrl && username && password
-      ? createXuiClient({ baseUrl, username, password })
-      : getXuiClient()
+    // Security: всегда используем только backend env (без передачи credentials с клиента)
+    const xui = getXuiClient()
 
     if (!xui.configured) {
       return res.status(400).json({
@@ -402,38 +391,26 @@ app.post('/api/xui-request', async (req, res) => {
 // Прокси для тестирования сессии (специальный endpoint)
 app.post('/api/test-session', async (req, res) => {
   try {
-    const { serverIP, serverPort, protocol, randompath, username, password } = req.body
-
-    if (!serverIP || !serverPort) {
-      return res.status(400).json({
+    const xui = getXuiClient()
+    if (!xui || !xui.configured) {
+      return res.status(503).json({
         success: false,
-        msg: 'serverIP и serverPort обязательны'
+        msg: '3x-ui не настроен (XUI_HOST, XUI_USERNAME, XUI_PASSWORD)'
       })
     }
 
-    // Формируем URL
-    const normalizedPath = randompath 
-      ? `/${randompath.replace(/^\/+|\/+$/g, '')}` 
-      : ''
-    const baseUrl = `${protocol || 'http'}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
-    const loginUrl = `${baseUrl}/login`
+    const session = await xui.login()
+    if (!session) {
+      return res.status(401).json({
+        success: false,
+        msg: 'Авторизация в 3x-ui не удалась'
+      })
+    }
 
-    console.log(`🔄 Test Session: POST ${loginUrl}`)
-
-    // Выполняем запрос логина
-    const response = await axios.post(loginUrl, {
-      username: username || '',
-      password: password || ''
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      validateStatus: () => true,
-      timeout: 10000
+    return res.status(200).json({
+      success: true,
+      msg: 'Сессия 3x-ui активна'
     })
-
-    res.status(response.status).json(response.data)
 
   } catch (error) {
     console.error('❌ Test session error:', error.message)

@@ -140,7 +140,7 @@ export const adminService = {
       })
       
       if (shouldUpdateXui) {
-        const inboundId = settings?.xuiInboundId || import.meta.env.VITE_XUI_INBOUND_ID
+        const inboundId = settings?.xuiInboundId || '1'
         if (inboundId) {
           try {
             const expiryTime = mergedUser.expiresAt ? new Date(mergedUser.expiresAt).getTime() : 0
@@ -190,7 +190,7 @@ export const adminService = {
       // Сначала удаляем из 3x-ui (если у пользователя есть UUID)
       if (user.uuid && user.uuid.trim() !== '') {
         try {
-          const inboundId = import.meta.env.VITE_XUI_INBOUND_ID
+          const inboundId = '1'
           if (inboundId) {
             await ThreeXUI.deleteClient(inboundId, user.email)
             logger.info('Admin', 'Пользователь удален из 3x-ui', { email: user.email })
@@ -250,11 +250,11 @@ export const adminService = {
       } else {
         // Создаем настройки по умолчанию
         const defaultSettings = {
-          serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-          serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-          xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-          xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-          xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+          serverIP: '',
+          serverPort: 2053,
+          xuiUsername: '',
+          xuiPassword: '',
+          xuiInboundId: '',
           servers: [],
           // Ссылки на приложения HAPP Proxy
           appLinks: {
@@ -276,11 +276,11 @@ export const adminService = {
         logger.warn('Admin', 'Офлайн-режим: используем настройки по умолчанию', null)
         // Используем настройки по умолчанию из переменных окружения
         return {
-          serverIP: import.meta.env.VITE_XUI_HOST || 'http://localhost',
-          serverPort: Number(import.meta.env.VITE_XUI_PORT) || 2053,
-          xuiUsername: import.meta.env.VITE_XUI_USERNAME || '',
-          xuiPassword: import.meta.env.VITE_XUI_PASSWORD || '',
-          xuiInboundId: import.meta.env.VITE_XUI_INBOUND_ID || '',
+          serverIP: '',
+          serverPort: 2053,
+          xuiUsername: '',
+          xuiPassword: '',
+          xuiInboundId: '',
           servers: [],
           // Ссылки на приложения HAPP Proxy
           appLinks: {
