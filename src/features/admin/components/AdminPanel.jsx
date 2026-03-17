@@ -92,7 +92,10 @@ const AdminPanel = ({
   onSetError = () => {},
   sidebarView, // для раздела «Аналитика»: передать 'analytics', чтобы в сайдбаре подсвечивался нужный пункт
 }) => {
-    const { users, servers, tariffs, settings } = useAppStore()
+  const { users: usersState, servers: serversState, tariffs: tariffsState, settings } = useAppStore()
+  const users = Array.isArray(usersState) ? usersState : []
+  const servers = Array.isArray(serversState) ? serversState : []
+  const tariffs = Array.isArray(tariffsState) ? tariffsState : []
   const ctx = useAdminContext()
   const onHandleDeduplicateTariffsEffective = ctx?.handleDeduplicateTariffs ?? onHandleDeduplicateTariffs
   const onHandleTariffLinkedTariffIdsChangeEffective = ctx?.handleTariffLinkedTariffIdsChange ?? onHandleTariffLinkedTariffIdsChange

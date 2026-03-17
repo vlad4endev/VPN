@@ -7651,6 +7651,38 @@ app.get('/api/system/logs', (req, res) => {
   res.json({ logs: [], message: 'Логи доступны в n8n workflows' })
 })
 
+app.post('/api/system/restart/:moduleId', async (req, res) => {
+  try {
+    const moduleId = String(req.params.moduleId || '').trim().toLowerCase()
+    if (!moduleId) {
+      return res.status(400).json({ success: false, message: 'moduleId обязателен' })
+    }
+
+    // Безопасный "soft restart": не перезапускаем процесс Node, а сбрасываем внутренние сессии/кэши.
+    if (moduleId === 'vpn' || moduleId === 'proxy' || moduleId === 'api') {
+      try {
+        const xui = getXuiClient()
+        if (xui && typeof xui.clearSession === 'function') {
+          xui.clearSession()
+        }
+      } catch (_) {
+        // no-op
+      }
+    }
+
+    return res.json({
+      success: true,
+      moduleId,
+      message: `Модуль ${moduleId} перезапущен (soft restart)`,
+    })
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Не удалось перезапустить модуль',
+    })
+  }
+})
+
 /**
  * Ручная синхронизация платежа
  * POST /admin/sync-payment

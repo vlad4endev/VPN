@@ -8,6 +8,7 @@ import { Activity, Cpu, HardDrive, Wifi, AlertCircle, CheckCircle2, XCircle, Tra
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import axios from 'axios'
 import logger from '../../../shared/utils/logger.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
 const SystemMonitor = () => {
   const [status, setStatus] = useState(null)
@@ -23,7 +24,7 @@ const SystemMonitor = () => {
   const maxHistoryPoints = 30 // Последние 30 точек для графика
 
   // API URL для мониторинга (можно использовать переменную окружения)
-  const apiUrl = import.meta.env.VITE_MONITORING_API_URL || import.meta.env.VITE_PROXY_URL || window.location.origin
+  const apiUrl = import.meta.env.VITE_MONITORING_API_URL || getApiBaseUrl()
   const monitoringEnabled = import.meta.env.VITE_ENABLE_MONITORING !== 'false'
 
   // Получение статуса клиента (браузер)
@@ -73,7 +74,7 @@ const SystemMonitor = () => {
 
     try {
       const response = await axios.get(`${apiUrl}/api/system/status`, {
-        timeout: 5000,
+        timeout: 12000,
         validateStatus: () => true, // Не бросать ошибку на любой статус
       })
 
@@ -131,7 +132,7 @@ const SystemMonitor = () => {
           level: logFilter === 'all' ? 'all' : logFilter,
           since: 60 * 60 * 1000, // 1 hour
         },
-        timeout: 5000,
+        timeout: 8000,
         validateStatus: () => true, // Не бросать ошибку на любой статус
       })
 
@@ -156,7 +157,7 @@ const SystemMonitor = () => {
 
     try {
       const response = await axios.post(`${apiUrl}/api/system/restart/${moduleId}`, {}, {
-        timeout: 10000,
+        timeout: 15000,
         validateStatus: () => true,
       })
 
@@ -169,7 +170,8 @@ const SystemMonitor = () => {
           fetchStatus()
         }, 2000)
       } else {
-        throw new Error(response.data.message || 'Не удалось перезапустить модуль')
+        const msg = response?.data?.message || response?.data?.error || `Сервер вернул статус ${response.status}`
+        throw new Error(msg)
       }
     } catch (err) {
       logger.error('SystemMonitor', `Ошибка перезагрузки модуля ${moduleId}`, { moduleId }, err)
