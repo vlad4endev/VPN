@@ -9,22 +9,22 @@ import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
  */
 const QUESTIONS = [
   {
-    id: 'devices',
+    id: 'whitelist',
     key: 'aiTariff.q1',
+    options: [
+      { value: 'whitelist_mobile', key: 'aiTariff.whitelistMobile', tariffHint: 'super' },
+      { value: 'home_only', key: 'aiTariff.homeOnly', tariffHint: 'multi' },
+      { value: 'both', key: 'aiTariff.whitelistAndHome', tariffHint: 'megamix' },
+    ],
+  },
+  {
+    id: 'devices',
+    key: 'aiTariff.q2',
     options: [
       { value: '1', key: 'aiTariff.devices1', tariffHint: 'super' },
       { value: '2-3', key: 'aiTariff.devices2_3', tariffHint: null },
       { value: '4-5', key: 'aiTariff.devices4_5', tariffHint: 'multi' },
       { value: '5+', key: 'aiTariff.devices5plus', tariffHint: 'multi' },
-    ],
-  },
-  {
-    id: 'usage',
-    key: 'aiTariff.q2',
-    options: [
-      { value: 'phone', key: 'aiTariff.usagePhone', tariffHint: 'super' },
-      { value: 'home', key: 'aiTariff.usageHome', tariffHint: 'multi' },
-      { value: 'both', key: 'aiTariff.usageBoth', tariffHint: 'megamix' },
     ],
   },
   {
@@ -39,24 +39,25 @@ const QUESTIONS = [
 ]
 
 function resolveTariffFromAnswers(answers, tariffs) {
+  const whitelist = answers.whitelist
   const devices = answers.devices
-  const usage = answers.usage
   const priority = answers.priority
 
   const superTariff = tariffs?.find(t => (t.name || '').toLowerCase() === 'super' || (t.plan || '').toLowerCase() === 'super')
   const multiTariff = tariffs?.find(t => (t.name || '').toLowerCase() === 'multi' || (t.plan || '').toLowerCase() === 'multi')
   const megamixTariff = tariffs?.find(t => (t.name || '').toLowerCase() === 'megamix')
 
-  if (usage === 'both') return megamixTariff || superTariff
-  if (usage === 'home' && devices !== '1') return multiTariff
-  if (usage === 'phone' && devices === '1') return superTariff
+  if (whitelist === 'both') return megamixTariff || superTariff
+  if (whitelist === 'home_only') return multiTariff
+  if (whitelist === 'whitelist_mobile' && devices === '1') return superTariff
+  if (whitelist === 'whitelist_mobile' && (devices === '4-5' || devices === '5+')) return megamixTariff || superTariff
+  if (whitelist === 'whitelist_mobile' && devices === '2-3' && priority === 'devices') return megamixTariff || multiTariff
+  if (whitelist === 'whitelist_mobile' && devices === '2-3') return superTariff
   if (devices === '4-5' || devices === '5+') return multiTariff
-  if (devices === '2-3' && usage === 'home') return multiTariff
-  if (devices === '2-3' && usage === 'phone') return superTariff
+  if (devices === '1') return superTariff
   if (devices === '2-3' && priority === 'devices') return multiTariff
   if (devices === '2-3' && priority === 'support') return superTariff
   if (devices === '2-3') return multiTariff
-  if (devices === '1') return superTariff
 
   return superTariff || multiTariff
 }
