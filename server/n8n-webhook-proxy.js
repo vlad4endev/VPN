@@ -4909,6 +4909,14 @@ app.patch('/api/admin/platega-settings', express.json(), async (req, res) => {
     }
     await setPlategaSettingsToLocal({ plategaMerchantId, plategaSecretKey })
     console.log('✅ Platega: настройки сохранены в локальный файл (server/data/platega-settings.json)')
+
+    if (db) {
+      try {
+        const APP_ID = process.env.APP_ID || 'skyputh'
+        await db.doc(`artifacts/${APP_ID}/public/settings`).set({ plategaMerchantId, plategaSecretKey }, { merge: true })
+      } catch (_) { /* не блокируем */ }
+    }
+
     res.json({
       success: true,
       hasMerchantId: !!plategaMerchantId,
@@ -4972,6 +4980,18 @@ app.post('/api/admin/payment-settings', express.json(), async (req, res) => {
 
     await setPlategaSettingsToLocal({ plategaMerchantId, plategaSecretKey })
     console.log('✅ Platega: настройки сохранены в server/data/platega-settings.json')
+
+    if (db) {
+      try {
+        const APP_ID = process.env.APP_ID || 'skyputh'
+        const settingsRef = db.doc(`artifacts/${APP_ID}/public/settings`)
+        await settingsRef.set({ plategaMerchantId, plategaSecretKey }, { merge: true })
+        console.log('✅ Platega: ключи также сохранены в Firestore (artifacts/%s/public/settings)', APP_ID)
+      } catch (fsErr) {
+        console.warn('⚠️ Platega: не удалось сохранить ключи в Firestore:', fsErr.message)
+      }
+    }
+
     res.status(200).json({
       success: true,
       hasMerchantId: !!plategaMerchantId,
@@ -5146,22 +5166,24 @@ async function loadPaymentSettingsFresh() {
 
 /**
  * Загрузить учётные данные Platega для генерации ссылки.
- * Приоритет: Firestore (основная БД) → локальный файл → env.
+ * Приоритет: локальный файл (server/data/platega-settings.json, через админку) → env → Firestore (fallback).
  * @returns {Promise<{ merchantId: string|null, secretKey: string|null }>}
  */
 async function getPlategaCredentials() {
+  const local = await getPlategaSettingsFromLocal()
+  let merchantId = local.plategaMerchantId || null
+  let secretKey = local.plategaSecretKey || null
+  if (merchantId && secretKey) {
+    return { merchantId, secretKey }
+  }
+  merchantId = merchantId || process.env.PLATEGA_MERCHANT_ID || null
+  secretKey = secretKey || process.env.PLATEGA_SECRET_KEY || null
+  if (merchantId && secretKey) {
+    return { merchantId, secretKey }
+  }
   const settings = await loadPaymentSettingsFresh()
-  let merchantId = settings.plategaMerchantId || settings.platega_merchant_id || null
-  let secretKey = settings.plategaSecretKey || settings.platega_secret_key || null
-  if (!merchantId || !secretKey) {
-    const local = await getPlategaSettingsFromLocal()
-    merchantId = merchantId || local.plategaMerchantId || null
-    secretKey = secretKey || local.plategaSecretKey || null
-  }
-  if (!merchantId || !secretKey) {
-    merchantId = merchantId || process.env.PLATEGA_MERCHANT_ID || null
-    secretKey = secretKey || process.env.PLATEGA_SECRET_KEY || null
-  }
+  merchantId = merchantId || settings.plategaMerchantId || settings.platega_merchant_id || null
+  secretKey = secretKey || settings.plategaSecretKey || settings.platega_secret_key || null
   return { merchantId, secretKey }
 }
 
