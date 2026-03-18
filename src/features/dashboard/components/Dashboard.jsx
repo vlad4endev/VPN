@@ -1663,11 +1663,11 @@ const Dashboard = ({
                       disabled
                       className="w-full min-h-[44px] px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-lg sm:rounded-xl text-slate-400 text-base cursor-not-allowed"
                     />
-                    <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">Email нельзя изменить</p>
+                    <p className="text-slate-500 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] mt-1.5">{t('dashboard.emailReadOnly', 'Email нельзя изменить')}</p>
                   </div>
 
                   <div>
-                    <label htmlFor="profile-subid" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">SubId (ID подписки)</label>
+                    <label htmlFor="profile-subid" className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-bold mb-1.5 sm:mb-2">{t('dashboard.subIdLabel', 'SubId (ID подписки)')}</label>
                     {currentUser.subId ? (
                       <div className="flex flex-col sm:flex-row gap-2">
                         <input
@@ -1683,8 +1683,8 @@ const Dashboard = ({
                         <button
                           onClick={() => onCopy(currentUser.subId)}
                           className="min-h-[44px] min-w-[44px] px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center touch-manipulation"
-                          title="Копировать SubId"
-                          aria-label="Копировать SubId"
+                          title={t('dashboard.copySubId', 'Копировать SubId')}
+                          aria-label={t('dashboard.copySubId', 'Копировать SubId')}
                         >
                           <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
@@ -1788,9 +1788,9 @@ const Dashboard = ({
                     <button
                       onClick={onHandleDeleteAccount}
                       className="min-h-[44px] w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-lg sm:rounded-xl font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all flex items-center justify-center touch-manipulation"
-                      aria-label="Удалить аккаунт"
+                      aria-label={t('dashboard.deleteAccount', 'Удалить аккаунт')}
                     >
-                      Удалить аккаунт
+                      {t('dashboard.deleteAccount', 'Удалить аккаунт')}
                     </button>
                   </div>
                 </div>

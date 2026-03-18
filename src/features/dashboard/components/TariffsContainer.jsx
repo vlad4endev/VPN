@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Sparkles } from 'lucide-react'
 import AITariffHelper from './AITariffHelper.jsx'
@@ -43,7 +43,7 @@ const TariffsContainer = ({
                 />
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                {tariffs.filter(t => t.active !== false).map((tariff) => {
+                {tariffs.filter(tariff => tariff.active !== false).map((tariff) => {
                     const planKey = (tariff.plan || tariff.name || '').toLowerCase()
                     const nameKey = (tariff.name || '').toLowerCase()
                     const isSuper = planKey === 'super' || tariff.name === 'Super'
@@ -51,9 +51,9 @@ const TariffsContainer = ({
                     const isMegaMix = nameKey === 'megamix'
 
                     const tariffDescriptions = {
-                        super: 'Идеален для смартфона и планшета: приоритетная поддержка и быстрое подключение. Обход блокировок и белых списков — один аккаунт для мобильного интернета.',
-                        multi: 'До 5 устройств сразу: ТВ-приставки, компьютеры, роутеры. Высокая скорость без белого списка — для дома и офиса. Подключите всё, что нужно.',
-                        megamix: 'Два тарифа в одной подписке: объедините возможности Super и MULTI. Больше гибкости и выгоды, когда нужны и мобильный доступ, и домашняя сеть.',
+                        super: t('tariff.descSuper', 'Идеален для смартфона и планшета: приоритетная поддержка и быстрое подключение. Обход блокировок и белых списков — один аккаунт для мобильного интернета.'),
+                        multi: t('tariff.descMulti', 'До 5 устройств сразу: ТВ-приставки, компьютеры, роутеры. Высокая скорость без белого списка — для дома и офиса. Подключите всё, что нужно.'),
+                        megamix: t('tariff.descMegaMix', 'Два тарифа в одной подписке: объедините возможности Super и MULTI. Больше гибкости и выгоды, когда нужны и мобильный доступ, и домашняя сеть.'),
                     }
 
                     const linkedConfigs = Array.isArray(tariff.linkedTariffConfigs) && tariff.linkedTariffConfigs.length > 0 ? tariff.linkedTariffConfigs : null
@@ -69,13 +69,13 @@ const TariffsContainer = ({
                         const hasUnlimited = linkedConfigs.some(c => (Number(c.trafficGB) ?? 0) === 0)
                         totalTrafficGB = hasUnlimited ? 0 : linkedConfigs.reduce((sum, c) => sum + (Number(c.trafficGB) || 0), 0)
                         linkedBreakdown = linkedConfigs.map(c => {
-                            const name = tariffs.find(t => t.id === c.tariffId)?.name || c.tariffId || ''
+                            const name = tariffs.find(item => item.id === c.tariffId)?.name || c.tariffId || ''
                             const d = Number(c.devices) || 1
                             const tr = (Number(c.trafficGB) ?? 0)
                             return { name, devices: d, trafficGB: tr }
                         })
                     } else if (linkedIds.length > 0) {
-                        const resolved = linkedIds.map(tid => tariffs.find(t => t.id === tid)).filter(Boolean)
+                        const resolved = linkedIds.map(tid => tariffs.find(item => item.id === tid)).filter(Boolean)
                         if (resolved.length > 0) {
                             totalDevices = resolved.reduce((sum, tgt) => sum + (Number(tgt.devices) || 1), 0)
                             const hasUnlimited = resolved.some(tgt => (Number(tgt.trafficGB) ?? 0) === 0)
@@ -91,7 +91,7 @@ const TariffsContainer = ({
                         isSuper ? tariffDescriptions.super
                             : isMulti ? tariffDescriptions.multi
                                 : isMegaMix ? tariffDescriptions.megamix
-                                    : `До ${devicesCount} ${devicesWord}. Стандартная поддержка и стабильное подключение. Подойдёт для повседневного использования.`
+                                    : t('tariff.descDefault', { count: devicesCount, word: devicesWord, defaultValue: `До ${devicesCount} ${devicesWord}. Стандартная поддержка и стабильное подключение. Подойдёт для повседневного использования.` })
                     )
 
                     const conditionsFromSettings = settings?.tariffConditions?.[nameKey] || settings?.tariffConditions?.[planKey] || (nameKey !== 'super' && nameKey !== 'multi' && nameKey !== 'megamix' ? settings?.tariffConditions?.default : null)

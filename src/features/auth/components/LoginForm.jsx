@@ -102,11 +102,11 @@ const LoginForm = ({
   }
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 bg-responsive overflow-x-hidden" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }}>
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-950 to-slate-950 overflow-x-hidden">
       <div className="flex-1 flex items-center justify-center p-3 sm:p-4 lg:p-6">
         <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/50 rounded-2xl sm:rounded-[3rem] p-5 sm:p-8 lg:p-10 shadow-2xl backdrop-blur-xl mx-auto">
       <div className="text-center mb-6 sm:mb-10">
-        <h2 className="text-[clamp(1.75rem,5vw,2.25rem)] sm:text-4xl font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? labelT(t, 'auth.login', forceFallbackLabels) : labelT(t, 'auth.register', forceFallbackLabels)}</h2>
+        <h1 className="text-[clamp(1.75rem,5vw,2.25rem)] font-black text-white mb-2 tracking-tight italic">{authMode === 'login' ? labelT(t, 'auth.login', forceFallbackLabels) : labelT(t, 'auth.register', forceFallbackLabels)}</h1>
         <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">SKYFLOW System</p>
         </div>
 

@@ -818,6 +818,7 @@ export default function VPNServiceApp() {
     // Проверка прав доступа - только админы могут загружать и изменять настройки
     if (!currentUser || currentUser.role !== 'admin') {
       logger.warn('Firestore', 'Попытка загрузки настроек без прав администратора')
+      setSettingsLoading(false)
       return
     }
 
@@ -827,7 +828,11 @@ export default function VPNServiceApp() {
       return
     }
 
-    if (!db) return
+    if (!db) {
+      logger.warn('Firestore', 'База данных недоступна при загрузке настроек')
+      setSettingsLoading(false)
+      return
+    }
 
     settingsLoadInProgressRef.current = true
     try {
@@ -1043,7 +1048,9 @@ export default function VPNServiceApp() {
   }, [currentUser, view, setView])
 
   // Редирект при отсутствии доступа (finances, support, admin, analytics) — в useEffect, не во время рендера
+  // Не проверяем доступ, пока идёт проверка авторизации — иначе редирект до загрузки currentUser
   useEffect(() => {
+    if (authChecking) return
     if (view === 'finances' && (!currentUser || !canAccessFinances(currentUser?.role))) {
       setView('dashboard')
     } else if (view === 'support' && !currentUser) {
@@ -1052,7 +1059,14 @@ export default function VPNServiceApp() {
       setView('dashboard')
       setError('Недостаточно прав для доступа к админ-панели')
     }
-  }, [view, currentUser])
+  }, [view, currentUser, authChecking])
+
+  // Очистка ошибки «Недостаточно прав», когда пользователь получает доступ (после загрузки currentUser)
+  useEffect(() => {
+    if (currentUser && canAccessAdmin(currentUser?.role, currentUser)) {
+      setError((prev) => (prev === 'Недостаточно прав для доступа к админ-панели' ? null : prev))
+    }
+  }, [currentUser])
 
   // Удалена логика автоматического переопределения view при наличии currentUser
   // View теперь восстанавливается из localStorage при инициализации и при загрузке пользователя
@@ -2389,6 +2403,14 @@ export default function VPNServiceApp() {
   // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере
   const adminPanelLoadedRef = useRef(false)
   const financesLoadedRef = useRef(false)
+
+  // Принудительная перезагрузка серверов (для кнопки «Перезагрузить» в UI)
+  const handleReloadServers = useCallback(() => {
+    adminPanelLoadedRef.current = false
+    settingsLoadInProgressRef.current = false
+    setSettingsLoading(true)
+    loadSettings()
+  }, [loadSettings])
   useEffect(() => {
     if (view === 'admin' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
@@ -2533,11 +2555,13 @@ export default function VPNServiceApp() {
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
       const currentSnap = await getDoc(settingsDoc)
       const currentData = currentSnap.exists() ? currentSnap.data() : {}
-      // Слияние: текущий документ + локальное состояние (appLinks, seo, серверы и т.д.)
+      // Если локальные серверы пусты, берём серверы из Firestore чтобы не затереть их случайно
+      const firestoreServers = Array.isArray(currentData.servers) ? currentData.servers : []
+      const effectiveServers = Array.isArray(servers) && servers.length > 0 ? servers : firestoreServers
       const payload = {
         ...currentData,
         ...(settings || {}),
-        servers: servers,
+        servers: effectiveServers,
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id,
       }
@@ -2730,13 +2754,10 @@ export default function VPNServiceApp() {
     }
 
     try {
-      // ВАЖНО: Сначала вычисляем обновленный список серверов СИНХРОННО
-      // Используем текущее состояние servers напрямую
       const isUpdate = cleanedServer.id && servers.find(s => s.id === cleanedServer.id)
       let updatedServers = []
       
       if (isUpdate) {
-        // Обновляем существующий сервер
         updatedServers = servers.map(s => s.id === cleanedServer.id ? cleanedServer : s)
         logger.debug('Admin', 'Обновление существующего сервера', { 
           serverId: cleanedServer.id,
@@ -2745,7 +2766,6 @@ export default function VPNServiceApp() {
           updatedCount: updatedServers.length
         })
       } else {
-        // Добавляем новый сервер
         updatedServers = [...servers, cleanedServer]
         logger.debug('Admin', 'Добавление нового сервера', { 
           serverId: cleanedServer.id,
@@ -2755,11 +2775,6 @@ export default function VPNServiceApp() {
         })
       }
       
-      // Обновляем локальное состояние серверов
-      setServers(updatedServers)
-      
-      // Сохраняем серверы в Firestore
-      // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
       const currentSettings = settings || {
         serverIP: '',
         serverPort: 2053,
@@ -2769,16 +2784,12 @@ export default function VPNServiceApp() {
         servers: [],
       }
       
-      // Создаем обновленные настройки с новым списком серверов
       const updatedSettings = {
         ...currentSettings,
-        servers: updatedServers, // Используем вычисленный список серверов
+        servers: updatedServers,
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser.id,
       }
-      
-      // Обновляем локальное состояние настроек
-      setSettings(updatedSettings)
       
       logger.info('Admin', 'Сохранение серверов в Firestore', { 
         adminId: currentUser.id,
@@ -2788,8 +2799,9 @@ export default function VPNServiceApp() {
         totalServers: updatedServers.length
       })
       
+      // Сначала сохраняем в Firestore, потом обновляем локальный стейт
       const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
-      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true }) // Используем merge, чтобы не перезаписать другие поля настроек
+      await setDoc(settingsDoc, stripUndefinedForFirestore(updatedSettings), { merge: true })
       
       logger.info('Admin', 'Сервер успешно сохранен в Firestore', { 
         adminId: currentUser.id,
@@ -2798,8 +2810,9 @@ export default function VPNServiceApp() {
         isUpdate: !!isUpdate
       })
       
-      // ВАЖНО: После успешного сохранения закрываем форму и показываем сообщение об успехе
-      // Сбрасываем ref для нового сервера при сохранении
+      // Обновляем локальный стейт только после успешной записи в Firestore
+      setServers(updatedServers)
+      setSettings(updatedSettings)
       newServerIdRef.current = null
       setEditingServer(null)
       setSuccess('Сервер сохранен')

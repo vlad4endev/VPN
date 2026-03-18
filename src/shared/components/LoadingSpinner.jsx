@@ -3,7 +3,7 @@
  * Легкий компонент для отображения состояния загрузки
  */
 
-export default function LoadingSpinner({ message = 'Загрузка...', size = 'lg' }) {
+export default function LoadingSpinner({ message = 'Loading...', size = 'lg' }) {
   const sizeClasses = {
     sm: 'h-6 w-6',
     md: 'h-8 w-8',
@@ -14,14 +14,13 @@ export default function LoadingSpinner({ message = 'Загрузка...', size =
   return (
     <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center bg-slate-950 overflow-x-hidden">
       <div className="text-center">
-        <div 
-          className={`inline-block animate-spin rounded-full border-t-2 border-b-2 border-blue-600 mb-4 ${sizeClasses[size]}`}
+        {/* role="status" сообщает скринридеру об обновлении; aria-label задаётся через sr-only параграф */}
+        <div
           role="status"
-          aria-label="Загрузка"
-        >
-          <span className="sr-only">{message}</span>
-        </div>
-        <p className="text-slate-400">{message}</p>
+          aria-label={message}
+          className={`inline-block animate-spin rounded-full border-t-2 border-b-2 border-blue-600 mb-4 ${sizeClasses[size]}`}
+        />
+        <p className="text-slate-400" aria-hidden="true">{message}</p>
       </div>
     </div>
   )

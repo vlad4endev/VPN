@@ -895,7 +895,10 @@ async function ensureAdmin(req, res) {
       await initFirebaseAdmin()
     } catch (_) {}
     if (!admin || !db) {
-      res.status(503).json({ success: false, error: 'Сервис недоступен' })
+      res.status(503).json({
+        success: false,
+        error: 'Firebase не настроен. Добавьте server/firebase-service-account.json или FIREBASE_SERVICE_ACCOUNT_KEY в server/.env и перезапустите backend.',
+      })
       return { ok: false }
     }
   }

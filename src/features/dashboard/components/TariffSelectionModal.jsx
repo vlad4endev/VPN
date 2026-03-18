@@ -605,9 +605,9 @@ const TariffSelectionModal = ({
               {isMegaMix && (
                 <div>
                   <label className="block text-slate-300 text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] font-medium mb-1.5 sm:mb-2">
-                    Доп. устройства к Super
+                    {t('tariff.megaMixExtraDevices', 'Доп. устройства к Super')}
                   </label>
-                  <p className="text-slate-400 text-xs mb-2">+100 ₽/мес за каждое устройство — гибко настройте под себя</p>
+                  <p className="text-slate-400 text-xs mb-2">{t('tariff.megaMixExtraHint', '+100 ₽/мес за каждое устройство — гибко настройте под себя')}</p>
                   <div className="flex flex-wrap gap-2">
                     {[0, 1, 2, 3, 4, 5].map((num) => (
                       <button
@@ -713,7 +713,7 @@ const TariffSelectionModal = ({
                 </div>
                 {isMegaMix && megaMixExtraDevices > 0 && (
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Доп. устройства Super ({megaMixExtraDevices} × 100 ₽/мес)</span>
+                    <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">{t('tariff.megaMixExtraLine', { count: megaMixExtraDevices, defaultValue: `Доп. устройства Super (${megaMixExtraDevices} × 100 ₽/мес)` })}</span>
                     <span className="text-slate-300 font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)]">+{(megaMixExtraDevices * 100 * selectedPeriod).toFixed(0)} ₽</span>
                   </div>
                 )}
@@ -753,26 +753,20 @@ const TariffSelectionModal = ({
                 <span className="font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('tariff.confirmChoice')}</span>
               </div>
               <p className="text-slate-300 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm mb-3 sm:mb-4 break-words">
-                Вы подтверждаете выбор тарифа "{tariff?.name}" 
+                {t('tariff.confirmQuestion', { name: tariff?.name, defaultValue: `Вы подтверждаете выбор тарифа "${tariff?.name}"` })}
                 {isSuper && (
                   <>
-                    {' '}на {selectedDevices} {selectedDevices === 1 ? 'устройство' : 'устройства'}
-                    {' '}на {selectedPeriod === 1 ? '1 месяц' :
-                            selectedPeriod === 3 ? '3 месяца' :
-                            selectedPeriod === 6 ? '6 месяцев' :
-                            'год'}
-                    {' '}за {totalPrice.toFixed(2)} ₽
-                    {discount > 0 && <span className="text-green-400 ml-1">(со скидкой {Math.round(discount * 100)}%)</span>}
+                    {' '}{t('tariff.confirmDevices', { count: selectedDevices, defaultValue: `на ${selectedDevices} устройств` })}
+                    {' '}{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}
+                    {' '}{t('tariff.confirmPrice', { price: totalPrice.toFixed(2), defaultValue: `за ${totalPrice.toFixed(2)} ₽` })}
+                    {discount > 0 && <span className="text-green-400 ml-1">{t('tariff.confirmDiscount', { percent: Math.round(discount * 100), defaultValue: `(со скидкой ${Math.round(discount * 100)}%)` })}</span>}
                   </>
                 )}
                 {(isMulti || isFixedTariff) && (
                   <>
-                    {' '}на {selectedPeriod === 1 ? '1 месяц' :
-                            selectedPeriod === 3 ? '3 месяца' :
-                            selectedPeriod === 6 ? '6 месяцев' :
-                            'год'}
-                    {' '}за {totalPrice.toFixed(2)} ₽
-                    {discount > 0 && <span className="text-green-400 ml-1">(со скидкой {Math.round(discount * 100)}%)</span>}
+                    {' '}{selectedPeriod === 1 ? t('tariff.month1') : selectedPeriod === 3 ? t('tariff.months3') : selectedPeriod === 6 ? t('tariff.months6') : t('tariff.year')}
+                    {' '}{t('tariff.confirmPrice', { price: totalPrice.toFixed(2), defaultValue: `за ${totalPrice.toFixed(2)} ₽` })}
+                    {discount > 0 && <span className="text-green-400 ml-1">{t('tariff.confirmDiscount', { percent: Math.round(discount * 100), defaultValue: `(со скидкой ${Math.round(discount * 100)}%)` })}</span>}
                   </>
                 )}?
               </p>
@@ -793,10 +787,10 @@ const TariffSelectionModal = ({
                   onClick={handlePayLater}
                   disabled={isLoading}
                   className="w-full min-h-[44px] px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.35vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
-aria-label={t('tariff.payLaterTestAria')}
-                  >
-                    <Clock size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                    <span>{t('tariff.payLaterTest')}</span>
+                  aria-label={t('tariff.payLaterTestAria')}
+                >
+                  <Clock size={18} className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                  <span>{t('tariff.payLaterTest')}</span>
                 </button>
                 <p className="text-slate-500 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center mt-2 break-words">
                   {t('tariff.payLaterHint')}
@@ -859,9 +853,9 @@ aria-label={t('tariff.payLaterTestAria')}
                 }}
                 disabled={isLoading}
                 className="min-h-[44px] flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-white rounded-lg font-semibold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] transition-all disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
-aria-label={t('common.back')}
-                >
-                  {t('common.back')}
+                aria-label={t('common.back')}
+              >
+                {t('common.back')}
               </button>
             </div>
           )}
