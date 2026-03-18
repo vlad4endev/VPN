@@ -349,7 +349,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           fixed left-0 z-40
           w-[min(280px,85vw)] sm:w-64
           transform transition-transform duration-300 ease-out
-          overflow-y-auto overflow-x-hidden
+          overflow-y-auto overflow-x-hidden scrollbar-dark
           [top:env(safe-area-inset-top,0px)]
           [bottom:env(safe-area-inset-bottom,0px)]
           lg:translate-x-0

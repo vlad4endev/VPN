@@ -36,11 +36,11 @@ const AdminDashboard = ({
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Сводка — компактная */}
-      <section className="rounded-xl sm:rounded-2xl bg-slate-800/40 border border-slate-700/50 p-3 sm:p-4">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 sm:mb-3">
+      <section className="rounded-xl sm:rounded-2xl bg-slate-800/40 border border-slate-700/50 p-4 sm:p-5 lg:p-6">
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3 sm:mb-4">
           Сводка
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <span className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-400">
               <Users className="w-4 h-4" strokeWidth={2} />
@@ -89,11 +89,11 @@ const AdminDashboard = ({
       </section>
 
       {/* Разделы — одна карточка, сетка ссылок (без отдельных блоков на каждую группу) */}
-      <section className="rounded-xl sm:rounded-2xl bg-slate-800/40 border border-slate-700/50 p-3 sm:p-4">
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 sm:mb-3">
+      <section className="rounded-xl sm:rounded-2xl bg-slate-800/40 border border-slate-700/50 p-4 sm:p-5 lg:p-6">
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3 sm:mb-4">
           Разделы
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {LINK_SECTIONS.map((section) => (
             section.items.map(({ id, labelKey, icon: Icon }) => (
               <button

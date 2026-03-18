@@ -229,8 +229,8 @@ const AdminPanel = ({
         onSetAdminTab={onSetAdminTab}
       />
       <div className="flex-1 w-full min-w-0 flex flex-col min-h-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 lg:ml-64">
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 lg:pl-0 lg:pr-4">
-          <div className={`w-full max-w-content lg:max-w-none mx-auto min-w-0 ${adminTab === 'users' ? 'flex flex-col flex-1 min-h-0' : ''}`}>
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 lg:pl-6 lg:pr-6 xl:pl-8 xl:pr-8">
+          <div className={`w-full max-w-[80rem] mx-auto min-w-0 ${adminTab === 'users' ? 'flex flex-col flex-1 min-h-0' : ''}`}>
           {/* Шапка - Mobile First компактная */}
           <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 mb-3 sm:mb-4 border border-slate-800">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
