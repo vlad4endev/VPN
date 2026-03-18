@@ -193,7 +193,14 @@ export async function runAiFunnelAnalysis(opts = {}) {
   const isJson = contentType.includes('application/json')
   if (!res.ok) {
     const data = isJson ? await res.json().catch(() => ({})) : {}
-    throw new Error(data.error || data.message || res.statusText || 'Ошибка ИИ-анализа воронки')
+    let msg = data.error || data.message || res.statusText
+    if (!msg) {
+      if (res.status === 502) msg = 'Сервис ИИ недоступен (502). Проверьте настройки ИИ в разделе «Интеграции → ИИ» и повторите позже.'
+      else if (res.status === 503) msg = 'ИИ не настроен или недоступен. Задайте API-ключ в разделе «Интеграции → ИИ».'
+      else if (res.status === 504) msg = 'ИИ не успел ответить. Попробуйте ещё раз.'
+      else msg = 'Ошибка ИИ-анализа воронки'
+    }
+    throw new Error(msg)
   }
   if (!isJson) throw new Error('Сервер вернул не JSON')
   return res.json()
