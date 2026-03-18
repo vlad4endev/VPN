@@ -3278,18 +3278,26 @@ app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Укажите tableId' })
   }
   const fetchTableRows = async (tid) => {
-    const listUrl = `${baseUrl}/api/v2/tables/${tid}/records`
+    const listUrl = `${baseUrl.replace(/\/+$/, '')}/api/v2/tables/${tid}/records`
     const limit = 1000
     const rows = []
     let offset = 0
     let hasMore = true
     while (hasMore) {
-      const { data } = await axios.get(listUrl, {
+      const resp = await axios.get(listUrl, {
         params: { limit, offset },
         headers: { 'xc-token': apiToken, 'Content-Type': 'application/json' },
         timeout: 30000,
         validateStatus: () => true,
       })
+      const status = resp.status
+      const data = resp.data
+      if (status >= 400) {
+        const errMsg = data?.message || data?.msg || data?.error || (typeof data === 'string' ? data : null)
+        throw new Error(
+          errMsg || `NocoDB вернул ${status}. Проверьте: URL базы (без /nc/... в конце), API-токен, ID таблицы (из URL, например mxxxxxxxx).`
+        )
+      }
       const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
       if (!Array.isArray(list) || list.length === 0) break
       rows.push(...list)
@@ -3309,7 +3317,13 @@ app.post('/api/admin/import-from-nocodb/preview', async (req, res) => {
     const columns = Array.from(columnsSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     return res.json({ success: true, list: allRows, columns })
   } catch (err) {
-    const msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    let msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    if (err.code === 'ECONNREFUSED') msg = 'Не удалось подключиться к NocoDB. Проверьте URL базы и доступность сервера.'
+    if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') msg = 'Таймаут при обращении к NocoDB. Проверьте сеть и URL.'
+    if (err.code === 'ENOTFOUND') msg = 'Домен NocoDB не найден. Проверьте URL базы.'
+    if (err.response?.status === 401) msg = msg || 'Неверный API-токен. Создайте токен в NocoDB: Account → API Token.'
+    if (err.response?.status === 403) msg = msg || 'Доступ запрещён. Проверьте права токена и доступ к таблице.'
+    if (err.response?.status === 404) msg = msg || 'Таблица не найдена. Проверьте ID таблицы (из URL, например mxxxxxxxx).'
     console.error('❌ POST /api/admin/import-from-nocodb/preview:', msg)
     return res.status(500).json({ success: false, error: msg || 'Ошибка загрузки данных из NocoDB' })
   }
@@ -3375,13 +3389,13 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
 
   // Загружаем записи из одной или двух таблиц (одинаковая структура, разные данные)
   const fetchTableRows = async (tid) => {
-    const listUrl = `${baseUrl}/api/v2/tables/${tid}/records`
+    const listUrl = `${baseUrl.replace(/\/+$/, '')}/api/v2/tables/${tid}/records`
     const limit = 1000
     const rows = []
     let offset = 0
     let hasMore = true
     while (hasMore) {
-      const { data } = await axios.get(listUrl, {
+      const resp = await axios.get(listUrl, {
         params: { limit, offset },
         headers: {
           'xc-token': apiToken,
@@ -3390,6 +3404,14 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
         timeout: 30000,
         validateStatus: () => true,
       })
+      const status = resp.status
+      const data = resp.data
+      if (status >= 400) {
+        const errMsg = data?.message || data?.msg || data?.error || (typeof data === 'string' ? data : null)
+        throw new Error(
+          errMsg || `NocoDB вернул ${status}. Проверьте: URL базы (без /nc/... в конце), API-токен, ID таблицы.`
+        )
+      }
       const list = data?.list || data?.data || (Array.isArray(data) ? data : [])
       if (!Array.isArray(list) || list.length === 0) break
       list.forEach((r) => {
@@ -3639,7 +3661,13 @@ app.post('/api/admin/import-from-nocodb', async (req, res) => {
       details: { created, updated, skipped, errors, writeBackOk, writeBackErrors },
     })
   } catch (err) {
-    const msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    let msg = err.response?.data?.message || err.response?.data?.msg || err.message
+    if (err.code === 'ECONNREFUSED') msg = 'Не удалось подключиться к NocoDB. Проверьте URL базы и доступность сервера.'
+    if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') msg = 'Таймаут при обращении к NocoDB. Проверьте сеть и URL.'
+    if (err.code === 'ENOTFOUND') msg = 'Домен NocoDB не найден. Проверьте URL базы.'
+    if (err.response?.status === 401) msg = msg || 'Неверный API-токен. Создайте токен в NocoDB: Account → API Token.'
+    if (err.response?.status === 403) msg = msg || 'Доступ запрещён. Проверьте права токена и доступ к таблице.'
+    if (err.response?.status === 404) msg = msg || 'Таблица не найдена. Проверьте ID таблицы (из URL).'
     console.error('❌ POST /api/admin/import-from-nocodb:', msg)
     return res.status(500).json({
       success: false,

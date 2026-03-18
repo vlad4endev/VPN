@@ -427,6 +427,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="https://app.nocodb.com или ваш домен"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">Только домен, без /nc/... или /api. Пример: https://app.nocodb.com или https://nocodb.yourdomain.com</p>
               </div>
               <div>
                 <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
@@ -439,6 +440,7 @@ const ImportFromNocoDBModal = ({ onClose }) => {
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Токен из настроек NocoDB"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">Account (иконка профиля) → API Token → Create new token</p>
               </div>
               <div>
                 <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-300 mb-1.5">

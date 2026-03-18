@@ -50,6 +50,7 @@ export const AdminPanelPropTypes = {
   onHandleSaveServer: PropTypes.func.isRequired,
   onHandleDeleteServer: PropTypes.func.isRequired,
   onHandleTestServerSession: PropTypes.func.isRequired,
+  onHandleReloadServers: PropTypes.func,
   testingServerId: PropTypes.string,
   newServerIdRef: PropTypes.shape({
     current: PropTypes.string,

@@ -346,12 +346,13 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           bg-slate-900 border-r border-slate-800
           p-3 sm:p-4 md:p-6
           flex flex-col
-          h-screen max-h-[100dvh]
-          fixed lg:static lg:h-full
-          top-0 left-0 z-40 lg:z-auto
+          fixed left-0 z-40
           w-[min(280px,85vw)] sm:w-64
           transform transition-transform duration-300 ease-out
           overflow-y-auto overflow-x-hidden
+          [top:env(safe-area-inset-top,0px)]
+          [bottom:env(safe-area-inset-bottom,0px)]
+          lg:translate-x-0
           ${isMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >

@@ -1,4 +1,5 @@
 import { supabase } from '../../../lib/supabase/client.js'
+import { auth } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 
@@ -7,10 +8,18 @@ import logger from '../../../shared/utils/logger.js'
 
 const TABLE = 'vpn_firestore_documents'
 
+/** Токен для API: приоритет Firebase Auth (если пользователь залогинен), иначе Supabase */
 async function getAuthToken() {
-  if (!supabase) return null
-  const { data: { session } } = await supabase.auth.getSession()
-  return session?.access_token || null
+  if (auth?.currentUser) {
+    try {
+      return await auth.currentUser.getIdToken()
+    } catch (_) {}
+  }
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token || null
+  }
+  return null
 }
 
 export const notificationsService = {

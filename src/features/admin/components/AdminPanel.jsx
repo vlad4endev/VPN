@@ -48,6 +48,7 @@ const AdminPanel = ({
   onHandleSaveServer,
   onHandleDeleteServer,
   onHandleTestServerSession,
+  onHandleReloadServers,
   testingServerId,
   newServerIdRef,
   settingsLoading,
@@ -218,7 +219,7 @@ const AdminPanel = ({
   const sectionInfo = getAdminSectionByTabId(adminTab)
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:flex-row lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
       <Sidebar
         currentUser={currentUser}
         view={sidebarView || 'admin'}
@@ -227,7 +228,7 @@ const AdminPanel = ({
         adminTab={adminTab}
         onSetAdminTab={onSetAdminTab}
       />
-      <div className="flex-1 w-full min-w-0 flex flex-col min-h-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6">
+      <div className="flex-1 w-full min-w-0 flex flex-col min-h-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 lg:ml-64">
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 lg:pl-0 lg:pr-4">
           <div className={`w-full max-w-content lg:max-w-none mx-auto min-w-0 ${adminTab === 'users' ? 'flex flex-col flex-1 min-h-0' : ''}`}>
           {/* Шапка - Mobile First компактная */}
@@ -385,14 +386,28 @@ const AdminPanel = ({
                   </h2>
                   <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">Управление серверами для взаимодействия с панелями 3x-ui</p>
                 </div>
-                <button
-                  onClick={onHandleAddServer}
-                  className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] w-full sm:w-auto px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
-                  aria-label="Добавить сервер"
-                >
-                  <PlusCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
-                  <span className="btn-text whitespace-nowrap">Добавить сервер</span>
-                </button>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {onHandleReloadServers && (
+                    <button
+                      onClick={onHandleReloadServers}
+                      disabled={settingsLoading}
+                      className="min-h-[32px] sm:min-h-[40px] px-3 sm:px-4 py-1.5 sm:py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm touch-manipulation"
+                      title="Перезагрузить серверы из базы данных"
+                      aria-label="Перезагрузить серверы"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 ${settingsLoading ? 'animate-spin' : ''}`} />
+                      <span className="hidden sm:inline whitespace-nowrap">Обновить</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={onHandleAddServer}
+                    className="btn-icon-only-mobile min-h-[32px] sm:min-h-[40px] flex-1 sm:flex-none px-3 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm md:text-base touch-manipulation"
+                    aria-label="Добавить сервер"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 flex-shrink-0" />
+                    <span className="btn-text whitespace-nowrap">Добавить сервер</span>
+                  </button>
+                </div>
               </div>
 
               {settingsLoading ? (
@@ -560,6 +575,11 @@ const AdminPanel = ({
                           </label>
                         </div>
                       </div>
+                      {error && (
+                        <div className="md:col-span-2 mt-1 p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+                          {error}
+                        </div>
+                      )}
                       <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 mt-4 sm:mt-5 md:mt-6">
                         <button
                           type="button"
