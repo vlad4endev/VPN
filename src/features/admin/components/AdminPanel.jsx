@@ -219,7 +219,7 @@ const AdminPanel = ({
   const sectionInfo = getAdminSectionByTabId(adminTab)
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col lg:min-h-0 lg:h-screen lg:overflow-hidden overflow-x-hidden bg-slate-950">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden bg-slate-950">
       <Sidebar
         currentUser={currentUser}
         view={sidebarView || 'admin'}
@@ -228,7 +228,7 @@ const AdminPanel = ({
         adminTab={adminTab}
         onSetAdminTab={onSetAdminTab}
       />
-      <div className="flex-1 w-full lg:w-[calc(100%-16rem)] min-w-0 flex flex-col min-h-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 lg:ml-64">
+      <div className="flex-1 w-full lg:w-[calc(100%-16rem)] min-w-0 flex flex-col min-h-0 pt-14 sm:pt-16 lg:pt-4 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 lg:ml-64 lg:h-screen">
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8">
           <div className={`w-full min-w-0 ${adminTab === 'users' ? 'flex flex-col flex-1 min-h-0' : ''}`}>
           {/* Шапка - Mobile First компактная */}

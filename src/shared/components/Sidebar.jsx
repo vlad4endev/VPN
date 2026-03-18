@@ -35,7 +35,8 @@ const DASHBOARD_NAV_ITEMS = [
  */
 /** Возвращает ключ раздела, в котором находится таб */
 const getSectionKeyByTabId = (tabId) => {
-  const section = ADMIN_NAV_SECTIONS.find((s) => s.items.some((i) => i.id === tabId))
+  if (!tabId || !Array.isArray(ADMIN_NAV_SECTIONS)) return null
+  const section = ADMIN_NAV_SECTIONS.find((s) => s.items?.some((i) => i.id === tabId))
   return section ? section.titleKey : null
 }
 
