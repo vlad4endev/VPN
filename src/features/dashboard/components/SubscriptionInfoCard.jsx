@@ -11,7 +11,6 @@ import {
   CreditCard 
 } from 'lucide-react'
 import { formatTimeRemaining, formatDate } from '../../../shared/utils/formatDate.js'
-import logger from '../../../shared/utils/logger.js'
 
 const SubscriptionInfoCard = ({
   currentUser,
@@ -298,7 +297,7 @@ const SubscriptionInfoCard = ({
               <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-yellow-400 font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)]">
-                    Тест до {formatDate(currentUser.testPeriodEndDate)}
+                    {t('dashboard.testUntil', { date: formatDate(currentUser.testPeriodEndDate) })}
                   </p>
                   <p className="text-yellow-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">{t('dashboard.afterExpiryNote')}</p>
                 </div>
@@ -330,10 +329,10 @@ const SubscriptionInfoCard = ({
                     }}
                     disabled={creatingSubscription || showPaymentProcessing}
                     className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                    aria-label="Оплатить подписку"
+                    aria-label={t('dashboard.paySubscriptionAria', 'Оплатить подписку')}
                   >
                     <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
+                    <span>{creatingSubscription || showPaymentProcessing ? t('dashboard.processing') : t('dashboard.pay', 'Оплатить')}</span>
                   </button>
                 )}
               </div>
@@ -360,7 +359,7 @@ const SubscriptionInfoCard = ({
                     </p>
                     {!isExpired && (
                       <p className="text-red-300/80 text-[clamp(0.65rem,0.6rem+0.25vw,0.75rem)] mt-0.5">
-                        Необходимо произвести оплату для продолжения
+                        {t('dashboard.paymentRequiredToContinue', 'Необходимо произвести оплату для продолжения')}
                       </p>
                     )}
                   </div>
@@ -397,10 +396,10 @@ const SubscriptionInfoCard = ({
                       }}
                       disabled={creatingSubscription || showPaymentProcessing}
                       className="min-h-[36px] px-3 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] transition-all flex items-center justify-center gap-1.5 touch-manipulation whitespace-nowrap"
-                      aria-label="Оплатить подписку"
+                      aria-label={t('dashboard.paySubscriptionAria', 'Оплатить подписку')}
                     >
                       <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span>{creatingSubscription || showPaymentProcessing ? 'Обработка...' : 'Оплатить'}</span>
+                      <span>{creatingSubscription || showPaymentProcessing ? t('dashboard.processing') : t('dashboard.pay', 'Оплатить')}</span>
                     </button>
                   )}
                 </div>

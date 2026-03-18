@@ -123,7 +123,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         }}
         className={`w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-colors touch-manipulation ${view === 'support' ? navItemClass(true) : 'text-slate-300 hover:bg-slate-800 hover:text-sky-400 active:bg-slate-700'}`}
         aria-label={t('sidebar.supportLink')}
-        aria-selected={view === 'support'}
+        aria-current={view === 'support' ? 'page' : undefined}
       >
         <MessageCircle size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
         <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.support')}</span>
@@ -157,7 +157,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('admin')}
           className={navItemClass(view === 'admin')}
           aria-label={t('sidebar.admin')}
-          aria-selected={view === 'admin'}
+          aria-current={view === 'admin' ? 'page' : undefined}
         >
           <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.admin')}</span>
@@ -168,7 +168,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('finances')}
           className={navItemClass(view === 'finances')}
           aria-label={t('sidebar.finances')}
-          aria-selected={view === 'finances'}
+          aria-current={view === 'finances' ? 'page' : undefined}
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.finances')}</span>
@@ -179,7 +179,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}
           aria-label={t('sidebar.analytics')}
-          aria-selected={view === 'analytics'}
+          aria-current={view === 'analytics' ? 'page' : undefined}
         >
           <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.analytics')}</span>
@@ -189,7 +189,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         onClick={() => handleNavClick('dashboard')}
         className={navItemClass(view === 'dashboard')}
         aria-label={t('sidebar.cabinet')}
-        aria-selected={view === 'dashboard'}
+        aria-current={view === 'dashboard' ? 'page' : undefined}
       >
         <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
         <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.cabinet')}</span>
@@ -206,7 +206,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
             onClick={() => handleNavClick('admin')}
             className={navItemClass(view === 'admin')}
             aria-label={t('sidebar.admin')}
-            aria-selected={view === 'admin'}
+            aria-current={view === 'admin' ? 'page' : undefined}
           >
             <Users size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
             <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.admin')}</span>
@@ -263,7 +263,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('finances')}
           className={navItemClass(view === 'finances')}
           aria-label={t('sidebar.finances')}
-          aria-selected={view === 'finances'}
+          aria-current={view === 'finances' ? 'page' : undefined}
         >
           <BarChart3 size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.finances')}</span>
@@ -276,7 +276,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('analytics')}
           className={navItemClass(view === 'analytics')}
           aria-label={t('sidebar.analytics')}
-          aria-selected={view === 'analytics'}
+          aria-current={view === 'analytics' ? 'page' : undefined}
         >
           <TrendingDown size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.analytics')}</span>
@@ -289,7 +289,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
           onClick={() => handleNavClick('dashboard')}
           className={navItemClass(view === 'dashboard')}
           aria-label={t('sidebar.cabinet')}
-          aria-selected={view === 'dashboard'}
+          aria-current={view === 'dashboard' ? 'page' : undefined}
         >
           <Shield size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
           <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.cabinet')}</span>

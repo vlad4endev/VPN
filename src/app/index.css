@@ -19,13 +19,18 @@ html, body {
   overflow-x: hidden; /* Prevent horizontal scrolling */
   width: 100%;
   max-width: 100%;
-  /* Safe area insets for notch/home indicator (iOS, Android gesture nav) */
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
-  padding-top: env(safe-area-inset-top, 0px);
   /* Reduce overscroll/rubber-band on iOS/Android */
   overscroll-behavior-y: none;
   overscroll-behavior-x: none;
+}
+
+/* Safe area insets: только на body (после сброса padding: 0), чтобы
+   нотч/жест-панель не перекрывали контент на iOS и Android */
+body {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Root container: full viewport height, no horizontal overflow (fixes layout in Telegram WebView and mobile) */

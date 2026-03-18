@@ -5,8 +5,8 @@ import PrivacyPolicyModal from './PrivacyPolicyModal.jsx'
 import UserAgreementModal from './UserAgreementModal.jsx'
 
 const TELEGRAM_URL = 'https://t.me/+M3Wd-rkrqytmMTg6'
-const KNOWLEDGE_BASE_URL = '#'
-const PERSONAL_DATA_URL = '#'
+const KNOWLEDGE_BASE_URL = null
+const PERSONAL_DATA_URL = null
 
 const linkClass =
   'text-slate-500 hover:text-slate-300 transition-colors text-xs flex items-center gap-1 touch-manipulation'
@@ -64,10 +64,12 @@ export default function Footer() {
                 <Send className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
                 <span>{t('footer.telegramChannel')}</span>
               </a>
-              <a href={KNOWLEDGE_BASE_URL} className={linkClass} aria-label={t('footer.knowledgeBaseAria')}>
-                <BookOpen className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
-                <span>{t('footer.knowledgeBase')}</span>
-              </a>
+              {KNOWLEDGE_BASE_URL && (
+                <a href={KNOWLEDGE_BASE_URL} className={linkClass} aria-label={t('footer.knowledgeBaseAria')}>
+                  <BookOpen className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
+                  <span>{t('footer.knowledgeBase')}</span>
+                </a>
+              )}
               <button
                 type="button"
                 onClick={() => setShowAgreementModal(true)}
@@ -86,10 +88,12 @@ export default function Footer() {
                 <FileText className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
                 <span>{t('footer.privacyPolicy')}</span>
               </button>
-              <a href={PERSONAL_DATA_URL} className={linkClass} aria-label={t('footer.personalDataAria')}>
-                <Shield className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
-                <span>{t('footer.personalData')}</span>
-              </a>
+              {PERSONAL_DATA_URL && (
+                <a href={PERSONAL_DATA_URL} className={linkClass} aria-label={t('footer.personalDataAria')}>
+                  <Shield className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
+                  <span>{t('footer.personalData')}</span>
+                </a>
+              )}
             </nav>
                 {/* Счётчик Метрики скрыт; учёт идёт через скрипт на странице */}
               </div>

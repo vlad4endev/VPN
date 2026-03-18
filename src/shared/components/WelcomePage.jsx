@@ -70,27 +70,27 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
     <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30 w-full">
       <main id="main" role="main" className="min-w-0 w-full max-w-full overflow-x-hidden">
         {/* Hero — экран приветствия */}
-        <header className="relative pt-14 sm:pt-16 lg:pt-20 pb-12 sm:pb-14 lg:pb-16 px-4 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950 overflow-hidden" style={{ backgroundSize: 'cover', backgroundPosition: 'center' }} role="banner" aria-label={t('welcome.mainScreen')}>
-          <div className="max-w-7xl mx-auto text-center w-full max-w-full px-1 sm:px-0">
+        <header className="relative pt-14 sm:pt-16 lg:pt-20 pb-12 sm:pb-14 lg:pb-16 px-4 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950 overflow-hidden" role="banner" aria-label={t('welcome.mainScreen')}>
+          <div className="max-w-7xl mx-auto text-center w-full">
             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10">
               <LanguageSwitcher />
             </div>
             <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs sm:text-sm font-bold mb-6 sm:mb-8 animate-bounce" aria-hidden="true">
               <Zap size={14} className="flex-shrink-0" /> {t('welcome.badge')}
             </div>
-            <h1 className="text-[clamp(2.5rem,8vw,4.5rem)] lg:text-7xl font-black text-white mb-4 sm:mb-6 tracking-tighter italic leading-tight">
+            <h1 className="text-[clamp(2.5rem,8vw,4.5rem)] font-black text-white mb-4 sm:mb-6 tracking-tighter italic leading-tight">
               <span className="text-blue-600">SKY</span>FLOW
             </h1>
-            <p className="text-[clamp(1.125rem,2.5vw,1.5rem)] lg:text-2xl text-white/90 max-w-2xl mx-auto mb-2 sm:mb-3 font-semibold leading-relaxed break-words">
+            <p className="text-[clamp(1.125rem,2.5vw,1.5rem)] text-white/90 max-w-2xl mx-auto mb-2 sm:mb-3 font-semibold leading-relaxed break-words">
               {t('welcome.tagline')}
             </p>
-            <p className="text-[clamp(0.9375rem,1.5vw,1.125rem)] lg:text-lg text-slate-400 max-w-2xl mx-auto mb-2 leading-relaxed break-words">
+            <p className="text-[clamp(0.9375rem,1.5vw,1.125rem)] text-slate-400 max-w-2xl mx-auto mb-2 leading-relaxed break-words">
               {t('welcome.subtitle')}
             </p>
             <p className="text-sm sm:text-base text-slate-500 max-w-2xl mx-auto mb-8 sm:mb-10 leading-relaxed break-words">
               {t('welcome.cta')}
             </p>
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center max-w-sm sm:max-w-none mx-auto sm:mx-0">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center max-w-sm sm:max-w-none mx-auto">
               {isTelegramApp && onTelegramSignIn && (
                 <button
                   type="button"
@@ -123,26 +123,26 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
         </header>
 
         {/* Преимущества */}
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 w-full max-w-full" aria-label={t('welcome.benefits')}>
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 w-full" aria-label={t('welcome.benefits')}>
           <div className="bg-slate-900/50 border border-slate-800 p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2.5rem] group hover:border-blue-500/40 transition-all min-w-0 overflow-hidden">
             <div className="bg-blue-500/10 w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center text-blue-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
               <Shield size={24} className="sm:w-7 sm:h-7" />
             </div>
-            <h2 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitCabinetTitle')}</h2>
+            <h3 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitCabinetTitle')}</h3>
             <p className="text-slate-500 font-medium text-sm sm:text-base leading-relaxed break-words">{t('welcome.benefitCabinetDesc')}</p>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2.5rem] group hover:border-blue-500/40 transition-all min-w-0 overflow-hidden">
             <div className="bg-blue-500/10 w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center text-blue-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
               <Check size={24} className="sm:w-7 sm:h-7" />
             </div>
-            <h2 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitSupportTitle')}</h2>
+            <h3 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitSupportTitle')}</h3>
             <p className="text-slate-500 font-medium text-sm sm:text-base leading-relaxed break-words">{t('welcome.benefitSupportDesc')}</p>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2.5rem] group hover:border-blue-500/40 transition-all min-w-0 sm:col-span-2 lg:col-span-1 overflow-hidden">
             <div className="bg-blue-500/10 w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center text-blue-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
               <Globe size={24} className="sm:w-7 sm:h-7" />
             </div>
-            <h2 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitLocationsTitle')}</h2>
+            <h3 className="text-lg sm:text-xl font-black text-white mb-2 sm:mb-3 uppercase tracking-tight">{t('welcome.benefitLocationsTitle')}</h3>
             <p className="text-slate-500 font-medium text-sm sm:text-base leading-relaxed break-words">{t('welcome.benefitLocationsDesc')}</p>
           </div>
         </section>

@@ -1,245 +1,131 @@
-import { supabase } from '../../../lib/supabase/client.js'
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
+} from 'firebase/auth'
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore'
+import { auth, db } from '../../../lib/firebase/config.js'
 import { APP_ID } from '../../../shared/constants/app.js'
 import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 import ThreeXUI from '../../vpn/services/ThreeXUI.js'
 import logger from '../../../shared/utils/logger.js'
 
-async function generateUniqueSubId(maxAttempts = 10) {
-  if (!supabase) return ThreeXUI.generateSubId()
-
+/**
+ * Генерация уникального subId с проверкой в базе данных
+ */
+async function generateUniqueSubId(db, appIdValue = APP_ID, maxAttempts = 10) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const subId = ThreeXUI.generateSubId()
 
     try {
-      const { data, error } = await supabase
-        .from('vpn_users')
-        .select('uid')
-        .eq('app_id', APP_ID)
-        .eq('sub_id', subId)
-        .limit(1)
+      const usersCollection = collection(db, `artifacts/${appIdValue}/public/data/users_v4`)
+      const q = query(usersCollection, where('subId', '==', subId))
+      const querySnapshot = await getDocs(q)
 
-      if (error) throw error
-
-      if (!data || data.length === 0) {
-        logger.info('Auth', `Уникальный subId сгенерирован с попытки ${attempt}`, { subId, appId: APP_ID })
+      if (querySnapshot.empty) {
+        logger.info('Auth', `Уникальный subId сгенерирован с попытки ${attempt}`, { subId, appId: appIdValue })
         return subId
-      }
-
-      logger.warn('Auth', `subId ${subId} уже существует, генерируем новый (попытка ${attempt}/${maxAttempts})`)
-      if (attempt === maxAttempts) {
-        const timestamp = Date.now()
-        const extraRandom = Math.floor(Math.random() * 10000000000)
-        return `${timestamp}${extraRandom.toString().padStart(10, '0')}`
+      } else {
+        logger.warn('Auth', `subId ${subId} уже существует, генерируем новый (попытка ${attempt}/${maxAttempts})`)
+        if (attempt === maxAttempts) {
+          const timestamp = Date.now()
+          const extraRandom = Math.floor(Math.random() * 10000000000)
+          return `${timestamp}${extraRandom.toString().padStart(10, '0')}`
+        }
       }
     } catch (error) {
-      logger.error('Auth', 'Ошибка при проверке уникальности subId', { subId, attempt, appId: APP_ID }, error)
+      logger.error('Auth', 'Ошибка при проверке уникальности subId', { subId, attempt, appId: appIdValue }, error)
       if (attempt === maxAttempts) return subId
     }
   }
-
   return ThreeXUI.generateSubId()
 }
 
 export const authService = {
-  async loadUserData(uid) {
-    if (!supabase || !uid) return null
+  async loadUserData(uid, dbOverride = null) {
+    const dbInstance = dbOverride ?? db
+    if (!dbInstance || !uid) return null
 
     try {
-      const { data, error } = await supabase
-        .from('vpn_users')
-        .select('*')
-        .eq('uid', uid)
-        .eq('app_id', APP_ID)
-        .single()
+      const userDoc = doc(dbInstance, `artifacts/${APP_ID}/public/data/users_v4`, uid)
+      const userSnapshot = await getDoc(userDoc)
 
-      if (error) {
-        if (error.code === 'PGRST116') return null
-        throw error
-      }
+      if (userSnapshot.exists()) {
+        let userData = { id: userSnapshot.id, ...userSnapshot.data() }
 
-      if (!data) return null
-
-      let userData = {
-        id: data.uid,
-        email: data.email,
-        name: data.name,
-        phone: data.phone,
-        role: data.role,
-        plan: data.plan,
-        uuid: data.uuid,
-        subId: data.sub_id,
-        expiresAt: data.expires_at,
-        tariffId: data.tariff_id,
-        tariffName: data.tariff_name,
-        photoURL: data.photo_url,
-        language: data.language,
-        referredBy: data.referred_by,
-        createdAt: data.source_created_at,
-        updatedAt: data.source_updated_at,
-        ...(data.raw || {}),
-      }
-
-      if (!userData.subId) {
-        logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный (loadUserData)', { uid, email: userData.email })
-        try {
-          const generatedSubId = await generateUniqueSubId()
-          const { error: updateErr } = await supabase
-            .from('vpn_users')
-            .update({ sub_id: generatedSubId, source_updated_at: new Date().toISOString() })
-            .eq('uid', uid)
-
-          if (!updateErr) {
+        if (!userData.subId) {
+          logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный (loadUserData)', { uid, email: userData.email })
+          try {
+            const generatedSubId = await generateUniqueSubId(dbInstance, APP_ID)
+            await updateDoc(userDoc, { subId: generatedSubId, updatedAt: new Date().toISOString() })
             userData = { ...userData, subId: generatedSubId }
-            logger.info('Auth', 'subId добавлен существующему пользователю (loadUserData)', { uid, subId: generatedSubId })
+          } catch (subIdErr) {
+            logger.error('Auth', 'Ошибка при генерации subId для существующего пользователя', { uid }, subIdErr)
           }
-        } catch (subIdErr) {
-          logger.error('Auth', 'Ошибка при генерации subId для существующего пользователя', { uid }, subIdErr)
         }
-      }
 
-      logger.debug('Auth', 'Данные пользователя загружены', { uid, email: userData.email, hasSubId: !!userData.subId })
-      return userData
+        return userData
+      }
+      return null
     } catch (err) {
-      if (err.message?.includes('permission') || err.code === '42501') {
+      if (err.code === 'permission-denied') {
         logger.error('Auth', 'Нет доступа к данным пользователя (permission-denied)', { uid }, err)
         throw err
       }
-
-      if (err.message?.includes('offline') || err.message?.includes('Failed to fetch')) {
-        logger.warn('Auth', 'Supabase офлайн, пытаемся загрузить из кеша localStorage', { uid })
+      if (err.code === 'unavailable' || err.message?.includes('offline') || err.message?.includes('Failed to get document because the client is offline')) {
         try {
           const savedUserStr = localStorage.getItem('vpn_current_user')
           if (savedUserStr) {
             const { parseUserSafely } = await import('../../../shared/utils/sanitizeUser.js')
             const savedUser = parseUserSafely(savedUserStr)
-            if (savedUser && savedUser.id === uid) {
-              logger.info('Auth', 'Данные пользователя загружены из localStorage (офлайн-режим)', { uid, email: savedUser.email })
-              return savedUser
-            }
+            if (savedUser && savedUser.id === uid) return savedUser
           }
-        } catch (localErr) {
-          logger.warn('Auth', 'Ошибка загрузки из localStorage', { uid }, localErr)
-        }
+        } catch (localErr) {}
         return null
       }
-
       logger.error('Auth', 'Ошибка загрузки данных пользователя', { uid }, err)
       return null
     }
   },
 
-  async ensureUserExists(supabaseUser) {
-    if (!supabaseUser?.id) return null
-    const existing = await this.loadUserData(supabaseUser.id)
-    if (existing) return existing
-
-    const generatedUUID = ThreeXUI.generateUUID()
-    const generatedSubId = await generateUniqueSubId()
-    const now = new Date().toISOString()
-    const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'
-
-    const newUserData = {
-      uid: supabaseUser.id,
-      app_id: APP_ID,
-      email: supabaseUser.email || null,
-      name: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || '',
-      phone: '',
-      role: 'user',
-      plan: 'free',
-      uuid: generatedUUID,
-      sub_id: generatedSubId,
-      expires_at: null,
-      tariff_id: null,
-      tariff_name: null,
-      photo_url: supabaseUser.user_metadata?.avatar_url || null,
-      language: uiLang,
-      referred_by: null,
-      raw: {},
-      source_created_at: now,
-      source_updated_at: now,
+  async ensureFirestoreUserIfMissing(firebaseUser, dbOverride = null) {
+    if (!firebaseUser?.uid) return null
+    const baseUrl = getApiBaseUrl()
+    try {
+      const idToken = await firebaseUser.getIdToken()
+      const res = await fetch(`${baseUrl}/api/auth/ensure-firestore-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.user) return { id: data.user.id, ...data.user }
+        return await this.loadUserData(firebaseUser.uid, dbOverride)
+      }
+    } catch (err) {
+      logger.warn('Auth', 'ensure-firestore-user не удался', { uid: firebaseUser.uid }, err)
     }
-
-    const { error } = await supabase.from('vpn_users').upsert(newUserData, { onConflict: 'uid' })
-    if (error) {
-      logger.error('Auth', 'Ошибка создания пользователя в Supabase', { uid: supabaseUser.id }, error)
-      throw error
-    }
-
-    logger.info('Auth', 'Пользователь создан в Supabase', { uid: supabaseUser.id, email: supabaseUser.email })
-    return {
-      id: supabaseUser.id,
-      email: newUserData.email,
-      name: newUserData.name,
-      phone: newUserData.phone,
-      role: newUserData.role,
-      plan: newUserData.plan,
-      uuid: newUserData.uuid,
-      subId: newUserData.sub_id,
-      expiresAt: null,
-      tariffId: null,
-      tariffName: null,
-      photoURL: newUserData.photo_url,
-      language: newUserData.language,
-      createdAt: now,
-      updatedAt: now,
-    }
+    return null
   },
 
   async createUserWithEmail(email, password, name, referredBy = null) {
-    if (!supabase) {
-      throw new Error('Система авторизации недоступна. Проверьте конфигурацию Supabase.')
+    if (!auth || !db) throw new Error('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
+
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+    const firebaseUser = userCredential.user
+
+    if (name.trim()) {
+      await updateProfile(firebaseUser, { displayName: name.trim() })
     }
-
-    logger.info('Auth', 'Начало регистрации нового пользователя через Supabase Auth', { email })
-
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: name.trim() },
-      },
-    })
-
-    if (authError) throw authError
-    const supabaseUser = authData.user
-    if (!supabaseUser) throw new Error('Не удалось создать пользователя')
 
     const generatedUUID = ThreeXUI.generateUUID()
-    logger.info('Auth', 'UUID сгенерирован для нового пользователя', { email, uuid: generatedUUID })
+    const generatedSubId = await generateUniqueSubId(db, APP_ID)
 
-    const generatedSubId = await generateUniqueSubId()
-    logger.info('Auth', 'Уникальный subId сгенерирован для нового пользователя', { email, subId: generatedSubId })
-
+    const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
     const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'
-    const now = new Date().toISOString()
-    const newUserRow = {
-      uid: supabaseUser.id,
-      app_id: APP_ID,
-      email,
-      name: name.trim(),
-      phone: '',
-      role: 'user',
-      plan: 'free',
-      uuid: generatedUUID,
-      sub_id: generatedSubId,
-      expires_at: null,
-      tariff_id: null,
-      tariff_name: null,
-      photo_url: null,
-      language: uiLang,
-      referred_by: referredBy?.trim() || null,
-      raw: {},
-      source_created_at: now,
-      source_updated_at: now,
-    }
-
-    const { error: insertErr } = await supabase.from('vpn_users').upsert(newUserRow, { onConflict: 'uid' })
-    if (insertErr) throw insertErr
-
-    logger.info('Supabase', 'Данные пользователя созданы', { uid: supabaseUser.id, email })
-
-    const userData = {
-      id: supabaseUser.id,
+    const newUserData = {
       email,
       name: name.trim(),
       phone: '',
@@ -250,106 +136,98 @@ export const authService = {
       expiresAt: null,
       tariffName: '',
       tariffId: '',
-      photoURL: null,
+      photoURL: firebaseUser.photoURL || null,
       language: uiLang,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       ...(referredBy && referredBy.trim() ? { referredBy: referredBy.trim() } : {}),
     }
 
-    return { supabaseUser, userData }
+    await setDoc(userDocRef, newUserData)
+
+    return {
+      firebaseUser,
+      userData: { id: firebaseUser.uid, ...newUserData },
+    }
   },
 
   async signInWithEmail(email, password) {
-    if (!supabase) {
-      throw new Error('Система авторизации недоступна. Проверьте конфигурацию Supabase.')
-    }
+    if (!auth || !db) throw new Error('Система авторизации недоступна. Проверьте конфигурацию Firebase.')
 
-    logger.info('Auth', 'Попытка входа через Supabase Auth', { email })
+    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    const firebaseUser = userCredential.user
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password })
-    if (authError) throw authError
-
-    const supabaseUser = authData.user
-    if (!supabaseUser) throw new Error('Не удалось войти')
-
-    let userData = await this.loadUserData(supabaseUser.id)
+    let userData = await this.loadUserData(firebaseUser.uid)
     if (!userData) {
-      userData = await this.ensureUserExists(supabaseUser)
+      userData = await this.ensureFirestoreUserIfMissing(firebaseUser)
       if (!userData) {
-        logger.warn('Auth', 'Данные пользователя не найдены', { uid: supabaseUser.id })
-        await supabase.auth.signOut()
+        await signOut(auth)
         throw new Error('Данные пользователя не найдены. Обратитесь к администратору.')
       }
     }
 
-    const currentUserData = {
-      ...userData,
-      email: supabaseUser.email || userData.email,
-      photoURL: supabaseUser.user_metadata?.avatar_url || userData.photoURL || null,
+    return {
+      firebaseUser,
+      userData: {
+        ...userData,
+        email: firebaseUser.email || userData.email,
+        photoURL: firebaseUser.photoURL || userData.photoURL || null,
+      },
     }
-
-    logger.info('Auth', 'Успешный вход', { email, uid: supabaseUser.id, role: userData.role })
-    return { supabaseUser, userData: currentUserData }
   },
 
   async signOut() {
-    if (!supabase) {
-      throw new Error('Система авторизации недоступна.')
-    }
-
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
-    logger.info('Auth', 'Выход выполнен')
-  },
-
-  async sendPasswordResetEmail(email) {
-    if (!supabase || !email || typeof email !== 'string') {
-      throw new Error('Email обязателен для сброса пароля')
-    }
-    const trimmed = email.trim()
-    if (!trimmed) throw new Error('Email обязателен для сброса пароля')
-
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed)
-    if (error) throw error
-    logger.info('Auth', 'Письмо для сброса пароля отправлено', { email: trimmed })
+    if (!auth) throw new Error('Система авторизации недоступна.')
+    await signOut(auth)
   },
 
   getErrorMessageI18nKey(error) {
-    if (!error?.message) return null
-    const msg = error.message.toLowerCase()
-    const messageToKey = {
-      'invalid login credentials': 'app.wrongPassword',
-      'email not confirmed': 'app.emailNotConfirmed',
-      'user not found': 'app.userNotFound',
-      'email already registered': 'app.emailExists',
-      'password should be at least': 'validation.passwordMinLength',
-      'too many requests': 'app.tooManyAttempts',
-      'network': 'app.networkError',
-      'signup is disabled': 'app.serviceUnavailable',
+    if (!error?.code) return null
+    const codeToKey = {
+      'auth/user-not-found': 'app.userNotFound',
+      'auth/wrong-password': 'app.wrongPassword',
+      'auth/invalid-email': 'app.invalidEmailFormat',
+      'auth/user-disabled': 'app.accountBlocked',
+      'auth/too-many-requests': 'app.tooManyAttempts',
+      'auth/network-request-failed': 'app.networkError',
+      'auth/email-already-in-use': 'app.emailExists',
+      'auth/operation-not-allowed': 'app.serviceUnavailable',
+      'auth/weak-password': 'validation.passwordMinLength',
+      'auth/popup-blocked': 'app.redirectSignInStateLost',
+      'auth/account-exists-with-different-credential': 'app.emailExists',
+      'auth/invalid-credential': 'app.telegramInvalidCredential',
+      'permission-denied': 'app.noAccessDb',
+      'unavailable': 'app.serviceUnavailable',
     }
-    for (const [substring, key] of Object.entries(messageToKey)) {
-      if (msg.includes(substring)) return key
-    }
-    return null
+    return codeToKey[error.code] ?? null
   },
 
   getErrorMessage(error) {
     if (!error) return null
-    const msg = error.message?.toLowerCase() || ''
+    if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') return null
     const errorMessages = {
-      'invalid login credentials': 'Неверный email или пароль.',
-      'email not confirmed': 'Email не подтверждён. Проверьте почту.',
-      'user not found': 'Пользователь с таким email не найден.',
-      'email already registered': 'Пользователь с таким email уже существует.',
-      'user already registered': 'Пользователь с таким email уже существует.',
-      'password should be at least': 'Пароль слишком слабый. Используйте более сложный пароль.',
-      'too many requests': 'Слишком много попыток входа. Попробуйте позже.',
-      'signup is disabled': 'Регистрация временно отключена.',
+      'auth/user-not-found': 'Пользователь с таким email не найден.',
+      'auth/wrong-password': 'Неверный пароль.',
+      'auth/invalid-email': 'Неверный формат email.',
+      'auth/user-disabled': 'Аккаунт заблокирован. Обратитесь к администратору.',
+      'auth/too-many-requests': 'Слишком много попыток входа. Попробуйте позже.',
+      'auth/network-request-failed': 'Ошибка сети. Проверьте подключение к интернету.',
+      'auth/email-already-in-use': 'Пользователь с таким email уже существует.',
+      'auth/operation-not-allowed': 'Операция не разрешена. Обратитесь к администратору.',
+      'auth/weak-password': 'Пароль слишком слабый. Используйте более сложный пароль.',
+      'auth/popup-blocked': 'Всплывающее окно заблокировано. Разрешите всплывающие окна и попробуйте еще раз.',
+      'auth/account-exists-with-different-credential': 'Аккаунт с таким email уже существует. Используйте другой способ входа.',
+      'auth/invalid-credential': 'Не удалось войти. На сервере должен быть настроен тот же проект Firebase (projectId), что и у приложения.',
+      'permission-denied': 'Нет доступа к базе данных. Обратитесь к администратору системы.',
+      'unavailable': 'Сервис временно недоступен. Попробуйте позже.',
     }
-    for (const [substring, message] of Object.entries(errorMessages)) {
-      if (msg.includes(substring)) return message
-    }
-    return error.message || 'Произошла ошибка. Попробуйте еще раз.'
+    return errorMessages[error.code] || error.message || 'Произошла ошибка. Попробуйте еще раз.'
+  },
+
+  async sendPasswordResetEmail(email) {
+    if (!auth || !email || typeof email !== 'string') throw new Error('Email обязателен для сброса пароля')
+    const trimmed = email.trim()
+    if (!trimmed) throw new Error('Email обязателен для сброса пароля')
+    await firebaseSendPasswordResetEmail(auth, trimmed)
   },
 }
