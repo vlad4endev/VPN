@@ -9,7 +9,7 @@ const KNOWLEDGE_BASE_URL = null
 const PERSONAL_DATA_URL = null
 
 const linkClass =
-  'text-slate-500 hover:text-slate-300 transition-colors text-xs flex items-center gap-1 touch-manipulation'
+  'text-slate-500 hover:text-slate-300 transition-colors text-xs flex items-center gap-1 touch-manipulation min-h-[2.75rem] py-2 px-2 rounded-lg hover:bg-slate-800/30'
 
 /**
  * Общий подвал приложения: по умолчанию скрыт, раскрывается по клику на кнопку.
@@ -28,7 +28,7 @@ export default function Footer() {
           <button
             type="button"
             onClick={() => setIsExpanded(true)}
-            className="w-full py-2 flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-400 text-xs font-medium transition-colors touch-manipulation"
+            className="w-full py-3 min-h-[2.75rem] flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-400 text-xs font-medium transition-colors touch-manipulation"
             aria-expanded="false"
             aria-label={t('footer.showFooter', 'Показать подвал')}
           >
@@ -37,7 +37,7 @@ export default function Footer() {
           </button>
         ) : (
           <footer>
-            <div className="max-w-content mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+            <div className="max-w-content mx-auto px-4 sm:px-6 md:px-8 py-3 sm:py-4">
               <div className="flex flex-col items-center gap-2 sm:gap-3 text-center">
                 <div className="flex items-center justify-center gap-2 w-full">
                   <p className="text-slate-600 text-xs font-medium tracking-wide">
@@ -46,7 +46,7 @@ export default function Footer() {
                   <button
                     type="button"
                     onClick={() => setIsExpanded(false)}
-                    className="p-1 rounded text-slate-500 hover:text-slate-400 hover:bg-slate-800/50 transition-colors"
+                    className="min-w-[2.75rem] min-h-[2.75rem] p-2 rounded-lg text-slate-500 hover:text-slate-400 hover:bg-slate-800/50 transition-colors touch-manipulation flex items-center justify-center"
                     aria-label={t('footer.hideFooter', 'Свернуть подвал')}
                     title={t('footer.hideFooter', 'Свернуть')}
                   >

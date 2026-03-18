@@ -67,12 +67,12 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
   ]
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30 w-full">
-      <main id="main" role="main" className="min-w-0 w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex-1 flex flex-col bg-slate-950 text-slate-200 overflow-x-hidden selection:bg-blue-500/30 w-full max-w-[100vw]">
+      <main id="main" role="main" className="min-w-0 w-full max-w-full overflow-x-hidden flex flex-col">
         {/* Hero — экран приветствия */}
-        <header className="relative pt-14 sm:pt-16 lg:pt-20 pb-12 sm:pb-14 lg:pb-16 px-4 sm:px-6 lg:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950 overflow-hidden" role="banner" aria-label={t('welcome.mainScreen')}>
-          <div className="max-w-7xl mx-auto text-center w-full">
-            <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10">
+        <header className="relative pt-14 sm:pt-16 md:pt-20 pb-12 sm:pb-14 md:pb-16 px-4 sm:px-6 md:px-8 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-slate-950 to-slate-950 overflow-hidden" role="banner" aria-label={t('welcome.mainScreen')}>
+          <div className="max-w-[80rem] mx-auto text-center w-full px-4 sm:px-6 md:px-8">
+            <div className="absolute top-3 right-3 sm:top-4 sm:right-4 md:top-5 md:right-5 z-10">
               <LanguageSwitcher />
             </div>
             <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs sm:text-sm font-bold mb-6 sm:mb-8 animate-bounce" aria-hidden="true">
@@ -122,8 +122,8 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
           </div>
         </header>
 
-        {/* Преимущества */}
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 w-full" aria-label={t('welcome.benefits')}>
+        {/* Преимущества — Mobile-First: 1 col → 2 cols (768px) → 3 cols (1024px) */}
+        <section className="container-responsive py-12 sm:py-16 md:py-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 w-full" aria-label={t('welcome.benefits')}>
           <div className="bg-slate-900/50 border border-slate-800 p-5 sm:p-6 lg:p-8 rounded-2xl sm:rounded-[2.5rem] group hover:border-blue-500/40 transition-all min-w-0 overflow-hidden">
             <div className="bg-blue-500/10 w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center text-blue-500 mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
               <Shield size={24} className="sm:w-7 sm:h-7" />
@@ -148,8 +148,8 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
         </section>
 
         {/* Тарифы */}
-        <section className="py-10 sm:py-14 lg:py-16 px-4 sm:px-6" aria-labelledby="welcome-tariffs-heading">
-          <div className="max-w-7xl mx-auto rounded-2xl sm:rounded-[2.5rem] bg-slate-900/60 border border-slate-700/80 shadow-2xl shadow-blue-900/10 px-4 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-16">
+        <section className="container-responsive py-10 sm:py-14 md:py-16" aria-labelledby="welcome-tariffs-heading">
+          <div className="max-w-[80rem] mx-auto rounded-2xl sm:rounded-[2.5rem] bg-slate-900/60 border border-slate-700/80 shadow-2xl shadow-blue-900/10 px-4 sm:px-6 md:px-8 py-8 sm:py-12 md:py-16">
           <div className="text-center mb-8 sm:mb-12">
             <h2 id="welcome-tariffs-heading" className="text-[clamp(1.75rem,5vw,3rem)] lg:text-5xl font-black text-white mb-3 sm:mb-4 tracking-tighter">{t('welcome.tariffs')}</h2>
             <div className="inline-flex p-1 rounded-xl bg-slate-800/80 border border-slate-700" role="tablist" aria-label={t('welcome.tariffChoice')}>
@@ -186,7 +186,7 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
               <Check className="text-blue-500 shrink-0" size={20} /> {t('welcome.locationsList')}
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 max-w-5xl mx-auto mb-8 sm:mb-10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 md:gap-6 max-w-[64rem] mx-auto mb-8 sm:mb-10">
             {durations.map(({ key, labelKey }) => {
               const { total, perMonth } = prices[key]
               const is12 = key === 12
@@ -224,8 +224,8 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
         </section>
 
         {/* Статистика: отзывы и пользователи */}
-        <section className="py-10 sm:py-14 lg:py-16 px-4 sm:px-6" aria-label={t('welcome.statsUsers')}>
-          <div className="max-w-5xl mx-auto">
+        <section className="container-responsive py-10 sm:py-14 md:py-16" aria-label={t('welcome.statsUsers')}>
+          <div className="max-w-[64rem] mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl sm:rounded-3xl p-5 sm:p-6 lg:p-8 text-center hover:border-blue-500/40 transition-all min-w-0">
                 <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-blue-500 mb-1 sm:mb-2">200+</div>
@@ -251,8 +251,8 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
         </section>
 
         {/* Локации */}
-        <section className="bg-slate-900/30 py-12 sm:py-16 lg:py-20 px-4 sm:px-6 border-y border-slate-900" aria-label={t('welcome.presencePoints')}>
-          <div className="max-w-7xl mx-auto text-center">
+        <section className="container-responsive bg-slate-900/30 py-12 sm:py-16 md:py-20 border-y border-slate-900" aria-label={t('welcome.presencePoints')}>
+          <div className="max-w-[80rem] mx-auto text-center">
             <h2 className="text-[clamp(1.5rem,4vw,2.25rem)] lg:text-4xl font-black text-white mb-3 sm:mb-4 leading-none italic">{t('welcome.presencePoints')}</h2>
             <p className="text-slate-400 text-base sm:text-lg max-w-2xl mx-auto mb-8 sm:mb-12 font-medium leading-relaxed px-2">{t('welcome.presenceDesc')}</p>
             <ul className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-4xl mx-auto list-none p-0 m-0">
@@ -266,7 +266,7 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
         </section>
 
         {/* Отзывы — карусель влево/вправо */}
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-16 lg:py-20" aria-labelledby="welcome-reviews-heading">
+        <section className="container-responsive py-12 sm:py-16 md:py-20" aria-labelledby="welcome-reviews-heading">
           <div className="text-center mb-8 sm:mb-12">
             <h2 id="welcome-reviews-heading" className="text-[clamp(1.75rem,4vw,3rem)] lg:text-5xl font-black text-white mb-3 sm:mb-4 tracking-tighter">{t('welcome.reviewsSection')}</h2>
             <p className="text-slate-500 font-bold uppercase tracking-widest text-xs sm:text-sm">{t('welcome.reviewsSubtitle')}</p>
@@ -277,7 +277,7 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
                 type="button"
                 onClick={() => scrollReviews('left')}
                 aria-label={t('welcome.reviewPrev')}
-                className="absolute left-0 sm:left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 active:scale-95 transition-all shadow-xl min-w-[40px] min-h-[40px] touch-manipulation"
+                className="absolute left-0 sm:left-2 top-1/2 -translate-y-1/2 z-10 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 active:scale-95 transition-all shadow-xl min-w-[2.75rem] min-h-[2.75rem] touch-manipulation"
               >
                 <ChevronLeft size={22} className="sm:w-6 sm:h-6" />
               </button>
@@ -285,7 +285,7 @@ export default function WelcomePage({ onSetView, reviews = [], onTelegramSignIn,
                 type="button"
                 onClick={() => scrollReviews('right')}
                 aria-label={t('welcome.reviewNext')}
-                className="absolute right-0 sm:right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 active:scale-95 transition-all shadow-xl min-w-[40px] min-h-[40px] touch-manipulation"
+                className="absolute right-0 sm:right-2 top-1/2 -translate-y-1/2 z-10 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-800/90 border border-slate-700 text-white flex items-center justify-center hover:bg-slate-700 hover:border-blue-500/50 active:scale-95 transition-all shadow-xl min-w-[2.75rem] min-h-[2.75rem] touch-manipulation"
               >
                 <ChevronRight size={22} className="sm:w-6 sm:h-6" />
               </button>

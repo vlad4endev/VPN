@@ -53,10 +53,19 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Images and Media - Responsive by default */
+/* Images and Media - Responsive by default, no horizontal overflow */
 img, video, iframe, embed, object {
   max-width: 100%;
   height: auto;
+}
+img, video {
+  display: block;
+}
+/* Для контейнеров с фиксированными размерами — заполнение без искажений */
+img.object-cover, video.object-cover {
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
 }
 
 /* Defensive CSS for flex items */
@@ -64,36 +73,44 @@ img, video, iframe, embed, object {
   min-width: 0; /* Prevent flex items from pushing out their parents */
 }
 
-/* Container utility - Mobile First (320→480→1025→1441) */
+/* Container utility - Mobile First (320→768→1024→1280) */
 @layer utilities {
   .container-responsive {
     width: 100%;
-    max-width: 1280px;
+    max-width: 80rem; /* 1280px */
     margin-left: auto;
     margin-right: auto;
-    padding-left: clamp(1rem, 4vw, 1.25rem);  /* 16-20px mobile */
-    padding-right: clamp(1rem, 4vw, 1.25rem);
+    padding-left: clamp(1rem, 4vw, 1.5rem);
+    padding-right: clamp(1rem, 4vw, 1.5rem);
   }
   
-  @media (min-width: 481px) {
+  @media (min-width: 768px) {
     .container-responsive {
       padding-left: 1.5rem;
       padding-right: 1.5rem;
     }
   }
   
-  @media (min-width: 1025px) {
+  @media (min-width: 1024px) {
     .container-responsive {
       padding-left: 2rem;
       padding-right: 2rem;
     }
   }
   
-  @media (min-width: 1441px) {
+  @media (min-width: 1280px) {
     .container-responsive {
       padding-left: 2.5rem;
       padding-right: 2.5rem;
     }
+  }
+  
+  /* Responsive section spacing - единообразные отступы между блоками */
+  .section-gap {
+    margin-bottom: clamp(2rem, 4vw, 4rem);
+  }
+  .section-gap-sm {
+    margin-bottom: clamp(1rem, 2vw, 2rem);
   }
 }
 

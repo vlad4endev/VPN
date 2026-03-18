@@ -17,7 +17,7 @@ const navItemClass = (active) =>
   }`
 
 const navSubItemClass = (active) =>
-  `w-full min-h-[40px] flex items-center gap-2 sm:gap-3 pl-6 sm:pl-7 pr-3 sm:pr-4 py-2 sm:py-2.5 rounded-lg transition-all duration-200 touch-manipulation text-[0.9em] ${
+  `w-full min-h-[2.75rem] flex items-center gap-2 sm:gap-3 pl-6 sm:pl-7 pr-3 sm:pr-4 py-2 sm:py-2.5 rounded-lg transition-all duration-200 touch-manipulation text-[0.9em] ${
     active ? 'bg-blue-600/90 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 active:bg-slate-700'
   }`
 
@@ -133,7 +133,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
         target="_blank"
         rel="noopener noreferrer"
         onClick={() => setIsMenuOpen(false)}
-        className="w-full min-h-[40px] flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-800 hover:text-sky-400 text-sm transition-colors"
+        className="w-full min-h-[2.75rem] flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-lg text-slate-500 hover:bg-slate-800 hover:text-sky-400 text-sm transition-colors touch-manipulation"
         aria-label="Telegram"
       >
         <span className="font-medium">Telegram</span>
@@ -220,7 +220,7 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
                     <button
                       type="button"
                       onClick={() => toggleAdminSection(section.titleKey)}
-                      className="w-full min-h-[36px] flex items-center gap-2 pl-6 sm:pl-7 pr-3 sm:pr-4 py-1.5 sm:py-2 rounded-lg text-left text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors touch-manipulation"
+                      className="w-full min-h-[2.75rem] flex items-center gap-2 pl-6 sm:pl-7 pr-3 sm:pr-4 py-2 sm:py-2.5 rounded-lg text-left text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors touch-manipulation"
                       aria-expanded={isExpanded}
                       aria-label={isExpanded ? `${t('common.collapse')} ${t(section.titleKey)}` : `${section.titleKey}`}
                     >

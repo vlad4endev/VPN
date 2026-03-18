@@ -229,7 +229,7 @@ const LoginForm = ({
                 <button
                   type="button"
                   onClick={onForgotPassword}
-                  className="text-xs font-semibold text-slate-400 hover:text-blue-400 transition-colors bg-transparent border-0 cursor-pointer p-0"
+                  className="text-xs font-semibold text-slate-400 hover:text-blue-400 transition-colors bg-transparent border-0 cursor-pointer py-2 px-2 -mr-2 min-h-[2.75rem] flex items-center touch-manipulation"
                 >
                   {labelT(t, 'auth.forgotPassword', forceFallbackLabels)}
                 </button>
@@ -296,7 +296,7 @@ const LoginForm = ({
                       <button
                         type="button"
                         onClick={() => setShowPrivacyModal(true)}
-                        className="text-blue-400 hover:text-blue-300 underline focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded"
+                        className="text-blue-400 hover:text-blue-300 underline focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded py-2 px-1 -mx-1 touch-manipulation"
                       >
                         {t('auth.consentPrivacyLink')}
                       </button>
@@ -414,7 +414,7 @@ const LoginForm = ({
               window.history.replaceState(null, '', window.location.pathname || '/')
             }
           }}
-          className="block w-full mt-8 text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline text-center bg-transparent border-0 cursor-pointer p-0"
+          className="block w-full mt-8 py-3 min-h-[2.75rem] text-slate-600 text-xs font-bold hover:text-blue-400 transition-colors hover:underline text-center bg-transparent border-0 cursor-pointer touch-manipulation flex items-center justify-center"
         >
           {t('auth.backToHome')}
         </button>
