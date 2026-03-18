@@ -80,7 +80,7 @@ const SupportView = ({
         onSetAdminTab={onSetAdminTab}
       />
 
-      <main className="flex-1 flex flex-col min-h-0 pb-20 lg:pb-0 lg:ml-64 pt-14 sm:pt-16 lg:pt-0">
+      <main className="flex-1 w-full lg:w-[calc(100%-16rem)] flex flex-col min-h-0 pb-20 lg:pb-0 lg:ml-64 pt-14 sm:pt-16 lg:pt-0">
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-3 sm:p-4 lg:p-6 gap-3 sm:gap-4 min-w-0">
           {/* Список тикетов */}
           <section className="lg:w-80 xl:w-96 flex-shrink-0 flex flex-col bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden min-w-0">

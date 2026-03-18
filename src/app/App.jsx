@@ -3871,7 +3871,7 @@ export default function VPNServiceApp() {
           onSetView={setView}
           onLogout={handleLogout}
         />
-        <div className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 lg:ml-64 pt-14 sm:pt-16 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 w-full lg:w-[calc(100%-16rem)] min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 lg:ml-64 pt-14 sm:pt-16 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
           <div className="w-full min-w-0">
             <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
               <FinancesDashboard formatDate={formatDate} currentUser={currentUser} />
