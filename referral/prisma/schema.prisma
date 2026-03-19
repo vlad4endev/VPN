@@ -1,0 +1,101 @@
+// Referral domain schema for PostgreSQL (Next.js App Router + Prisma).
+// Run from repo: cd referral && npm install && npx prisma migrate dev
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ReferralRecordStatus {
+  PENDING
+  COMPLETED
+  FRAUD
+}
+
+enum ReferralRewardStatus {
+  PENDING
+  CREDITED
+  VOID
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  passwordHash String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// IP при регистрации (первый из X-Forwarded-For / socket)
+  registrationIp String? @db.VarChar(45)
+
+  /// SHA-256 (hex) отпечатка с клиента (UA + экран и т.д.), опционально
+  deviceFingerprintHash String? @db.VarChar(128)
+
+  /// Публичный код приглашения (A-Z0-9), генерируется при регистрации
+  referralCode String @unique @db.VarChar(16)
+
+  referredById String?
+  referredBy   User?   @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  invitedUsers User[]  @relation("UserReferrals")
+
+  recordsAsReferrer ReferralRecord[] @relation("ReferrerRecords")
+  recordsAsReferee  ReferralRecord[] @relation("RefereeRecords")
+  referralRewards   ReferralReward[]
+}
+
+model ReferralRecord {
+  id         String               @id @default(cuid())
+  referrerId String
+  refereeId  String
+  status     ReferralRecordStatus @default(PENDING)
+  createdAt  DateTime             @default(now())
+
+  /// Аудит антифрода (копия данных на момент обработки)
+  refereeSignupIp          String? @db.VarChar(45)
+  refereeFingerprintHash String? @db.VarChar(128)
+
+  referrer User @relation("ReferrerRecords", fields: [referrerId], references: [id], onDelete: Cascade)
+  referee  User @relation("RefereeRecords", fields: [refereeId], references: [id], onDelete: Cascade)
+
+  rewards ReferralReward[]
+
+  /// Один реферер на одного приглашённого
+  @@unique([refereeId])
+  @@index([referrerId])
+  @@index([status])
+}
+
+model ReferralReward {
+  id String @id @default(cuid())
+
+  userId String
+
+  referralRecordId String
+
+  /// Сумма в минимальных денежных единицах (центы и т.д.)
+  amountCents Int
+  currency    String @default("USD") @db.VarChar(8)
+
+  kind String @default("REFERRER") @db.VarChar(32)
+
+  status     ReferralRewardStatus @default(PENDING)
+  creditedAt DateTime?
+
+  externalTransactionId String? @db.VarChar(128)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referralRecord ReferralRecord @relation(fields: [referralRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([referralRecordId, userId])
+  @@index([userId])
+  @@index([status])
+  @@index([referralRecordId])
+}
