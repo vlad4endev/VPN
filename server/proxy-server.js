@@ -403,13 +403,15 @@ app.post('/api/test-session', async (req, res) => {
     if (!session) {
       return res.status(401).json({
         success: false,
-        msg: 'Авторизация в 3x-ui не удалась'
+        msg: 'Авторизация в 3x-ui не удалась',
+        sessionCookie: null,
       })
     }
 
     return res.status(200).json({
       success: true,
-      msg: 'Сессия 3x-ui активна'
+      msg: 'Сессия 3x-ui активна',
+      sessionCookie: session,
     })
 
   } catch (error) {

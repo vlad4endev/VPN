@@ -917,19 +917,16 @@ export default function VPNServiceApp() {
       // Проверяем успешность
       const data = response.data || {}
       
-      // Извлекаем cookies из заголовков ответа
-      // Cookies приходят в формате: ["3x-ui=...; Path=/; Expires=...; Max-Age=3600; HttpOnly; SameSite=Lax"]
-      let sessionCookie = null
+      // sessionCookie приходит в body от backend (предпочтительно),
+      // т.к. заголовок Set-Cookie часто недоступен из JS в браузере.
+      let sessionCookie = data.sessionCookie || null
+
+      // Fallback: попробуем извлечь из заголовков, если backend не вернул sessionCookie.
       const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie']
-      
-      if (setCookieHeader) {
-        // set-cookie может быть массивом или строкой
+      if (!sessionCookie && setCookieHeader) {
         const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
-        
-        // Ищем cookie с именем "3x-ui"
         for (const cookieString of cookieArray) {
           if (cookieString.includes('3x-ui=')) {
-            // Извлекаем значение cookie (до первой точки с запятой)
             const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
             if (cookieMatch) {
               sessionCookie = cookieMatch[1]
@@ -937,8 +934,8 @@ export default function VPNServiceApp() {
             }
           }
         }
-        
-        logger.info('Admin', '🍪 Cookies извлечены из ответа', {
+
+        logger.info('Admin', '🍪 Cookies извлечены из заголовков', {
           serverId: server.id,
           serverName: server.name,
           hasSetCookie: !!setCookieHeader,

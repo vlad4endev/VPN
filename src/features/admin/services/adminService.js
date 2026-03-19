@@ -227,16 +227,41 @@ export const adminService = {
       
       if (settingsSnapshot.exists()) {
         const data = settingsSnapshot.data()
-        // Очищаем username от кавычек при загрузке
-        const firestoreServers = (data.servers || []).map(server => {
+        // Backward-compat: в старых версиях `servers` мог сохраниться как объект (map), а не массив.
+        const rawServersCandidate = data.servers
+        const rawServers = Array.isArray(rawServersCandidate)
+          ? rawServersCandidate
+          : rawServersCandidate && typeof rawServersCandidate === 'object'
+            ? Object.entries(rawServersCandidate).map(([id, server]) => {
+                if (server && typeof server === 'object') return { ...server, id: server.id ?? id }
+                return { id }
+              })
+            : []
+
+        const firestoreServers = rawServers.map((server) => {
+          let normalizedTariffIds = []
+          if (Array.isArray(server?.tariffIds)) {
+            normalizedTariffIds = server.tariffIds
+          } else if (server?.tariffIds && typeof server.tariffIds === 'object') {
+            // Возможный формат: { [tariffId]: true } или { [tariffId]: "tariffId" }
+            const entries = Object.entries(server.tariffIds)
+            const values = entries.map(([, v]) => v)
+            const allBooleans = values.length > 0 && values.every((v) => typeof v === 'boolean')
+            normalizedTariffIds = allBooleans
+              ? entries.filter(([, v]) => v).map(([k]) => k)
+              : values.filter((v) => v != null && v !== false).map((v) => String(v))
+          }
+
           const cleanServer = {
             ...server,
-            xuiUsername: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+            xuiUsername: (server?.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+            tariffIds: normalizedTariffIds,
           }
-          
+
           // Если у сервера нет поля protocol, определяем его по порту
           if (!cleanServer.protocol) {
-            cleanServer.protocol = (cleanServer.serverPort === 443 || cleanServer.serverPort === 40919) ? 'https' : 'http'
+            cleanServer.protocol =
+              cleanServer.serverPort === 443 || cleanServer.serverPort === 40919 ? 'https' : 'http'
           }
           return cleanServer
         })
@@ -484,11 +509,24 @@ export const adminService = {
     const settingsSnap = await getDoc(settingsRef)
     if (settingsSnap.exists()) {
       const data = settingsSnap.data()
-      const servers = data.servers || []
-      const newServers = servers.map((s) => ({
-        ...s,
-        tariffIds: Array.isArray(s.tariffIds) ? s.tariffIds.filter((id) => id !== tariffId) : [],
-      }))
+      const rawServersCandidate = data.servers
+      const servers = Array.isArray(rawServersCandidate)
+        ? rawServersCandidate
+        : rawServersCandidate && typeof rawServersCandidate === 'object'
+          ? Object.entries(rawServersCandidate).map(([id, s]) => {
+              if (s && typeof s === 'object') return { ...s, id: s.id ?? id }
+              return { id }
+            })
+          : []
+
+      const newServers = servers.map((s) => {
+        const ids = Array.isArray(s.tariffIds) ? s.tariffIds : []
+        return {
+          ...s,
+          tariffIds: ids.filter((id) => id !== tariffId),
+        }
+      })
+
       const changed = newServers.some((s, i) => (s.tariffIds || []).length !== (servers[i].tariffIds || []).length)
       if (changed) {
         await updateDoc(settingsRef, { servers: newServers, updatedAt: new Date().toISOString() })
@@ -586,7 +624,15 @@ export const adminService = {
     const settingsSnap = await getDoc(settingsRef)
     if (settingsSnap.exists()) {
       const data = settingsSnap.data()
-      const servers = data.servers || []
+      const rawServersCandidate = data.servers
+      const servers = Array.isArray(rawServersCandidate)
+        ? rawServersCandidate
+        : rawServersCandidate && typeof rawServersCandidate === 'object'
+          ? Object.entries(rawServersCandidate).map(([id, s]) => {
+              if (s && typeof s === 'object') return { ...s, id: s.id ?? id }
+              return { id }
+            })
+          : []
       let changed = false
       const newServers = servers.map((s) => {
         const ids = s.tariffIds || []

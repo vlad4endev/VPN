@@ -229,17 +229,22 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       })
 
       const data = response.data || {}
-      let sessionCookie = null
-      const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie']
-      
-      if (setCookieHeader) {
-        const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
-        for (const cookieString of cookieArray) {
-          if (cookieString.includes('3x-ui=')) {
-            const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
-            if (cookieMatch) {
-              sessionCookie = cookieMatch[1]
-              break
+      // В браузере заголовок Set-Cookie часто недоступен из JS,
+      // поэтому sessionCookie приходит в body от backend.
+      let sessionCookie = data.sessionCookie || null
+
+      // Fallback: попробуем извлечь из заголовков, если backend по какой-то причине не вернул sessionCookie.
+      if (!sessionCookie) {
+        const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie']
+        if (setCookieHeader) {
+          const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
+          for (const cookieString of cookieArray) {
+            if (cookieString.includes('3x-ui=')) {
+              const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
+              if (cookieMatch) {
+                sessionCookie = cookieMatch[1]
+                break
+              }
             }
           }
         }

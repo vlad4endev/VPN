@@ -783,10 +783,31 @@ export default function VPNServiceApp() {
             userId: currentUser?.id,
           })
         }
-        const rawServers = Array.isArray(rawServersCandidate) ? rawServersCandidate : []
+        // Backward-compat: в старых версиях `servers` мог сохраниться как объект (map), а не массив.
+        const rawServers = Array.isArray(rawServersCandidate)
+          ? rawServersCandidate
+          : rawServersCandidate && typeof rawServersCandidate === 'object'
+            ? Object.entries(rawServersCandidate).map(([id, server]) => {
+                if (server && typeof server === 'object') {
+                  return { ...server, id: server.id ?? id }
+                }
+                return { id }
+              })
+            : []
         const firestoreServers = rawServers.map(server => {
-          const normalizedTariffIds = Array.isArray(server.tariffIds) ? server.tariffIds : []
-          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds)) {
+          let normalizedTariffIds = []
+          if (Array.isArray(server.tariffIds)) {
+            normalizedTariffIds = server.tariffIds
+          } else if (server.tariffIds && typeof server.tariffIds === 'object') {
+            // Возможный формат: { [tariffId]: true } или { [tariffId]: "tariffId" }
+            const entries = Object.entries(server.tariffIds)
+            const values = entries.map(([, v]) => v)
+            const allBooleans = values.length > 0 && values.every((v) => typeof v === 'boolean')
+            normalizedTariffIds = allBooleans
+              ? entries.filter(([, v]) => v).map(([k]) => k)
+              : values.filter((v) => v != null && v !== false).map((v) => String(v))
+          }
+          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds) && typeof server.tariffIds !== 'object') {
             const idsIsObjectLike = server.tariffIds && typeof server.tariffIds === 'object'
             const idsPreview = idsIsObjectLike
               ? Object.fromEntries(Object.entries(server.tariffIds).slice(0, 5))
@@ -868,12 +889,33 @@ export default function VPNServiceApp() {
             adminId: currentUser?.id,
           })
         }
-        const rawServers = Array.isArray(rawServersCandidate) ? rawServersCandidate : []
+        // Backward-compat: в старых версиях `servers` мог сохраниться как объект (map), а не массив.
+        const rawServers = Array.isArray(rawServersCandidate)
+          ? rawServersCandidate
+          : rawServersCandidate && typeof rawServersCandidate === 'object'
+            ? Object.entries(rawServersCandidate).map(([id, server]) => {
+                if (server && typeof server === 'object') {
+                  return { ...server, id: server.id ?? id }
+                }
+                return { id }
+              })
+            : []
         const firestoreServers = rawServers.map(server => {
           // КРИТИЧНО: Очищаем кавычки при загрузке из Firestore
           // Это исправляет проблему, если в Firestore сохранены данные с кавычками
-          const normalizedTariffIds = Array.isArray(server.tariffIds) ? server.tariffIds : []
-          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds)) {
+          let normalizedTariffIds = []
+          if (Array.isArray(server.tariffIds)) {
+            normalizedTariffIds = server.tariffIds
+          } else if (server.tariffIds && typeof server.tariffIds === 'object') {
+            // Возможный формат: { [tariffId]: true } или { [tariffId]: "tariffId" }
+            const entries = Object.entries(server.tariffIds)
+            const values = entries.map(([, v]) => v)
+            const allBooleans = values.length > 0 && values.every((v) => typeof v === 'boolean')
+            normalizedTariffIds = allBooleans
+              ? entries.filter(([, v]) => v).map(([k]) => k)
+              : values.filter((v) => v != null && v !== false).map((v) => String(v))
+          }
+          if (server.tariffIds !== undefined && !Array.isArray(server.tariffIds) && typeof server.tariffIds !== 'object') {
             const idsIsObjectLike = server.tariffIds && typeof server.tariffIds === 'object'
             const idsPreview = idsIsObjectLike
               ? Object.fromEntries(Object.entries(server.tariffIds).slice(0, 5))
@@ -3041,19 +3083,16 @@ export default function VPNServiceApp() {
       // Проверяем успешность
       const data = response.data || {}
       
-      // Извлекаем cookies из заголовков ответа
-      // Cookies приходят в формате: ["3x-ui=...; Path=/; Expires=...; Max-Age=3600; HttpOnly; SameSite=Lax"]
-      let sessionCookie = null
+      // sessionCookie может приходить в body от backend (предпочтительно),
+      // т.к. заголовок Set-Cookie часто недоступен из JS в браузере.
+      let sessionCookie = response.data?.sessionCookie || null
+
+      // Fallback: попробуем извлечь из заголовков, если backend не вернул sessionCookie.
       const setCookieHeader = response.headers['set-cookie'] || response.headers['Set-Cookie']
-      
-      if (setCookieHeader) {
-        // set-cookie может быть массивом или строкой
+      if (!sessionCookie && setCookieHeader) {
         const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader]
-        
-        // Ищем cookie с именем "3x-ui"
         for (const cookieString of cookieArray) {
           if (cookieString.includes('3x-ui=')) {
-            // Извлекаем значение cookie (до первой точки с запятой)
             const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
             if (cookieMatch) {
               sessionCookie = cookieMatch[1]
@@ -3061,8 +3100,8 @@ export default function VPNServiceApp() {
             }
           }
         }
-        
-        logger.info('Admin', '🍪 Cookies извлечены из ответа', {
+
+        logger.info('Admin', '🍪 Cookies извлечены из заголовков', {
           serverId: server.id,
           serverName: server.name,
           hasSetCookie: !!setCookieHeader,

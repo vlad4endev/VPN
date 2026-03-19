@@ -1856,12 +1856,30 @@ app.post('/api/test-session', express.json(), async (req, res) => {
       validateStatus: () => true,
       timeout: 10000,
     })
+    let sessionCookie = null
     const setCookie = response.headers['set-cookie'] || response.headers['Set-Cookie']
     if (setCookie) {
       const arr = Array.isArray(setCookie) ? setCookie : [setCookie]
+      // Извлекаем значение cookie со строкой вида: "3x-ui=...; Path=/; ..."
+      for (const cookieString of arr) {
+        if (typeof cookieString === 'string' && cookieString.includes('3x-ui=')) {
+          const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
+          if (cookieMatch) {
+            sessionCookie = cookieMatch[1]
+            break
+          }
+        }
+      }
+      // Перекидываем заголовки Set-Cookie в ответ клиенту
       arr.forEach(c => res.append('Set-Cookie', c))
     }
-    res.status(response.status).json(response.data || {})
+
+    // Важно: в браузере заголовок Set-Cookie не всегда доступен из JS,
+    // поэтому отдаём sessionCookie дополнительно в JSON.
+    res.status(response.status).json({
+      ...(response.data || {}),
+      sessionCookie,
+    })
   } catch (error) {
     console.error('❌ Test session error:', error.message)
     res.status(error.response?.status || 500).json({

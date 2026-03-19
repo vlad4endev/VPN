@@ -295,7 +295,26 @@ async function createApp() {
         timeout: 10000
       })
 
-      res.status(response.status).json(response.data)
+      let sessionCookie = null
+      const setCookie = response.headers['set-cookie'] || response.headers['Set-Cookie']
+      if (setCookie) {
+        const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
+        for (const cookieString of cookies) {
+          if (typeof cookieString === 'string' && cookieString.includes('3x-ui=')) {
+            const cookieMatch = cookieString.match(/3x-ui=([^;]+)/)
+            if (cookieMatch) {
+              sessionCookie = cookieMatch[1]
+              break
+            }
+          }
+        }
+        cookies.forEach((c) => res.append('Set-Cookie', c))
+      }
+
+      res.status(response.status).json({
+        ...(response.data || {}),
+        sessionCookie,
+      })
 
     } catch (error) {
       console.error('❌ Test session error:', error.message)
