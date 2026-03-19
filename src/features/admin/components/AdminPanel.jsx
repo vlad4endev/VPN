@@ -161,6 +161,7 @@ const AdminPanel = ({
 
   // Состояние для открытия карточки пользователя
   const [selectedUser, setSelectedUser] = useState(null)
+  const [selectedUserIds, setSelectedUserIds] = useState([])
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [showImportNocoDBModal, setShowImportNocoDBModal] = useState(false)
 
@@ -187,6 +188,34 @@ const AdminPanel = ({
   // Обработчик закрытия карточки
   const handleCloseUserCard = useCallback(() => {
     setSelectedUser(null)
+  }, [])
+
+  // Держим выбор только по существующим пользователям
+  useEffect(() => {
+    const existingIds = new Set(users.map((u) => u.id).filter(Boolean))
+    setSelectedUserIds((prev) => prev.filter((id) => existingIds.has(id)))
+  }, [users])
+
+  const handleToggleUserSelection = useCallback((userId) => {
+    if (!userId) return
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    )
+  }, [])
+
+  const handleToggleAllFilteredUsers = useCallback((userIdsInView, shouldSelect) => {
+    if (!Array.isArray(userIdsInView) || userIdsInView.length === 0) return
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev)
+      if (shouldSelect) {
+        userIdsInView.forEach((id) => {
+          if (id) next.add(id)
+        })
+      } else {
+        userIdsInView.forEach((id) => next.delete(id))
+      }
+      return [...next]
+    })
   }, [])
 
   // Функции handleSaveUserCard и generateUUID теперь получаются из контекста в UserCard
@@ -352,6 +381,9 @@ const AdminPanel = ({
                 handleUserDevicesChange={handleUserDevicesChange}
                 handleUserExpiresAtChange={handleUserExpiresAtChange}
                 onUserRowClick={handleUserRowClick}
+                selectedUserIds={selectedUserIds}
+                onToggleUserSelection={handleToggleUserSelection}
+                onToggleAllFilteredUsers={handleToggleAllFilteredUsers}
               />
             </div>
             {/* Карточка пользователя — через портал, чтобы не обрезалась из-за overflow на десктопе */}
@@ -1360,6 +1392,7 @@ const AdminPanel = ({
           <MailingsSection
             users={users}
             tariffs={tariffs}
+            selectedUsers={users.filter((u) => selectedUserIds.includes(u.id))}
             onSuccess={onSetSuccess}
             onError={onSetError}
           />

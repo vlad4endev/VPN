@@ -180,7 +180,7 @@ function TemplateModal({ template, onClose, onSave, saving }) {
   )
 }
 
-export default function MailingsSection({ users = [], tariffs = [], onSuccess, onError }) {
+export default function MailingsSection({ users = [], tariffs = [], selectedUsers = [], onSuccess, onError }) {
   const [activeTab, setActiveTab] = useState('broadcast')
   const [templates, setTemplates] = useState([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -338,8 +338,10 @@ export default function MailingsSection({ users = [], tariffs = [], onSuccess, o
     const planSet = new Set()
     const byPlan = {}
     const byTariff = {}
-    for (const u of users) {
+    for (const u of selectedUsers) {
       if (u?.id) ids.push(u.id)
+    }
+    for (const u of users) {
       if (u?.plan) {
         planSet.add(u.plan)
         byPlan[u.plan] = (byPlan[u.plan] || 0) + 1
@@ -360,7 +362,7 @@ export default function MailingsSection({ users = [], tariffs = [], onSuccess, o
       countByTariff: byTariff,
       tariffsById: tariffMap,
     }
-  }, [users, tariffs])
+  }, [users, selectedUsers, tariffs])
 
   const getRecipientSummary = () => {
     if (recipientFilter === 'userIds') return { label: 'Выбранные в таблице', count: userIds.length }

@@ -37,6 +37,9 @@ const VirtualizedUserTable = ({
   handleUserDevicesChange,
   handleUserExpiresAtChange,
   onUserRowClick,
+  selectedUserIds = [],
+  onToggleUserSelection,
+  onToggleAllFilteredUsers,
 }) => {
   // Высота строки: на десктопе — просторная таблица, на мобильных — карточки
   const ROW_HEIGHT_DESKTOP = 84 // высокие строки на десктопе для удобства
@@ -155,6 +158,8 @@ const VirtualizedUserTable = ({
     handleUserExpiresAtChange,
     onUserRowClick,
     isMobile,
+    selectedUserIds,
+    onToggleUserSelection,
   }), [
     filteredUsers,
     editingUser,
@@ -170,6 +175,8 @@ const VirtualizedUserTable = ({
     handleUserExpiresAtChange,
     onUserRowClick,
     isMobile,
+    selectedUserIds,
+    onToggleUserSelection,
   ])
 
   // Компонент карточки пользователя для мобильных
@@ -179,6 +186,7 @@ const VirtualizedUserTable = ({
 
     const userStatus = getUserStatus(user)
     const isEditing = data.editingUser?.id === user.id
+    const isSelected = data.selectedUserIds.includes(user.id)
 
     return (
       <div
@@ -198,6 +206,15 @@ const VirtualizedUserTable = ({
           {/* Заголовок карточки - компактный */}
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex-1 min-w-0 pr-2">
+              <label className="flex items-center gap-2 mb-1 text-slate-400 text-xs" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => data.onToggleUserSelection?.(user.id)}
+                  className="rounded border-slate-600 text-sky-500"
+                />
+                В рассылку
+              </label>
               <h3 className="text-white font-semibold text-sm break-words mb-0.5 leading-tight">
                 {user.name || user.email || 'Без имени'}
               </h3>
@@ -346,6 +363,7 @@ const VirtualizedUserTable = ({
 
     const userStatus = getUserStatus(user)
     const isEditing = data.editingUser?.id === user.id
+    const isSelected = data.selectedUserIds.includes(user.id)
 
     const openCard = () => {
       if (data.onUserRowClick && !isEditing) {
@@ -361,7 +379,16 @@ const VirtualizedUserTable = ({
         role="button"
         aria-label={`Открыть карточку ${user.name || user.email || 'пользователя'}`}
       >
-        <div className="grid grid-cols-6 gap-4 md:gap-5 px-5 md:px-6 py-4 items-center min-h-[76px] max-h-full overflow-hidden">
+        <div className="grid grid-cols-[auto_1fr_1fr_1fr_1fr_1fr_1fr] gap-4 md:gap-5 px-5 md:px-6 py-4 items-center min-h-[76px] max-h-full overflow-hidden">
+          <div onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => data.onToggleUserSelection?.(user.id)}
+              className="rounded border-slate-600 text-sky-500"
+              aria-label={`Выбрать ${user.name || user.email || 'пользователя'} для рассылки`}
+            />
+          </div>
           {/* Имя пользователя */}
           <div className="min-w-0">
             <div className="text-slate-200 font-medium text-base truncate" title={user.name || user.email}>
@@ -537,6 +564,21 @@ const VirtualizedUserTable = ({
           </button>
         </div>
 
+        {filteredUsers.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filteredUsers.every((u) => selectedUserIds.includes(u.id))}
+                onChange={(e) => onToggleAllFilteredUsers?.(filteredUsers.map((u) => u.id).filter(Boolean), e.target.checked)}
+                className="rounded border-slate-600 text-sky-500"
+              />
+              Выбрать всех в текущем фильтре ({filteredUsers.length})
+            </label>
+            <span className="text-slate-500">Выбрано для рассылки: {selectedUserIds.length}</span>
+          </div>
+        )}
+
         {/* Панель фильтров — сетка на мобильных, ряд на десктопе */}
         {filtersExpanded && (
           <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -639,7 +681,8 @@ const VirtualizedUserTable = ({
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
           {/* Заголовок таблицы для десктопа — крупнее для удобства */}
-          <div className="flex-shrink-0 bg-slate-800/50 grid grid-cols-6 gap-4 md:gap-5 px-5 md:px-6 py-4 border-b border-slate-700">
+          <div className="flex-shrink-0 bg-slate-800/50 grid grid-cols-[auto_1fr_1fr_1fr_1fr_1fr_1fr] gap-4 md:gap-5 px-5 md:px-6 py-4 border-b border-slate-700">
+            <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">✓</div>
             <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Пользователь</div>
             <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Роль</div>
             <div className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Статус</div>
