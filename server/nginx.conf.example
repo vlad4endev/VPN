@@ -123,6 +123,14 @@ server {
         return 302 $scheme://$host/#review;
     }
 
+    # Magic-link привязка: тот же UI, что и /?token=... (строгое SPA: try_files или прокси на app.get('*') в Node)
+    location = /bind-telegram {
+        return 302 $scheme://$host/$is_args$args;
+    }
+    location = /bind-telegram/ {
+        return 302 $scheme://$host/$is_args$args;
+    }
+
     # ========== API: проксирование на backend (ОБЯЗАТЕЛЬНО перед location /) ==========
     # Без этого блока запросы /api/system/restart/*, /api/payment/* и др. вернут 404
     location /api/ {

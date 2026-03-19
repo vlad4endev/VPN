@@ -81,15 +81,43 @@ service cloud.firestore {
     function isValidRole(role) {
       return role is string && role in ['user', 'admin'];
     }
+
+    // --- Magic link (привязка браузерного входа по одноразовой ссылке) ---
+    // Токен на сервере: randomBytes(32).toString('hex') => 64 hex-символа.
+    // Осторожно: пока токен активен, гость теоретически может прочитать документ по известному userId (редкий вектор).
+    function isMagicLinkGuestRead() {
+      return request.auth == null &&
+        resource.data.auth_token is string &&
+        resource.data.auth_token.size() == 64 &&
+        resource.data.auth_token.matches('^[a-f0-9]{64}$') &&
+        resource.data.token_expiry is string &&
+        resource.data.token_expiry.size() > 0;
+    }
+
+    // Гость завершает привязку: email + isRegistered, сброс auth_token / token_expiry (null или удаление полей).
+    function isMagicLinkBindUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let hadToken = resource.data.auth_token is string &&
+        resource.data.auth_token.size() == 64 &&
+        resource.data.auth_token.matches('^[a-f0-9]{64}$') &&
+        resource.data.token_expiry is string;
+      let clearedToken = !request.resource.data.keys().hasAny(['auth_token']) || request.resource.data.auth_token == null;
+      let clearedExpiry = !request.resource.data.keys().hasAny(['token_expiry']) || request.resource.data.token_expiry == null;
+      return request.auth == null && hadToken && clearedToken && clearedExpiry &&
+        affected.hasOnly(['email', 'isRegistered', 'auth_token', 'token_expiry', 'updatedAt']) &&
+        request.resource.data.isRegistered == true &&
+        isValidEmail(request.resource.data.email) &&
+        request.resource.data.updatedAt is string;
+    }
     
     // Пользователи - только свой документ или админы могут читать/писать все
     match /artifacts/{appId}/public/data/users_v4/{userId} {
-      // Чтение: свой документ или админ (claim или роль в Firestore)
-      allow read: if request.auth != null && (
+      // Чтение: свой документ, админ, или гость с активной magic-ссылкой (запрос where auth_token == token)
+      allow read: if (request.auth != null && (
         isOwner(userId) || 
         isAdmin() || 
         isAdminFromFirestore()
-      );
+      )) || isMagicLinkGuestRead();
       
       // Создание: только аутентифицированные пользователи могут создавать свой документ
       // ВАЛИДАЦИЯ: Проверяем обязательные поля и их формат. Реферальная система: допускаем опциональное поле referredBy.
@@ -116,7 +144,7 @@ service cloud.firestore {
       // Обновление: свой документ или админ (claim или роль в Firestore)
       // Путь 1: владелец делает только «очистку подписки» (uuid/plan/expiresAt/... → null) — разрешаем без строгой валидации полей
       // Путь 2: общее правило с валидацией обновляемых полей. referralBonusBalance только через backend (владелец не может менять).
-      allow update: if request.auth != null && (
+      allow update: if (request.auth != null && (
         (isOwner(userId) && isSubscriptionCleanupUpdate()) ||
         ((isOwner(userId) || isAdmin() || isAdminFromFirestore()) &&
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email']) || isValidEmail(request.resource.data.email)) &&
@@ -129,7 +157,7 @@ service cloud.firestore {
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['referralCode']) || (request.resource.data.referralCode is string && request.resource.data.referralCode.size() >= 6 && request.resource.data.referralCode.size() <= 32)) &&
           (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['referralBonusBalance']) || (isAdmin() || isAdminFromFirestore())) &&
           request.resource.data.updatedAt is string)
-      );
+      )) || isMagicLinkBindUpdate();
       
       // Удаление: админ (claim или роль в Firestore)
       allow delete: if request.auth != null && (isAdmin() || isAdminFromFirestore());

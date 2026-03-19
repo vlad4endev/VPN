@@ -114,6 +114,17 @@
         }
       })();
     </script>
+    <!-- Deep link magic-link: если хост отдаёт index.html только с «/», переносим query на корень (как /#review) -->
+    <script>
+      (function() {
+        var p = (window.location.pathname || '').replace(/\/+$/, '').toLowerCase();
+        if (p === '/bind-telegram' || p.endsWith('/bind-telegram')) {
+          var u = new URL(window.location.href);
+          u.pathname = '/';
+          window.location.replace(u.toString());
+        }
+      })();
+    </script>
     <div id="root">
       <noscript>
         <h1 class="text-2xl font-bold text-white p-8">SKYFLOW</h1>

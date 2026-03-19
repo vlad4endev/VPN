@@ -6,6 +6,8 @@
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
   "redirects": [
+    { "source": "/bind-telegram", "destination": "/", "permanent": false },
+    { "source": "/bind-telegram/", "destination": "/", "permanent": false },
     { "source": "/t", "destination": "/", "permanent": false },
     { "source": "/t/", "destination": "/", "permanent": false },
     { "source": "/telegram", "destination": "/", "permanent": false },
