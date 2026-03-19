@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
-import { Mail, Lock, RotateCcw, ShieldCheck, KeyRound, Telegram } from 'lucide-react'
+import { Mail, Lock, RotateCcw, ShieldCheck, KeyRound, Send } from 'lucide-react'
 import logger from '../../../shared/utils/logger.js'
 import { validateEmail } from '../utils/validateEmail.js'
 import { validatePassword } from '../utils/validatePassword.js'
@@ -402,7 +402,7 @@ export default function BindTelegramAccount({ db, appId, setCurrentUser, setView
                 {submitLoading ? (
                   <span className="inline-block h-4 w-4 rounded-full border-2 border-white/60 border-t-white animate-spin" />
                 ) : (
-                  <Telegram className="w-4 h-4" />
+                  <Send className="w-4 h-4" />
                 )}
                 {submitLoading ? 'Привязываем...' : 'Привязать и войти'}
               </button>
