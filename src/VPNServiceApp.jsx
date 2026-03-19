@@ -893,6 +893,8 @@ export default function VPNServiceApp() {
         serverPort: server.serverPort,
         protocol: protocol,
         randompath: server.randompath || '',
+        username: (server.xuiUsername || '').trim().replace(/^["']|["']$/g, ''),
+        password: server.xuiPassword || '',
       }
       
       // Логируем payload без credentials

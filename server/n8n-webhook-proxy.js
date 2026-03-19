@@ -1838,6 +1838,33 @@ app.post('/api/public/review', async (req, res) => {
  * Использует XUI_USERNAME, XUI_PASSWORD из env. Проксирует ответ и Set-Cookie клиенту.
  */
 app.post('/api/test-session', express.json(), async (req, res) => {
+  const attemptLogin = async (protocolToTry) => {
+    const {
+      serverIP,
+      serverPort,
+      randompath = '',
+      username,
+      password,
+    } = req.body || {}
+    const normalizedPath = randompath
+      ? `/${String(randompath).replace(/^\/+|\/+$/g, '')}`
+      : ''
+    const baseUrl = `${protocolToTry}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
+    const loginUrl = `${baseUrl}/login`
+    return axios.post(
+      loginUrl,
+      {
+        username: username ?? process.env.XUI_USERNAME ?? '',
+        password: password ?? process.env.XUI_PASSWORD ?? '',
+      },
+      {
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        validateStatus: () => true,
+        timeout: 10000,
+      },
+    )
+  }
+
   try {
     const { serverIP, serverPort, protocol = 'http', randompath = '' } = req.body || {}
     if (!serverIP || !serverPort) {
@@ -1846,16 +1873,27 @@ app.post('/api/test-session', express.json(), async (req, res) => {
         msg: 'serverIP и serverPort обязательны',
       })
     }
-    const username = process.env.XUI_USERNAME || ''
-    const password = process.env.XUI_PASSWORD || ''
-    const normalizedPath = randompath ? `/${String(randompath).replace(/^\/+|\/+$/g, '')}` : ''
-    const baseUrl = `${protocol}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
-    const loginUrl = `${baseUrl}/login`
-    const response = await axios.post(loginUrl, { username, password }, {
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      validateStatus: () => true,
-      timeout: 10000,
-    })
+
+    const protocolToTry = String(protocol || 'http').toLowerCase()
+    let response
+    try {
+      response = await attemptLogin(protocolToTry)
+    } catch (err) {
+      // Частый кейс: на порту реально HTTPS, а мы пробуем HTTP.
+      // Тогда Node часто ругается "Parse Error: Invalid HTTP version".
+      const msg = String(err?.message || '')
+      const shouldRetry =
+        msg.includes('Invalid HTTP version') || msg.includes('Parse Error') || msg.includes('HPE_INVALID_VERSION')
+
+      if (shouldRetry) {
+        const altProtocol = protocolToTry === 'https' ? 'http' : 'https'
+        const retryResponse = await attemptLogin(altProtocol)
+        response = retryResponse
+      } else {
+        throw err
+      }
+    }
+
     let sessionCookie = null
     const setCookie = response.headers['set-cookie'] || response.headers['Set-Cookie']
     if (setCookie) {

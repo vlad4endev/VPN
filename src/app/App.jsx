@@ -3062,6 +3062,8 @@ export default function VPNServiceApp() {
         serverPort: server.serverPort,
         protocol: protocol,
         randompath: server.randompath || '',
+        username: username,
+        password: password,
       }
       
       // Логируем payload без credentials

@@ -212,11 +212,16 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     const protocol = currentServer.protocol || (currentServer.serverPort === 443 || currentServer.serverPort === 40919 ? 'https' : 'http')
 
     try {
+      const xuiUsername = (currentServer.xuiUsername || '').trim().replace(/^["']|["']$/g, '')
+      const xuiPassword = currentServer.xuiPassword || ''
+
       const requestPayload = {
-        serverIP: server.serverIP,
-        serverPort: server.serverPort,
+        serverIP: currentServer.serverIP,
+        serverPort: currentServer.serverPort,
         protocol: protocol,
-        randompath: server.randompath || '',
+        randompath: currentServer.randompath || '',
+        username: xuiUsername,
+        password: xuiPassword,
       }
       
       const response = await axios.post('/api/test-session', requestPayload, {
