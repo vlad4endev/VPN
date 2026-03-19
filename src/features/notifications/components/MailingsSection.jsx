@@ -180,7 +180,16 @@ function TemplateModal({ template, onClose, onSave, saving }) {
   )
 }
 
-export default function MailingsSection({ users = [], tariffs = [], selectedUsers = [], onSuccess, onError }) {
+export default function MailingsSection({
+  users = [],
+  tariffs = [],
+  selectedUsers = [],
+  selectedUserIds = [],
+  onToggleUserSelection,
+  onSetSelectedUserIds,
+  onSuccess,
+  onError,
+}) {
   const [activeTab, setActiveTab] = useState('broadcast')
   const [templates, setTemplates] = useState([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -195,10 +204,13 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
   const [broadcastPlan, setBroadcastPlan] = useState('')
   const [broadcastTariffId, setBroadcastTariffId] = useState('')
   const [broadcastButtons, setBroadcastButtons] = useState([{ label: '', url: '' }])
+  const [recipientSearch, setRecipientSearch] = useState('')
   const [broadcastSending, setBroadcastSending] = useState(false)
   const [lastResult, setLastResult] = useState(null)
   const [scheduledList, setScheduledList] = useState([])
   const [scheduledLoading, setScheduledLoading] = useState(false)
+  const [historyList, setHistoryList] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
@@ -260,9 +272,25 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
     }
   }, [calendarMonth, onError])
 
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true)
+    try {
+      const list = await notificationsService.getBroadcastHistory({ limit: 100 })
+      setHistoryList(list)
+    } catch (err) {
+      onError?.(err.message)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [onError])
+
   useEffect(() => {
     if (activeTab === 'calendar') loadScheduled()
   }, [activeTab, loadScheduled])
+
+  useEffect(() => {
+    if (activeTab === 'history') loadHistory()
+  }, [activeTab, loadHistory])
 
   useEffect(() => {
     if (scheduleModalOpen && !scheduleForm.scheduledDate) {
@@ -376,6 +404,17 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
   }
   const recipientSummary = getRecipientSummary()
 
+  const filteredRecipientUsers = useMemo(() => {
+    const q = recipientSearch.trim().toLowerCase()
+    if (!q) return users
+    return users.filter((u) => {
+      const name = String(u?.name || '').toLowerCase()
+      const email = String(u?.email || '').toLowerCase()
+      const login = String(u?.login || '').toLowerCase()
+      return name.includes(q) || email.includes(q) || login.includes(q)
+    })
+  }, [users, recipientSearch])
+
   const getScheduledRecipientLabel = (s) => {
     if (s.recipientFilter === 'all') return 'Всем'
     if (s.recipientFilter === 'plan' && s.plan) return `План «${s.plan}»`
@@ -457,7 +496,12 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
         }
       )
       setLastResult(result)
-      onSuccess?.(`Отправлено: ${result.sent ?? 0}${result.failed > 0 ? `, ошибок: ${result.failed}` : ''}`)
+      loadHistory()
+      const telegramInfo = result?.telegram
+      const telegramPart = telegramInfo?.enabled
+        ? `, Telegram: ${telegramInfo.sent ?? 0}${telegramInfo.failed > 0 ? ` (ошибок: ${telegramInfo.failed})` : ''}${telegramInfo.skipped > 0 ? `, не привязан: ${telegramInfo.skipped}` : ''}`
+        : ''
+      onSuccess?.(`Отправлено: ${result.sent ?? 0}${result.failed > 0 ? `, ошибок: ${result.failed}` : ''}${telegramPart}`)
     } catch (err) {
       onError?.(err.message)
     } finally {
@@ -502,6 +546,17 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
             <span className="text-slate-500 text-xs font-normal">({templates.length})</span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('history')}
+          className={`px-4 py-3 text-sm font-medium flex items-center gap-2 ${activeTab === 'history' ? 'bg-slate-800 text-sky-400 border-b-2 border-sky-500' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <Clock className="w-4 h-4" />
+          История
+          {historyList.length > 0 && (
+            <span className="text-slate-500 text-xs font-normal">({historyList.length})</span>
+          )}
+        </button>
       </div>
 
       {/* Сводка: шаблоны, запланировано, последняя отправка */}
@@ -510,7 +565,7 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
         <span>Запланировано: {pendingCount}</span>
         {lastResult != null && (
           <span className="text-green-400/90">
-            Последняя отправка: {lastResult.sent} доставлено{lastResult.failed > 0 ? `, ${lastResult.failed} ошибок` : ''}
+            Последняя отправка: {lastResult.sent} доставлено{lastResult.failed > 0 ? `, ${lastResult.failed} ошибок` : ''}{lastResult.telegram?.enabled ? `, Telegram: ${lastResult.telegram.sent ?? 0}` : ''}
           </span>
         )}
       </div>
@@ -749,6 +804,54 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
                   </select>
                 )}
               </div>
+
+              {recipientFilter === 'userIds' && (
+                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={recipientSearch}
+                      onChange={(e) => setRecipientSearch(e.target.value)}
+                      placeholder="Поиск по имени, email, login"
+                      className="w-full sm:w-auto sm:flex-1 min-w-[240px] px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onSetSelectedUserIds?.([...new Set([...selectedUserIds, ...filteredRecipientUsers.map((u) => u.id).filter(Boolean)])])}
+                      className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-sm"
+                    >
+                      Выбрать найденных
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSetSelectedUserIds?.(selectedUserIds.filter((id) => !filteredRecipientUsers.some((u) => u.id === id)))}
+                      className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm"
+                    >
+                      Снять найденных
+                    </button>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto border border-slate-700 rounded-lg">
+                    {filteredRecipientUsers.length === 0 ? (
+                      <div className="p-3 text-sm text-slate-500">Ничего не найдено</div>
+                    ) : (
+                      filteredRecipientUsers.map((u) => (
+                        <label key={u.id} className="flex items-center gap-3 px-3 py-2 border-b border-slate-800 last:border-b-0 cursor-pointer hover:bg-slate-800/60">
+                          <input
+                            type="checkbox"
+                            checked={selectedUserIds.includes(u.id)}
+                            onChange={() => onToggleUserSelection?.(u.id)}
+                            className="rounded border-slate-600 text-sky-500"
+                          />
+                          <span className="text-slate-200 text-sm">
+                            {u.name || u.login || u.email || u.id}
+                            <span className="text-slate-500 ml-2">{u.email || u.login || ''}</span>
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className="space-y-3 border-t border-slate-700 pt-4">
@@ -925,6 +1028,69 @@ export default function MailingsSection({ users = [], tariffs = [], selectedUser
                   )}
                 </ul>
               </>
+            )}
+          </>
+        )}
+
+        {activeTab === 'history' && (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-slate-400 text-sm">
+                История отправленных рассылок и одиночных уведомлений.
+              </p>
+              <button
+                type="button"
+                onClick={loadHistory}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+              >
+                <Loader2 className={`w-4 h-4 ${historyLoading ? 'animate-spin' : ''}`} />
+                Обновить
+              </button>
+            </div>
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8 text-slate-500">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" /> Загрузка…
+              </div>
+            ) : historyList.length === 0 ? (
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-6 text-center text-slate-500">
+                История пока пуста.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <th className="pb-2 pr-4">Дата</th>
+                      <th className="pb-2 pr-4">Тип</th>
+                      <th className="pb-2 pr-4">Кому</th>
+                      <th className="pb-2 pr-4">Заголовок</th>
+                      <th className="pb-2 pr-4">Результат</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyList.map((h) => (
+                      <tr key={h.id} className="border-b border-slate-800 align-top">
+                        <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
+                          {h.createdAt ? new Date(h.createdAt).toLocaleString('ru-RU') : '—'}
+                        </td>
+                        <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">
+                          {h.mode === 'single' ? 'Одиночное' : 'Рассылка'}
+                        </td>
+                        <td className="py-2 pr-4 text-slate-400">
+                          {h.recipientFilter === 'all' ? 'Всем' : h.recipientFilter === 'plan' ? `План: ${h.plan || '—'}` : h.recipientFilter === 'tariff' ? `Тариф: ${h.tariffId || '—'}` : `Выбранные (${h.total || 0})`}
+                        </td>
+                        <td className="py-2 pr-4 text-slate-200 max-w-md truncate" title={h.title || ''}>
+                          {h.title || '—'}
+                        </td>
+                        <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
+                          {h.sent ?? 0}/{h.total ?? 0}
+                          {(h.failed ?? 0) > 0 ? <span className="text-red-400"> · ошибок: {h.failed}</span> : <span className="text-green-400"> · ok</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </>
         )}

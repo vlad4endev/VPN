@@ -173,6 +173,19 @@ export const notificationsService = {
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   },
 
+  async getBroadcastHistory(params = {}) {
+    const token = await getAuthToken()
+    if (!token) throw new Error('Требуется авторизация')
+    const base = getApiBaseUrl()
+    const q = new URLSearchParams()
+    if (params.limit) q.set('limit', String(params.limit))
+    const res = await fetch(`${base}/api/admin/notifications/history${q.toString() ? `?${q.toString()}` : ''}`, {
+      headers: { Authorization: `Bearer ${token}`, [APP_ID_HEADER]: APP_ID },
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    return (await res.json()).history || []
+  },
+
   async broadcastViaApi(userIds, payload) {
     const token = await getAuthToken()
     if (!token) throw new Error('Требуется авторизация')

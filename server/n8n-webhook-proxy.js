@@ -800,6 +800,7 @@ async function createNotification(params) {
 }
 
 const NOTIFICATION_TEMPLATES_PATH = `artifacts/${process.env.APP_ID || 'skyputh'}/public/data/notification_templates`
+const NOTIFICATION_HISTORY_PATH = `artifacts/${process.env.APP_ID || 'skyputh'}/public/data/notification_broadcast_history`
 
 /** Подстановка переменных в шаблон. Переменные: {{user.name}}, {{user.email}}, {{user.login}}, {{user.phone}}, {{user.tariffName}}, {{user.plan}}, {{user.expiresAt}}, {{user.subId}}, {{paymentLink}}. */
 function substituteTemplate(template, user, extra = {}) {
@@ -1242,6 +1243,21 @@ app.delete('/api/admin/notifications/templates/:id', async (req, res) => {
   }
 })
 
+app.get('/api/admin/notifications/history', async (req, res) => {
+  const authResult = await ensureAdmin(req, res)
+  if (!authResult.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Firestore недоступен' })
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200)
+    const snap = await db.collection(NOTIFICATION_HISTORY_PATH).orderBy('createdAt', 'desc').limit(limit).get()
+    const history = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    res.json({ success: true, history })
+  } catch (err) {
+    console.error('GET /api/admin/notifications/history:', err.message)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 /**
  * Рассылка уведомлений (шаблоны, фильтры, кнопки).
  * POST /api/admin/notifications/broadcast
@@ -1291,13 +1307,17 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
   }
 
   const linkUrl = paymentLink
+  const botToken = await getTelegramToken()
   let sent = 0
   let failed = 0
+  let telegramSent = 0
+  let telegramFailed = 0
+  let telegramSkipped = 0
   const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
   for (const uid of userIds) {
     const uidStr = String(uid)
     let userData = { id: uidStr }
-    if (template || buttons.some((b) => (b.url || '').includes('{{'))) {
+    if (template || buttons.some((b) => (b.url || '').includes('{{')) || botToken) {
       try {
         const uSnap = await usersRef.doc(uidStr).get()
         if (uSnap.exists) userData = { id: uSnap.id, ...uSnap.data() }
@@ -1321,6 +1341,18 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       sent += 1
       const pushPayload = { title: finalTitle, body: finalBody.slice(0, 200), url: linkUrl, type: 'notification', notificationType: type }
       await sendWebPushToUser(uidStr, pushPayload)
+      if (botToken) {
+        const tgId = userData?.tgId ? String(userData.tgId).trim() : ''
+        if (tgId) {
+          const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+          const telegramText = `📢 <b>${escapeHtml(finalTitle)}</b>\n\n${escapeHtml(finalBody)}${finalOverview ? `\n\n${escapeHtml(finalOverview)}` : ''}\n\n🔗 <a href="${safeHref}">Открыть личный кабинет</a>`
+          const tgResult = await sendTelegramMessage(botToken, tgId, telegramText)
+          if (tgResult.ok) telegramSent += 1
+          else telegramFailed += 1
+        } else {
+          telegramSkipped += 1
+        }
+      }
     } else {
       failed += 1
     }
@@ -1332,7 +1364,44 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       severity: failed === userIds.length ? 'high' : 'medium',
     }).catch((err) => console.warn('notifyAdminError broadcast:', err?.message))
   }
-  res.json({ success: true, sent, failed, total: userIds.length })
+  try {
+    await db.collection(NOTIFICATION_HISTORY_PATH).add({
+      createdAt: new Date().toISOString(),
+      mode: 'broadcast',
+      type,
+      title,
+      body: bodyText,
+      templateId: templateId || null,
+      recipientFilter,
+      plan: recipientFilter === 'plan' ? plan || null : null,
+      tariffId: recipientFilter === 'tariff' ? tariffId || null : null,
+      total: userIds.length,
+      sent,
+      failed,
+      telegram: {
+        enabled: !!botToken,
+        sent: telegramSent,
+        failed: telegramFailed,
+        skipped: telegramSkipped,
+      },
+      userIdsPreview: userIds.slice(0, 50),
+      hasMoreRecipients: userIds.length > 50,
+    })
+  } catch (err) {
+    console.warn('notification history save failed (broadcast):', err?.message)
+  }
+  res.json({
+    success: true,
+    sent,
+    failed,
+    total: userIds.length,
+    telegram: {
+      sent: telegramSent,
+      failed: telegramFailed,
+      skipped: telegramSkipped,
+      enabled: !!botToken,
+    },
+  })
 })
 
 /**
@@ -1383,7 +1452,45 @@ app.post('/api/admin/notifications/send-one', express.json(), async (req, res) =
   if (!ok) return res.status(500).json({ success: false, error: 'Не удалось создать уведомление' })
   const linkUrl = paymentLink
   await sendWebPushToUser(uid, { title, body: bodyText.slice(0, 200), url: linkUrl, type: 'notification', notificationType: type })
-  res.json({ success: true, sent: 1 })
+  const botToken = await getTelegramToken()
+  let telegram = { sent: false, reason: 'bot_not_configured' }
+  if (botToken) {
+    const tgId = userData?.tgId ? String(userData.tgId).trim() : ''
+    if (tgId) {
+      const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      const telegramText = `📢 <b>${escapeHtml(title)}</b>\n\n${escapeHtml(bodyText)}${overview ? `\n\n${escapeHtml(overview)}` : ''}\n\n🔗 <a href="${safeHref}">Открыть личный кабинет</a>`
+      const tgResult = await sendTelegramMessage(botToken, tgId, telegramText)
+      telegram = tgResult.ok ? { sent: true } : { sent: false, reason: tgResult.error || 'send_failed' }
+    } else {
+      telegram = { sent: false, reason: 'tg_not_linked' }
+    }
+  }
+  try {
+    await db.collection(NOTIFICATION_HISTORY_PATH).add({
+      createdAt: new Date().toISOString(),
+      mode: 'single',
+      type,
+      title,
+      body: bodyText,
+      templateId: templateId || null,
+      recipientFilter: 'userIds',
+      total: 1,
+      sent: 1,
+      failed: 0,
+      telegram: {
+        enabled: !!botToken,
+        sent: telegram.sent ? 1 : 0,
+        failed: telegram.sent ? 0 : (telegram.reason === 'tg_not_linked' || telegram.reason === 'bot_not_configured' ? 0 : 1),
+        skipped: telegram.reason === 'tg_not_linked' ? 1 : 0,
+        reason: telegram.reason || null,
+      },
+      userIdsPreview: [uid],
+      hasMoreRecipients: false,
+    })
+  } catch (err) {
+    console.warn('notification history save failed (single):', err?.message)
+  }
+  res.json({ success: true, sent: 1, telegram })
 })
 
 /**

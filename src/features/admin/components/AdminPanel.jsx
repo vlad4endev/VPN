@@ -218,6 +218,11 @@ const AdminPanel = ({
     })
   }, [])
 
+  const handleSetSelectedUserIds = useCallback((nextIds) => {
+    const safeIds = Array.isArray(nextIds) ? nextIds.filter(Boolean) : []
+    setSelectedUserIds([...new Set(safeIds)])
+  }, [])
+
   // Функции handleSaveUserCard и generateUUID теперь получаются из контекста в UserCard
   // AdminPanel больше не передает эти функции через пропсы
 
@@ -1392,7 +1397,10 @@ const AdminPanel = ({
           <MailingsSection
             users={users}
             tariffs={tariffs}
+            selectedUserIds={selectedUserIds}
             selectedUsers={users.filter((u) => selectedUserIds.includes(u.id))}
+            onToggleUserSelection={handleToggleUserSelection}
+            onSetSelectedUserIds={handleSetSelectedUserIds}
             onSuccess={onSetSuccess}
             onError={onSetError}
           />
