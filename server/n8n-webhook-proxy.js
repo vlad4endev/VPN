@@ -37,6 +37,8 @@ import { getXuiClient, createXuiClient } from './lib/xuiClient.js'
 import { initStorage } from './storage.js'
 import { generateUniqueSubId } from './lib/generateUniqueSubId.js'
 import { generatePaymentLink as generatePaymentLinkFromService, generateOrderId, verifyYooMoneyWebhookSignature, buildRedirectUrl } from './payment/index.js'
+import { installConsoleCapture } from './lib/consoleCapture.js'
+import { getSystemLogs, clearSystemLogs, getSystemLogMax } from './lib/systemLogBuffer.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -44,6 +46,13 @@ const serverEnvPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '.
 if (fs.existsSync(serverEnvPath)) {
   dotenv.config({ path: serverEnvPath, override: false })
 }
+
+// Capture all server-side console logs into an in-memory ring buffer
+// so the admin UI can show them (Integrations → Logs).
+// Disable via SYSTEM_LOG_CAPTURE_CONSOLE=0 if you don't want the overhead.
+installConsoleCapture({
+  enabled: process.env.SYSTEM_LOG_CAPTURE_CONSOLE !== '0',
+})
 
 /** Для операций с 3x-ui используем только xuiClient (n8n для 3x-ui не используется). */
 function getXuiForVpn() {
@@ -4432,6 +4441,22 @@ app.get('/api/admin/telegram/logs', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, TMA_LOG_BUFFER_MAX)
   const entries = getTmaLogBuffer(limit)
   res.json({ success: true, logs: entries })
+})
+
+/** GET /api/admin/system/logs — последние системные логи сервера (только админ). */
+app.get('/api/admin/system/logs', async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+
+  const max = getSystemLogMax()
+  const limit = Math.min(parseInt(req.query.limit, 10) || 200, max)
+  const since = req.query.since != null ? String(req.query.since) : undefined
+  const level = req.query.level != null ? String(req.query.level) : undefined
+  const category = req.query.category != null ? String(req.query.category) : undefined
+  const search = req.query.search != null ? String(req.query.search) : undefined
+
+  const logs = getSystemLogs({ limit, since, level, category, search })
+  res.json({ success: true, logs })
 })
 
 /** GET /api/admin/telegram/chat-info — данные чата/аккаунта по сохранённому Chat ID админа (только админ) */

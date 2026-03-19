@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Search, Filter, Download, Trash2, AlertCircle, Info, AlertTriangle, Bug, Copy, ChevronDown, ChevronUp } from 'lucide-react'
 import logger from '../utils/logger.js'
+import { auth } from '../../lib/firebase/config.js'
+import { APP_ID } from '../constants/app.js'
+import { getApiBaseUrl } from '../utils/apiBase.js'
 
 /**
  * Панель логирования для просмотра и анализа логов приложения.
@@ -19,6 +22,7 @@ export default function LoggerPanel({ onClose }) {
   const [stats, setStats] = useState(null)
   const logsEndRef = useRef(null)
   const logsContainerRef = useRef(null)
+  const remoteSinceRef = useRef(null)
 
   // Загрузка логов и подписка на новые
   useEffect(() => {
@@ -33,6 +37,67 @@ export default function LoggerPanel({ onClose }) {
     })
 
     return unsubscribe
+  }, [])
+
+  // Подтягиваем серверные логи (с последнего timestamp), чтобы "всё было видно" в одной панели.
+  useEffect(() => {
+    let stopped = false
+    const LIMIT = 200
+    const INTERVAL_MS = 2500
+
+    async function fetchRemoteLogsOnce() {
+      if (stopped) return
+      const currentUser = auth?.currentUser
+      if (!currentUser?.getIdToken) return
+
+      let token = null
+      try {
+        token = await currentUser.getIdToken()
+      } catch {
+        return
+      }
+
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'X-App-Id': APP_ID,
+      }
+
+      const baseUrl = getApiBaseUrl()
+      const since = remoteSinceRef.current
+      const qs = new URLSearchParams({
+        limit: String(LIMIT),
+        ...(since ? { since } : {}),
+      })
+
+      try {
+        const res = await fetch(`${baseUrl}/api/admin/system/logs?${qs.toString()}`, {
+          method: 'GET',
+          headers,
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || !json?.success) return
+
+        const entries = Array.isArray(json.logs) ? json.logs : []
+        if (!entries.length) return
+
+        // Запоминаем newest timestamp.
+        const newest = entries[entries.length - 1]
+        if (newest?.timestamp) remoteSinceRef.current = newest.timestamp
+
+        // Добавляем в общий хранилище фронтенда.
+        logger.ingestLogs(entries)
+      } catch (e) {
+        // Не спамим UI ошибками — просто ждём следующего тика.
+      }
+    }
+
+    fetchRemoteLogsOnce()
+    const t = setInterval(fetchRemoteLogsOnce, INTERVAL_MS)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
   }, [])
 
   // Обновление логов при изменении фильтров

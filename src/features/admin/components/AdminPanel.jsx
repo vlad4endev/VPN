@@ -375,9 +375,9 @@ const AdminPanel = ({
         )}
 
         {adminTab === 'settings' && (
-          <div className="space-y-[clamp(1rem,0.8rem+1vw,2rem)]">
+          <div className="space-y-[clamp(1rem,0.8rem+1vw,2rem)] min-h-0">
             {/* Блок 1: Серверы 3x-ui - Mobile First */}
-            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm">
+            <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl border border-slate-800 section-spacing-sm overflow-y-auto">
               <div className="mb-4 sm:mb-5 md:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
                 <div className="flex-1 min-w-0">
                   <h2 className="text-[clamp(1.125rem,1rem+0.625vw,1.5rem)] font-bold text-slate-200 mb-1.5 sm:mb-2 flex items-center gap-2">

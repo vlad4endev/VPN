@@ -49,10 +49,6 @@ class Logger {
    * @param {Error} error - Объект ошибки (если есть)
    */
   addLog(level, category, message, data = null, error = null) {
-    if (!this.shouldLog(level)) {
-      return
-    }
-
     const logEntry = {
       id: Date.now() + Math.random(),
       timestamp: new Date().toISOString(),
@@ -64,19 +60,22 @@ class Logger {
       stack: error?.stack || null,
     }
 
-    // Добавляем в начало массива (новые логи сверху)
-    this.logs.unshift(logEntry)
-
-    // Ограничиваем количество логов
-    if (this.logs.length > this.maxLogs) {
-      this.logs = this.logs.slice(0, this.maxLogs)
-    }
-
-    // Выводим в консоль для разработки
+    // Ключевое: консольный вывод делаем всегда (даже если в хранилище не попадает),
+    // чтобы "всё видеть" при отладке.
     this.logToConsole(level, category, message, data, error)
 
-    // Уведомляем подписчиков
-    this.notifyListeners(logEntry)
+    if (this.shouldLog(level)) {
+      // Добавляем в начало массива (новые логи сверху)
+      this.logs.unshift(logEntry)
+
+      // Ограничиваем количество логов
+      if (this.logs.length > this.maxLogs) {
+        this.logs = this.logs.slice(0, this.maxLogs)
+      }
+
+      // Уведомляем подписчиков только если лог действительно попал в хранилище
+      this.notifyListeners(logEntry)
+    }
   }
 
   /**
@@ -315,6 +314,38 @@ class Logger {
   clear() {
     this.logs = []
     this.notifyListeners({ type: 'clear' })
+  }
+
+  /**
+   * Вставка внешних логов (например, серверных) в текущее хранилище логов.
+   * Не применяет shouldLog(level): если админ запросил "детально", считаем что
+   * эти логи надо показывать.
+   *
+   * @param {Array<{id?: any, timestamp?: string, level?: string, category?: string, message?: string, data?: any, error?: any, stack?: string}>} entries
+   */
+  ingestLogs(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return
+
+    // entries возвращаются сервером как oldest->newest, чтобы корректно сформировать "новые сверху".
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i] || {}
+      this.logs.unshift({
+        id: e.id != null ? String(e.id) : (Date.now() + Math.random()).toString(),
+        timestamp: e.timestamp ? String(e.timestamp) : new Date().toISOString(),
+        level: e.level ? String(e.level).toLowerCase() : 'info',
+        category: e.category ? String(e.category).slice(0, 64) : 'system',
+        message: e.message ? String(e.message) : '',
+        data: e.data !== undefined ? this.sanitizeData(e.data) : null,
+        error: e.error !== undefined ? this.sanitizeData(e.error) : null,
+        stack: e.stack ? String(e.stack) : null,
+      })
+    }
+
+    if (this.logs.length > this.maxLogs) {
+      this.logs = this.logs.slice(0, this.maxLogs)
+    }
+
+    this.notifyListeners({ type: 'ingested', count: entries.length })
   }
 
   /**
