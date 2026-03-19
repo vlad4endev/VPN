@@ -96,13 +96,14 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     }
 
     try {
-      const isUpdate = cleanedServer.id && servers.find(s => s.id === cleanedServer.id)
+      const serversList = Array.isArray(servers) ? servers : []
+      const isUpdate = cleanedServer.id && serversList.find(s => s.id === cleanedServer.id)
       let updatedServers = []
       
       if (isUpdate) {
-        updatedServers = servers.map(s => s.id === cleanedServer.id ? cleanedServer : s)
+        updatedServers = serversList.map(s => s.id === cleanedServer.id ? cleanedServer : s)
       } else {
-        updatedServers = [...servers, cleanedServer]
+        updatedServers = [...serversList, cleanedServer]
       }
       
       setServers(updatedServers)
@@ -155,7 +156,8 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     }
 
     try {
-      const updatedServers = servers.filter(s => s.id !== serverId)
+      const serversList = Array.isArray(servers) ? servers : []
+      const updatedServers = serversList.filter(s => s.id !== serverId)
       setServers(updatedServers)
       
       const currentSettings = settings || {
@@ -184,7 +186,7 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     } catch (err) {
       logger.error('Admin', 'Ошибка удаления сервера из Firestore', { adminId: currentUser.id }, err)
       setError('Ошибка удаления сервера: ' + (err.message || 'Неизвестная ошибка'))
-      setServers(servers) // Восстанавливаем при ошибке
+      setServers(serversList) // Восстанавливаем при ошибке
     }
   }, [servers, currentUser, db, settings, setServers, setSettings, setError, setSuccess])
 
@@ -196,7 +198,8 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     setError('')
     setSuccess('')
 
-    const currentServer = servers.find(s => s.id === server.id) || server
+    const serversList = Array.isArray(servers) ? servers : []
+    const currentServer = serversList.find(s => s.id === server.id) || server
     
     const protocol = currentServer.protocol || (currentServer.serverPort === 443 || currentServer.serverPort === 40919 ? 'https' : 'http')
 
@@ -235,7 +238,7 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       }
 
       // Обновляем сервер с результатами теста
-      const updatedServers = servers.map(s => 
+      const updatedServers = serversList.map(s => 
         s.id === server.id 
           ? {
               ...s,
@@ -254,7 +257,7 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
       logger.error('Admin', 'Ошибка тестирования сессии', { serverId: server.id }, err)
       
       // Обновляем сервер с ошибкой
-      const updatedServers = servers.map(s => 
+      const updatedServers = serversList.map(s => 
         s.id === server.id 
           ? {
               ...s,
