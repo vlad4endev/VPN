@@ -108,7 +108,11 @@ export default function BindTelegramAccount({ db, appId, setCurrentUser, setView
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      if (!db || !appId) return
+      if (!db || !appId) {
+        setLocalError('Сервис временно недоступен. Обновите страницу или попробуйте позже.')
+        setLoading(false)
+        return
+      }
       const t = tokenFromUrl()
       if (!t) {
         setLocalError('Ссылка недействительна или срок действия истек')
@@ -159,7 +163,15 @@ export default function BindTelegramAccount({ db, appId, setCurrentUser, setView
         setLoading(false)
       } catch (err) {
         logger.error('BindTelegramAccount', 'Ошибка поиска token в Firestore', null, err)
-        setLocalError('Ссылка недействительна или срок действия истек')
+        const code = err?.code || ''
+        const msg = String(err?.message || '')
+        if (code === 'permission-denied' || /permission/i.test(msg)) {
+          setLocalError(
+            'Нет доступа к базе с этого устройства. Откройте ссылку в обычном браузере или проверьте правила Firestore для гостей.',
+          )
+        } else {
+          setLocalError('Ссылка недействительна или срок действия истек')
+        }
         setLoading(false)
       }
     }
@@ -324,7 +336,13 @@ export default function BindTelegramAccount({ db, appId, setCurrentUser, setView
             <h2 className="text-[clamp(1.7rem,5vw,2.2rem)] sm:text-3xl font-black text-white mb-2 tracking-tight italic">
               Привязка Telegram
             </h2>
-            <p className="text-slate-400 text-sm mt-3">Мы нашли вашу подписку! Придумайте логин и пароль для доступа через браузер</p>
+            <p className="text-slate-400 text-sm mt-3">
+              {profile
+                ? 'Мы нашли вашу подписку! Придумайте логин и пароль для доступа через браузер'
+                : localError
+                  ? 'Ссылку не удалось подтвердить. Запросите новую у администратора или откройте письмо/бота ещё раз.'
+                  : 'Подписка не найдена по этой ссылке. Возможно, она уже была использована.'}
+            </p>
           </div>
 
           {errorText ? (

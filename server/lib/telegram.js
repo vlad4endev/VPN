@@ -25,8 +25,13 @@ export async function sendTelegramMessage(botToken, chatId, text, options = {}) 
   const body = {
     chat_id: String(chatId).trim(),
     text: String(text),
-    parse_mode: options.parse_mode || 'HTML',
     disable_web_page_preview: options.disable_web_page_preview !== false,
+  }
+  /** Без parse_mode — plain text (устойчиво к спецсимволам). plain: true или parse_mode: null */
+  if (options.plain === true || options.parse_mode === null) {
+    // не добавляем parse_mode
+  } else {
+    body.parse_mode = options.parse_mode || 'HTML'
   }
   if (options.reply_markup) body.reply_markup = options.reply_markup
   try {

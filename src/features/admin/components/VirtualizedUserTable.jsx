@@ -665,7 +665,11 @@ const VirtualizedUserTable = ({
           <button type="button" onClick={clearFilters} className="mt-2 text-blue-400 hover:underline text-sm">Сбросить фильтры</button>
         </div>
       ) : isMobile ? (
-        <div ref={listAreaRef} className="flex-1 min-h-0 overflow-hidden flex flex-col" style={{ minHeight: 200 }}>
+        <div
+          ref={listAreaRef}
+          className="flex-1 min-h-0 overflow-hidden flex flex-col"
+          style={{ minHeight: isMobile ? 'clamp(260px, 58dvh, 720px)' : 200 }}
+        >
           <FixedSizeList
             height={listAreaHeight}
             itemCount={filteredUsers.length}

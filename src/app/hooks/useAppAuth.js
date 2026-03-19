@@ -10,6 +10,7 @@ import { isAdminEmail } from '../../shared/constants/admin.js'
 import { getFirestoreSafeName } from '../../shared/utils/firestoreSafe.js'
 import { applyUserLanguageToUi } from '../../features/auth/services/userLanguageService.js'
 import { isBrowserAuthPath } from '../../features/telegram/utils/tmaPath.js'
+import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
 
 export const useAppAuth = ({
   appId,
@@ -407,11 +408,16 @@ export const useAppAuth = ({
         // Не переключать view — остаёмся на welcome до клика (без глобального редиректа)
         // Исключение: специальные пути (magic link, set-password, review) — показываем соответствующий экран
         if (typeof window !== 'undefined') {
-          const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
+          const pathname = window.location.pathname || ''
+          const path = pathname.toLowerCase().replace(/\/+$/, '')
           const hash = (window.location.hash || '').toLowerCase()
           if (path === '/review' || hash === '#review') setView('review')
           else if (path === '/set-password') setView('set-password')
-          else if (path === '/bind-telegram') setView('bind-telegram')
+          else if (pathnameIsBindTelegram(pathname)) setView('bind-telegram')
+          else {
+            const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+            if (magicView) setView(magicView)
+          }
         }
       }
 

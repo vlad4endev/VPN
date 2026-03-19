@@ -1,5 +1,5 @@
 import { useAppStore } from '../lib/store/appStore.js';
-import React, { useState, useEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -64,6 +64,7 @@ import SetupAccount from '../features/auth/components/SetupAccount.jsx'
 import BindTelegramAccount from '../features/auth/components/BindTelegramAccount.jsx'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 import { isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
+import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../features/auth/utils/magicLinkUrl.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -386,7 +387,9 @@ export default function VPNServiceApp() {
         const hash = (window.location.hash || '').toLowerCase()
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
-        if (path === '/bind-telegram') return 'bind-telegram'
+        if (pathnameIsBindTelegram(path)) return 'bind-telegram'
+        const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+        if (magicView) return magicView
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -531,15 +534,10 @@ export default function VPNServiceApp() {
 
   // Magic Link: одноразовая ссылка с ?token=...
   useMagicLinkInit({
-    auth,
-    db,
-    appId,
     currentUser,
     firebaseUser,
     authChecking,
-    setCurrentUser,
-    setView,
-    setError
+    setView
   })
 
   // Инициализация хука Telegram — после useAppAuth (нужен loadUserData)
@@ -636,6 +634,15 @@ export default function VPNServiceApp() {
     }
   }, [view, currentUser])
 
+  // Магик-линк: пока в URL есть ?token=..., у гостя принудительно bind/setup (иначе welcome/login из vpn_current_view перекрывают экран)
+  useLayoutEffect(() => {
+    if (currentUser || firebaseUser) return
+    if (typeof window === 'undefined') return
+    const mv = getMagicLinkViewFromSearch(window.location.search || '')
+    if (!mv) return
+    if (view !== mv) setView(mv)
+  }, [view, currentUser, firebaseUser, setView])
+
   // Синхронизация view с path/hash — #review, /set-password; /payment/success и /payment/fail рендерятся по path в основном рендере
   useEffect(() => {
     const syncViewFromUrl = () => {
@@ -644,7 +651,9 @@ export default function VPNServiceApp() {
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
-      if (path === '/bind-telegram') setViewState('bind-telegram')
+      if (pathnameIsBindTelegram(window.location.pathname || '')) setView('bind-telegram')
+      const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+      if (magicView) setView(magicView)
       // /payment/success и /payment/fail обрабатываются в рендере по path — view не меняем
     }
     syncViewFromUrl()
@@ -654,7 +663,7 @@ export default function VPNServiceApp() {
       window.removeEventListener('hashchange', syncViewFromUrl)
       window.removeEventListener('popstate', syncViewFromUrl)
     }
-  }, [])
+  }, [setView])
 
   // Загрузка одобренных отзывов один раз при готовности db (для лендинга и Dashboard)
   useEffect(() => {
@@ -3967,7 +3976,7 @@ export default function VPNServiceApp() {
           onSetView={setView}
           onLogout={handleLogout}
         />
-        <div className="flex-1 w-full lg:w-[calc(100%-16rem)] min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 lg:ml-64 lg:h-screen pt-14 sm:pt-16 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-y-auto overflow-x-hidden">
+        <div className="w-full lg:flex-1 lg:min-h-0 lg:w-[calc(100%-16rem)] min-w-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 lg:ml-64 lg:h-screen pt-14 sm:pt-16 lg:pt-6 pb-20 sm:pb-24 lg:pb-6 overflow-x-hidden overflow-y-visible lg:overflow-y-auto">
           <div className="w-full min-w-0">
             <Suspense fallback={<div className="flex items-center justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
               <FinancesDashboard formatDate={formatDate} currentUser={currentUser} />

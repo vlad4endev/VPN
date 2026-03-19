@@ -1348,7 +1348,11 @@ const Dashboard = ({
   }, [currentUser?.uid])
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden overflow-y-auto bg-slate-950">
+    <div
+      className={`min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden bg-slate-950 ${
+        isTelegramMini ? 'h-[100dvh] min-h-0 overflow-y-hidden' : ''
+      }`}
+    >
       {!isTelegramMini && (
         <Sidebar
           currentUser={currentUser}
@@ -1390,7 +1394,13 @@ const Dashboard = ({
           </div>
         </>
       )}
-      <div className={`flex-1 w-full min-w-0 min-h-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 pb-20 sm:pb-24 lg:pb-8 overflow-y-auto overflow-x-hidden ${!isTelegramMini ? 'lg:ml-64 lg:w-[calc(100%-16rem)] lg:h-screen' : ''} ${isTelegramMini ? 'pt-28' : 'pt-14 sm:pt-16 lg:pt-6'}`}>
+      <div
+        className={`w-full min-w-0 p-3 sm:p-4 md:p-6 lg:p-6 xl:p-8 pb-20 sm:pb-24 lg:pb-8 overflow-x-hidden ${
+          isTelegramMini
+            ? 'flex-1 min-h-0 overflow-y-auto pt-28'
+            : 'overflow-y-visible lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:ml-64 lg:w-[calc(100%-16rem)] lg:h-screen pt-14 sm:pt-16 lg:pt-6'
+        }`}
+      >
         <div className="mb-4 sm:mb-5 md:mb-6">
           <h1 className="text-[clamp(1.25rem,1.1rem+0.75vw,1.875rem)] font-bold text-white mb-1.5 sm:mb-2">{t('sidebar.cabinet')}</h1>
           <p className="text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] text-slate-400">{t('dashboard.subtitle')}</p>

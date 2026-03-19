@@ -17,11 +17,12 @@ html, body {
   margin: 0;
   padding: 0;
   overflow-x: hidden; /* Prevent horizontal scrolling */
+  overflow-y: auto; /* Явная вертикальная прокрутка документа (иначе ломается в iOS/WebView при flex-цепочках) */
   width: 100%;
   max-width: 100%;
-  /* Reduce overscroll/rubber-band on iOS/Android */
-  overscroll-behavior-y: none;
+  /* auto: не блокируем цепочку прокрутки; none ломал «общую» прокрутку на части экранов */
   overscroll-behavior-x: none;
+  overscroll-behavior-y: auto;
 }
 
 /* Safe area insets: только на body (после сброса padding: 0), чтобы
@@ -33,16 +34,24 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* Root container: full viewport height, no horizontal overflow (fixes layout in Telegram WebView and mobile) */
+/* Root: блок без flex — иначе #root не растягивался с контентом и прокрутка «залипала» почти везде */
 #root {
   min-height: 100dvh;
   min-height: var(--vh-fill, 100vh);
+  height: auto;
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
+  overflow-y: visible;
   background-color: #020617; /* slate-950 — до монтирования React в Mini App/мобильных не чёрный без контента */
+}
+
+/* Инерция прокрутки на iOS для явных зон overflow-y */
+@supports (-webkit-overflow-scrolling: touch) {
+  .overflow-y-auto,
+  .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 

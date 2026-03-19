@@ -499,7 +499,7 @@ export default function MailingsSection({
       loadHistory()
       const telegramInfo = result?.telegram
       const telegramPart = telegramInfo?.enabled
-        ? `, Telegram: ${telegramInfo.sent ?? 0}${telegramInfo.failed > 0 ? ` (ошибок: ${telegramInfo.failed})` : ''}${telegramInfo.skipped > 0 ? `, не привязан: ${telegramInfo.skipped}` : ''}`
+        ? `, Telegram: ${telegramInfo.sent ?? 0}${telegramInfo.failed > 0 ? ` (ошибок: ${telegramInfo.failed}${telegramInfo.lastError ? `: ${telegramInfo.lastError}` : ''})` : ''}${telegramInfo.skipped > 0 ? `, не привязан TG: ${telegramInfo.skipped}` : ''}`
         : ''
       onSuccess?.(`Отправлено: ${result.sent ?? 0}${result.failed > 0 ? `, ошибок: ${result.failed}` : ''}${telegramPart}`)
     } catch (err) {
@@ -1034,10 +1034,15 @@ export default function MailingsSection({
 
         {activeTab === 'history' && (
           <>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+              <div>
               <p className="text-slate-400 text-sm">
                 История отправленных рассылок и одиночных уведомлений.
               </p>
+              <p className="text-slate-500 text-xs mt-1">
+                Колонка «Результат» — доставка в личный кабинет (колокольчик). «Telegram» — отдельная доставка в привязанный чат (нужен <code className="text-slate-400">tgId</code>).
+              </p>
+              </div>
               <button
                 type="button"
                 onClick={loadHistory}
@@ -1087,13 +1092,27 @@ export default function MailingsSection({
                           {h.sent ?? 0}/{h.total ?? 0}
                           {(h.failed ?? 0) > 0 ? <span className="text-red-400"> · ошибок: {h.failed}</span> : <span className="text-green-400"> · ok</span>}
                         </td>
-                        <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
+                        <td
+                          className="py-2 pr-4 text-slate-300 align-top max-w-[240px]"
+                          title={h.telegram?.lastError || h.telegram?.reason || ''}
+                        >
                           {h.telegram?.enabled ? (
-                            <>
-                              {h.telegram.sent ?? 0}
-                              {(h.telegram.failed ?? 0) > 0 ? <span className="text-red-400"> / err {h.telegram.failed}</span> : null}
-                              {(h.telegram.skipped ?? 0) > 0 ? <span className="text-amber-400"> / skip {h.telegram.skipped}</span> : null}
-                            </>
+                            <div className="space-y-0.5">
+                              <div className="whitespace-nowrap">
+                                <span className="text-green-400/90">{h.telegram.sent ?? 0}</span>
+                                {(h.telegram.failed ?? 0) > 0 ? (
+                                  <span className="text-red-400"> · ошибок {h.telegram.failed}</span>
+                                ) : null}
+                                {(h.telegram.skipped ?? 0) > 0 ? (
+                                  <span className="text-amber-400"> · нет tgId {h.telegram.skipped}</span>
+                                ) : null}
+                              </div>
+                              {(h.telegram.failed ?? 0) > 0 && (h.telegram.lastError || h.telegram.reason) ? (
+                                <div className="text-[11px] text-red-300/90 break-words line-clamp-3">
+                                  {h.telegram.lastError || h.telegram.reason}
+                                </div>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="text-slate-500">выкл</span>
                           )}

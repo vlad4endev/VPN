@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import logger from '../../shared/utils/logger.js'
+import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
 
 function tokenParamFromUrl() {
   if (typeof window === 'undefined') return null
@@ -7,17 +8,6 @@ function tokenParamFromUrl() {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
     return token ? String(token) : null
-  } catch {
-    return null
-  }
-}
-
-function flowParamFromUrl() {
-  if (typeof window === 'undefined') return null
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const flow = params.get('flow')
-    return flow ? String(flow).trim().toLowerCase() : null
   } catch {
     return null
   }
@@ -41,32 +31,18 @@ export function useMagicLinkInit({
 
     // Если это страница привязки Telegram — не перехватываем токен магик-линка
     if (typeof window !== 'undefined') {
-      const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
-      if (path === '/bind-telegram') return
+      const path = window.location.pathname || ''
+      if (pathnameIsBindTelegram(path)) return
     }
 
     const token = tokenParamFromUrl()
     if (!token) return
 
-    const flow = flowParamFromUrl()
+    const target = getMagicLinkViewFromSearch(typeof window !== 'undefined' ? window.location.search : '')
     startedRef.current = true
-    if (flow === 'bind-telegram') {
-      logger.info('MagicLink', 'Magic token detected -> bind-telegram view')
-      setView?.('bind-telegram')
-      return
-    }
-
-    if (flow === 'setup-account') {
-      logger.info('MagicLink', 'Magic token detected -> setup-account view (explicit flow)')
-      setView?.('setup-account')
-      return
-    }
-
-    // Fallback для старых ссылок без flow:
-    // раньше магические ссылки могли приходить только с token, поэтому
-    // направляем в bind-telegram по умолчанию.
-    logger.info('MagicLink', 'Magic token detected without flow -> bind-telegram fallback')
-    setView?.('bind-telegram')
+    const resolved = target || 'bind-telegram'
+    logger.info('MagicLink', `Magic token detected -> ${resolved} view`, { explicit: !!target })
+    setView?.(resolved)
     return
 
   }, [currentUser, firebaseUser, authChecking, setView])

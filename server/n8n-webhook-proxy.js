@@ -1313,6 +1313,7 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
   let telegramSent = 0
   let telegramFailed = 0
   let telegramSkipped = 0
+  let telegramLastError = null
   const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
   for (const uid of userIds) {
     const uidStr = String(uid)
@@ -1344,11 +1345,12 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       if (botToken) {
         const tgId = userData?.tgId ? String(userData.tgId).trim() : ''
         if (tgId) {
-          const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-          const telegramText = `📢 <b>${escapeHtml(finalTitle)}</b>\n\n${escapeHtml(finalBody)}${finalOverview ? `\n\n${escapeHtml(finalOverview)}` : ''}\n\n🔗 <a href="${safeHref}">Открыть личный кабинет</a>`
-          const tgResult = await sendTelegramMessage(botToken, tgId, telegramText)
+          const tgResult = await sendNotificationToTelegram(botToken, tgId, finalTitle, finalBody, finalOverview, linkUrl)
           if (tgResult.ok) telegramSent += 1
-          else telegramFailed += 1
+          else {
+            telegramFailed += 1
+            if (!telegramLastError) telegramLastError = tgResult.error || 'Telegram error'
+          }
         } else {
           telegramSkipped += 1
         }
@@ -1383,6 +1385,7 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
         sent: telegramSent,
         failed: telegramFailed,
         skipped: telegramSkipped,
+        lastError: telegramLastError,
       },
       userIdsPreview: userIds.slice(0, 50),
       hasMoreRecipients: userIds.length > 50,
@@ -1400,6 +1403,7 @@ app.post('/api/admin/notifications/broadcast', async (req, res) => {
       failed: telegramFailed,
       skipped: telegramSkipped,
       enabled: !!botToken,
+      lastError: telegramLastError,
     },
   })
 })
@@ -1457,10 +1461,10 @@ app.post('/api/admin/notifications/send-one', express.json(), async (req, res) =
   if (botToken) {
     const tgId = userData?.tgId ? String(userData.tgId).trim() : ''
     if (tgId) {
-      const safeHref = linkUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-      const telegramText = `📢 <b>${escapeHtml(title)}</b>\n\n${escapeHtml(bodyText)}${overview ? `\n\n${escapeHtml(overview)}` : ''}\n\n🔗 <a href="${safeHref}">Открыть личный кабинет</a>`
-      const tgResult = await sendTelegramMessage(botToken, tgId, telegramText)
-      telegram = tgResult.ok ? { sent: true } : { sent: false, reason: tgResult.error || 'send_failed' }
+      const tgResult = await sendNotificationToTelegram(botToken, tgId, title, bodyText, overview, linkUrl)
+      telegram = tgResult.ok
+        ? { sent: true }
+        : { sent: false, reason: tgResult.error || 'send_failed' }
     } else {
       telegram = { sent: false, reason: 'tg_not_linked' }
     }
@@ -1483,6 +1487,7 @@ app.post('/api/admin/notifications/send-one', express.json(), async (req, res) =
         failed: telegram.sent ? 0 : (telegram.reason === 'tg_not_linked' || telegram.reason === 'bot_not_configured' ? 0 : 1),
         skipped: telegram.reason === 'tg_not_linked' ? 1 : 0,
         reason: telegram.reason || null,
+        lastError: telegram.sent ? null : (telegram.reason && telegram.reason !== 'tg_not_linked' && telegram.reason !== 'bot_not_configured' ? telegram.reason : null),
       },
       userIdsPreview: [uid],
       hasMoreRecipients: false,
@@ -4808,6 +4813,35 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+const TELEGRAM_BROADCAST_TEXT_MAX = 4096
+
+function buildNotificationTelegramHtml(finalTitle, finalBody, finalOverview, linkUrl) {
+  const safeHref = String(linkUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+  return `📢 <b>${escapeHtml(String(finalTitle || ''))}</b>\n\n${escapeHtml(String(finalBody || ''))}${finalOverview ? `\n\n${escapeHtml(String(finalOverview))}` : ''}\n\n🔗 <a href="${safeHref}">Открыть личный кабинет</a>`
+}
+
+function buildNotificationTelegramPlain(finalTitle, finalBody, finalOverview, linkUrl) {
+  const u = String(linkUrl || '')
+  return `📢 ${String(finalTitle || '')}\n\n${String(finalBody || '')}${finalOverview ? `\n\n${String(finalOverview)}` : ''}\n\n${u}`
+}
+
+/**
+ * Уведомление в ЛК + дубль в Telegram: сначала HTML, при ошибке разбора — plain text.
+ */
+async function sendNotificationToTelegram(botToken, tgId, finalTitle, finalBody, finalOverview, linkUrl) {
+  if (!botToken || !tgId) return { ok: false, error: 'no_token_or_chat' }
+  const html = buildNotificationTelegramHtml(finalTitle, finalBody, finalOverview, linkUrl).slice(0, TELEGRAM_BROADCAST_TEXT_MAX)
+  const rHtml = await sendTelegramMessage(botToken, tgId, html)
+  if (rHtml.ok) return rHtml
+  const plain = buildNotificationTelegramPlain(finalTitle, finalBody, finalOverview, linkUrl).slice(0, TELEGRAM_BROADCAST_TEXT_MAX)
+  const rPlain = await sendTelegramMessage(botToken, tgId, plain, { plain: true })
+  if (rPlain.ok) return rPlain
+  return {
+    ok: false,
+    error: `${rPlain.error || 'plain failed'}; HTML: ${rHtml.error || '—'}`,
+  }
 }
 
 const ADMIN_ERRORS_LIMIT = 500
