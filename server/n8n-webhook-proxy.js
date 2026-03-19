@@ -3336,6 +3336,51 @@ app.post('/api/admin/users', async (req, res) => {
   }
 })
 
+/**
+ * POST /api/admin/users/:userId/magic-link — сгенерировать персональную одноразовую magic-ссылку.
+ * Устанавливает в users_v4:
+ * - auth_token
+ * - token_expiry (ISO string)
+ */
+app.post('/api/admin/users/:userId/magic-link', express.json(), async (req, res) => {
+  const adminOk = await ensureAdmin(req, res)
+  if (!adminOk?.ok) return
+  if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
+
+  try {
+    const userId = String(req.params.userId || '').trim()
+    if (!userId) return res.status(400).json({ success: false, error: 'Укажите userId' })
+
+    const userDocRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${userId}`)
+    const snap = await userDocRef.get()
+    if (!snap.exists) return res.status(404).json({ success: false, error: 'Пользователь не найден' })
+
+    const tokenTtlMs = Number(process.env.MAGIC_LINK_TTL_MS) || 15 * 60 * 1000
+    const authToken = crypto.randomBytes(32).toString('hex')
+    const tokenExpiryIso = new Date(Date.now() + tokenTtlMs).toISOString()
+
+    await userDocRef.update({
+      auth_token: authToken,
+      token_expiry: tokenExpiryIso,
+      updatedAt: new Date().toISOString(),
+    })
+
+    const frontendBase = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '')
+      .toString()
+      .trim()
+      .replace(/\/+$/, '')
+
+    const link = frontendBase
+      ? `${frontendBase}/bind-telegram?token=${encodeURIComponent(authToken)}`
+      : `/bind-telegram?token=${encodeURIComponent(authToken)}`
+
+    return res.json({ success: true, link, tokenExpiry: tokenExpiryIso })
+  } catch (err) {
+    console.error('❌ POST /api/admin/users/:userId/magic-link:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка генерации magic link' })
+  }
+})
+
 /** Вернуть сохранённый конфиг импорта NocoDB из Firestore (для автозагрузки и подстановки в форму). */
 async function getSavedNocoDBConfig() {
   const settings = await getSettingsCached()

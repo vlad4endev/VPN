@@ -13,6 +13,9 @@ import { notifyDiscountAssigned } from '../services/notifyDiscountService.js'
 import { dashboardService } from '../../dashboard/services/dashboardService.js'
 import { supportService } from '../../support/services/supportService.js'
 import XUIService from '../../vpn/services/XUIService.js'
+import { auth } from '../../../lib/firebase/config.js'
+import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
+import { APP_ID } from '../../../shared/constants/app.js'
 
 /** Проверка, что объект похож на статистику 3x-ui (есть хотя бы одно из полей). */
 function hasStatsFields(obj) {
@@ -138,8 +141,53 @@ const UserCard = ({
   const [clientStats3xLoading, setClientStats3xLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('config')
 
+  // Персональная magic-ссылка (одноразовый токен)
+  const [magicLink, setMagicLink] = useState('')
+  const [magicLoading, setMagicLoading] = useState(false)
+  const [magicError, setMagicError] = useState('')
+
   const userId = user?.id || editingUser?.id
   const totalPaymentsSum = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+
+  const handleGenerateMagicLink = useCallback(async () => {
+    setMagicError('')
+    setMagicLink('')
+    if (!userId) return
+    if (!auth?.currentUser) {
+      setSaveError('Необходима авторизация админа')
+      return
+    }
+
+    setMagicLoading(true)
+    try {
+      const idToken = await auth.currentUser.getIdToken()
+      const res = await fetch(`${getApiBaseUrl()}/api/admin/users/${encodeURIComponent(userId)}/magic-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+          'X-App-Id': APP_ID,
+        },
+        body: JSON.stringify({}),
+      })
+
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || res.statusText || 'Ошибка генерации magic link')
+      }
+
+      const link = json.link || ''
+      if (!link) throw new Error('Сервер не вернул ссылку')
+      setMagicLink(link)
+      onCopy?.(link)
+    } catch (err) {
+      const msg = err?.message || 'Ошибка генерации magic link'
+      setMagicError(msg)
+      setSaveError(msg)
+    } finally {
+      setMagicLoading(false)
+    }
+  }, [userId, onCopy])
 
   useEffect(() => {
     if (!userId) return
@@ -892,6 +940,49 @@ const UserCard = ({
                   </div>
                   <Copy className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 shrink-0" />
                 </button>
+                <div className="w-full flex flex-col gap-2 pt-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Key className="w-4 h-4 text-slate-500" />
+                      <p className="text-xs text-slate-500 font-semibold">Магическая ссылка</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGenerateMagicLink}
+                      disabled={magicLoading || !userId}
+                      className="p-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                      title="Сгенерировать одноразовую магическую ссылку"
+                    >
+                      {magicLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {magicError ? (
+                    <p className="text-xs text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
+                      {magicError}
+                    </p>
+                  ) : null}
+
+                  {magicLink ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        readOnly
+                        value={magicLink}
+                        className="flex-1 px-3 py-2 bg-slate-950/40 border border-slate-700 rounded-lg text-slate-200 text-xs font-mono truncate"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => onCopy?.(magicLink)}
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
+                        title="Копировать ссылку"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">Нажмите кнопку, чтобы сгенерировать ссылку</p>
+                  )}
+                </div>
                 <div className="w-full flex flex-col gap-1.5">
                     <label htmlFor={fieldIds.language} className="text-xs text-slate-500">Язык (для ИИ и рассылок)</label>
                     <select
