@@ -43,14 +43,32 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
       // Объединённый тариф со ссылками с планом: выбираем по устройству (телефон — Super, десктоп/ТВ — MULTI)
       const withPlan = user.subscriptionLinksWithPlan && Array.isArray(user.subscriptionLinksWithPlan) && user.subscriptionLinksWithPlan.length > 0
       if (withPlan) {
+        const tariffKey = String(user?.tariffName || '').toLowerCase()
+        const isMegaMixTariff = /megamix|mega\s*mix/.test(tariffKey)
+        const isSuperTariff = !isMegaMixTariff && tariffKey.includes('super')
+        const isMultiTariff = !isMegaMixTariff && tariffKey.includes('multi')
+
         const superEntry = user.subscriptionLinksWithPlan.find(p => (p.plan || '').toLowerCase().includes('super'))
         const multiEntry = user.subscriptionLinksWithPlan.find(p => (p.plan || '').toLowerCase().includes('multi'))
-        const primary = isMobileDevice
-          ? (superEntry?.link || user.subscriptionLinksWithPlan[0]?.link)
-          : (multiEntry?.link || user.subscriptionLinksWithPlan[0]?.link)
-        setSubscriptionLinksWithPlan(user.subscriptionLinksWithPlan)
-        setSubscriptionLinksList(user.subscriptionLinksWithPlan.map(p => p.link))
-        setSubscriptionLink(primary || user.subscriptionLinksWithPlan[0]?.link)
+
+        // MegaMix показываем обе ссылки, обычные Super/MULTI — только одну
+        const selectedWithPlan = isMegaMixTariff
+          ? user.subscriptionLinksWithPlan
+          : isSuperTariff
+            ? (superEntry ? [superEntry] : [user.subscriptionLinksWithPlan[0]])
+            : isMultiTariff
+              ? (multiEntry ? [multiEntry] : [user.subscriptionLinksWithPlan[0]])
+              : user.subscriptionLinksWithPlan
+
+        const primary = isMegaMixTariff
+          ? (isMobileDevice
+            ? (superEntry?.link || selectedWithPlan[0]?.link)
+            : (multiEntry?.link || selectedWithPlan[0]?.link))
+          : (selectedWithPlan[0]?.link || null)
+
+        setSubscriptionLinksWithPlan(selectedWithPlan)
+        setSubscriptionLinksList(selectedWithPlan.map(p => p.link))
+        setSubscriptionLink(primary || selectedWithPlan[0]?.link || null)
         setLoadingLink(false)
         return
       }
@@ -125,7 +143,7 @@ const KeyModal = ({ user, onClose, clientStats = null, settings, onCopy, formatD
     }
     
     loadSubscriptionLink()
-  }, [user?.tariffId, user?.subId, user?.subscriptionLink, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, subId, isMobileDevice])
+  }, [user?.tariffId, user?.tariffName, user?.subId, user?.subscriptionLink, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, subId, isMobileDevice])
 
   // Загружаем настройки для получения ссылок на приложения
   const [appLinks, setAppLinks] = useState(null)

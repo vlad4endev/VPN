@@ -1851,18 +1851,16 @@ app.post('/api/test-session', express.json(), async (req, res) => {
       : ''
     const baseUrl = `${protocolToTry}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
     const loginUrl = `${baseUrl}/login`
-    return axios.post(
-      loginUrl,
-      {
-        username: username ?? process.env.XUI_USERNAME ?? '',
-        password: password ?? process.env.XUI_PASSWORD ?? '',
-      },
-      {
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        validateStatus: () => true,
-        timeout: 10000,
-      },
-    )
+    // 3x-ui login ожидает форму (как в server/lib/xuiClient.js), а не JSON.
+    const formBody = new URLSearchParams({
+      username: username ?? process.env.XUI_USERNAME ?? '',
+      password: password ?? process.env.XUI_PASSWORD ?? '',
+    }).toString()
+    return axios.post(loginUrl, formBody, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      validateStatus: () => true,
+      timeout: 10000,
+    })
   }
 
   try {

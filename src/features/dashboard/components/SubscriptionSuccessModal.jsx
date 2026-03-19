@@ -44,14 +44,32 @@ const SubscriptionSuccessModal = ({
       ? subscriptionLinksWithPlanProp
       : (user?.subscriptionLinksWithPlan && Array.isArray(user.subscriptionLinksWithPlan) && user.subscriptionLinksWithPlan.length > 0 ? user.subscriptionLinksWithPlan : null)
     if (withPlan && withPlan.length > 0) {
-      setSubscriptionLinksWithPlan(withPlan)
+      const tariffKey = String(tariffName || '').toLowerCase()
+      const isMegaMixTariff = /megamix|mega\s*mix/.test(tariffKey)
+      const isSuperTariff = !isMegaMixTariff && tariffKey.includes('super')
+      const isMultiTariff = !isMegaMixTariff && tariffKey.includes('multi')
+
       const superEntry = withPlan.find(p => (p.plan || '').toLowerCase().includes('super'))
       const multiEntry = withPlan.find(p => (p.plan || '').toLowerCase().includes('multi'))
-      const primary = isMobileDevice
-        ? (superEntry?.link || withPlan[0]?.link)
-        : (multiEntry?.link || withPlan[0]?.link)
+
+      // MegaMix показывает две ссылки (Super + MULTI), обычные Super/MULTI должны показывать только одну
+      const selectedWithPlan = isMegaMixTariff
+        ? withPlan
+        : isSuperTariff
+          ? (superEntry ? [superEntry] : [withPlan[0]])
+          : isMultiTariff
+            ? (multiEntry ? [multiEntry] : [withPlan[0]])
+            : withPlan
+
+      const primary = isMegaMixTariff
+        ? (isMobileDevice
+          ? (superEntry?.link || selectedWithPlan[0]?.link)
+          : (multiEntry?.link || selectedWithPlan[0]?.link))
+        : selectedWithPlan[0]?.link
+
+      setSubscriptionLinksWithPlan(selectedWithPlan)
       setSubscriptionLink(primary || null)
-      setSubscriptionLinksList(withPlan.map(p => p.link))
+      setSubscriptionLinksList(selectedWithPlan.map(p => p.link))
       return
     }
     if (subscriptionLinksProp && Array.isArray(subscriptionLinksProp) && subscriptionLinksProp.length > 0) {
@@ -68,7 +86,7 @@ const SubscriptionSuccessModal = ({
     }
     setSubscriptionLinksWithPlan(null)
     setSubscriptionLinksList(null)
-  }, [subscriptionLinksWithPlanProp, subscriptionLinksProp, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, isMobileDevice])
+  }, [subscriptionLinksWithPlanProp, subscriptionLinksProp, user?.subscriptionLinks, user?.subscriptionLinksWithPlan, isMobileDevice, tariffName])
 
   // Загружаем правильную ссылку на подписку с учетом тарифа (не перезаписываем, если уже есть subscriptionLinksWithPlan)
   useEffect(() => {

@@ -59,6 +59,9 @@ import { authService } from '../features/auth/services/authService.js'
 import { getFirestoreSafeName } from '../shared/utils/firestoreSafe.js'
 import { useTelegramInit } from './hooks/useTelegramInit.js'
 import { useAppAuth } from './hooks/useAppAuth.js'
+import { useMagicLinkInit } from './hooks/useMagicLinkInit.js'
+import SetupAccount from '../features/auth/components/SetupAccount.jsx'
+import BindTelegramAccount from '../features/auth/components/BindTelegramAccount.jsx'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 import { isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
 
@@ -383,6 +386,7 @@ export default function VPNServiceApp() {
         const hash = (window.location.hash || '').toLowerCase()
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
+        if (path === '/bind-telegram') return 'bind-telegram'
       }
       const savedView = localStorage.getItem('vpn_current_view')
       const savedUserStr = localStorage.getItem('vpn_current_user')
@@ -525,6 +529,19 @@ export default function VPNServiceApp() {
     signInInProgressRef
   })
 
+  // Magic Link: одноразовая ссылка с ?token=...
+  useMagicLinkInit({
+    auth,
+    db,
+    appId,
+    currentUser,
+    firebaseUser,
+    authChecking,
+    setCurrentUser,
+    setView,
+    setError
+  })
+
   // Инициализация хука Telegram — после useAppAuth (нужен loadUserData)
   const {
     telegramSignInLoading,
@@ -627,6 +644,7 @@ export default function VPNServiceApp() {
       const hash = (window.location.hash || '').toLowerCase()
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
+      if (path === '/bind-telegram') setViewState('bind-telegram')
       // /payment/success и /payment/fail обрабатываются в рендере по path — view не меняем
     }
     syncViewFromUrl()
@@ -3803,6 +3821,30 @@ export default function VPNServiceApp() {
   }
 
   // Уникальная страница установки пароля по ссылке (логин + создание пароля)
+  if (view === 'setup-account') {
+    return (
+      <SetupAccount
+        auth={auth}
+        db={db}
+        appId={appId}
+        setCurrentUser={setCurrentUser}
+        setView={setView}
+        setError={setError}
+      />
+    )
+  }
+
+  if (view === 'bind-telegram') {
+    return (
+      <BindTelegramAccount
+        db={db}
+        appId={appId}
+        setCurrentUser={setCurrentUser}
+        setView={setView}
+        setError={setError}
+      />
+    )
+  }
   if (view === 'set-password') {
     return (
       <SetPasswordPage onSetView={setView} />
