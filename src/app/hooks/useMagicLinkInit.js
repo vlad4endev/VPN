@@ -12,6 +12,17 @@ function tokenParamFromUrl() {
   }
 }
 
+function flowParamFromUrl() {
+  if (typeof window === 'undefined') return null
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const flow = params.get('flow')
+    return flow ? String(flow).trim().toLowerCase() : null
+  } catch {
+    return null
+  }
+}
+
 export function useMagicLinkInit({
   currentUser,
   firebaseUser,
@@ -37,9 +48,27 @@ export function useMagicLinkInit({
     const token = tokenParamFromUrl()
     if (!token) return
 
+    const flow = flowParamFromUrl()
     startedRef.current = true
-    logger.info('MagicLink', 'Magic token detected -> setup-account view')
-    setView?.('setup-account')
+    if (flow === 'bind-telegram') {
+      logger.info('MagicLink', 'Magic token detected -> bind-telegram view')
+      setView?.('bind-telegram')
+      return
+    }
+
+    if (flow === 'setup-account') {
+      logger.info('MagicLink', 'Magic token detected -> setup-account view (explicit flow)')
+      setView?.('setup-account')
+      return
+    }
+
+    // Fallback для старых ссылок без flow:
+    // раньше магические ссылки могли приходить только с token, поэтому
+    // направляем в bind-telegram по умолчанию.
+    logger.info('MagicLink', 'Magic token detected without flow -> bind-telegram fallback')
+    setView?.('bind-telegram')
+    return
+
   }, [currentUser, firebaseUser, authChecking, setView])
 }
 

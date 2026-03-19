@@ -3370,9 +3370,11 @@ app.post('/api/admin/users/:userId/magic-link', express.json(), async (req, res)
       .trim()
       .replace(/\/+$/, '')
 
+    const tokenParam = encodeURIComponent(authToken)
+    const flowParam = 'bind-telegram'
     const link = frontendBase
-      ? `${frontendBase}/bind-telegram?token=${encodeURIComponent(authToken)}`
-      : `/bind-telegram?token=${encodeURIComponent(authToken)}`
+      ? `${frontendBase}/bind-telegram?token=${tokenParam}&flow=${flowParam}`
+      : `/bind-telegram?token=${tokenParam}&flow=${flowParam}`
 
     return res.json({ success: true, link, tokenExpiry: tokenExpiryIso })
   } catch (err) {
