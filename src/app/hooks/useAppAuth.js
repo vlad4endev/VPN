@@ -405,11 +405,13 @@ export const useAppAuth = ({
           logger.info('Firebase', 'Пользователь не авторизован')
         }
         // Не переключать view — остаёмся на welcome до клика (без глобального редиректа)
+        // Исключение: специальные пути (magic link, set-password, review) — показываем соответствующий экран
         if (typeof window !== 'undefined') {
           const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '')
           const hash = (window.location.hash || '').toLowerCase()
           if (path === '/review' || hash === '#review') setView('review')
           else if (path === '/set-password') setView('set-password')
+          else if (path === '/bind-telegram') setView('bind-telegram')
         }
       }
 
