@@ -18,7 +18,9 @@ export default function PwaUpdateBanner() {
   if (!reg) return null
 
   const handleUpdate = () => {
-    applyUpdate(reg).then(() => window.location.reload())
+    applyUpdate(reg)
+      .then(() => window.location.reload())
+      .catch((err) => console.warn('PwaUpdateBanner: applyUpdate failed', err?.message))
   }
 
   return (

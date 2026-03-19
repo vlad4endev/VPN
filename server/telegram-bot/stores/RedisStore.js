@@ -3,15 +3,16 @@
  * Зависимость: npm i ioredis (или redis)
  */
 
-let redisClient = null
+const redisClients = new Map()
 
-function getClient(redisUrl) {
-  if (redisClient) return redisClient
+async function getClient(redisUrl) {
+  const key = String(redisUrl || '')
+  if (redisClients.has(key)) return redisClients.get(key)
   try {
-    // eslint-disable-next-line global-require
-    const Redis = require('ioredis')
-    redisClient = new Redis(redisUrl, { maxRetriesPerRequest: 3 })
-    return redisClient
+    const { default: Redis } = await import('ioredis')
+    const client = new Redis(redisUrl, { maxRetriesPerRequest: 3 })
+    redisClients.set(key, client)
+    return client
   } catch (e) {
     throw new Error('Redis store requires ioredis: npm i ioredis')
   }
@@ -20,7 +21,7 @@ function getClient(redisUrl) {
 export function createRedisStore(redisUrl, keyPrefix = 'tg_bot:', ttlSeconds = 3600) {
   return {
     async getState(chatId) {
-      const client = getClient(redisUrl)
+      const client = await getClient(redisUrl)
       const key = `${keyPrefix}state:${chatId}`
       const raw = await client.get(key)
       if (!raw) return null
@@ -37,7 +38,7 @@ export function createRedisStore(redisUrl, keyPrefix = 'tg_bot:', ttlSeconds = 3
     },
 
     async setState(chatId, state, ttl = ttlSeconds) {
-      const client = getClient(redisUrl)
+      const client = await getClient(redisUrl)
       const key = `${keyPrefix}state:${chatId}`
       const value = JSON.stringify({
         ...state,
@@ -47,7 +48,7 @@ export function createRedisStore(redisUrl, keyPrefix = 'tg_bot:', ttlSeconds = 3
     },
 
     async deleteState(chatId) {
-      const client = getClient(redisUrl)
+      const client = await getClient(redisUrl)
       await client.del(`${keyPrefix}state:${chatId}`)
     },
   }

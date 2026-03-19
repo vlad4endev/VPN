@@ -209,10 +209,13 @@ export default function XuiHttpRequestsPanel({ servers = [], settings, selectedU
   const copyResult = useCallback(() => {
     if (!result) return
     const text = JSON.stringify(result.data, null, 2)
-    navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    if (!navigator.clipboard?.writeText) return
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
+      .catch((err) => console.warn('XuiHttpRequestsPanel: copy failed', err?.message))
   }, [result])
 
   const methodOrder = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']

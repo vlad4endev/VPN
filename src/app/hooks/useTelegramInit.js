@@ -23,6 +23,15 @@ export const useTelegramInit = ({
     const isTelegramApp = hasTmaInitData
     const tmaUserFromAuthRef = useRef(null)
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const initData = typeof window.__TELEGRAM_INIT_DATA === 'string' ? window.__TELEGRAM_INIT_DATA.trim() : ''
+        const hasInitData = !!initData
+        setHasTmaInitData(hasInitData)
+        setTmaInitDataFromCheck(hasInitData ? initData : null)
+        setTmaWaitingAuth(hasInitData && !firebaseUser && !authChecking)
+    }, [firebaseUser, authChecking])
+
     const handleTelegramSignIn = useCallback(async () => {
         if (!auth) return
         const initData = typeof window !== 'undefined' ? window.__TELEGRAM_INIT_DATA : null

@@ -96,8 +96,14 @@ export default function LoggerPanel({ onClose }) {
   }
 
   const handleCopyLog = (log) => {
-    const text = `${log.timestamp} [${log.level.toUpperCase()}] [${log.category}] ${log.message}${log.data ? '\n' + JSON.stringify(log.data, null, 2) : ''}${log.error ? '\n' + JSON.stringify(log.error, null, 2) : ''}${log.stack ? '\n' + log.stack : ''}`
-    
+    const level = String(log?.level || 'log').toUpperCase()
+    const text = `${log.timestamp} [${level}] [${log.category}] ${log.message}${log.data ? '\n' + JSON.stringify(log.data, null, 2) : ''}${log.error ? '\n' + JSON.stringify(log.error, null, 2) : ''}${log.stack ? '\n' + log.stack : ''}`
+
+    if (!navigator?.clipboard?.writeText) {
+      console.error('Ошибка копирования: Clipboard API недоступен')
+      return
+    }
+
     navigator.clipboard.writeText(text).then(() => {
       // Можно добавить уведомление об успешном копировании
     }).catch(err => {

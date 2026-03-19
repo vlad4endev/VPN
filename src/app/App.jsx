@@ -1087,17 +1087,12 @@ export default function VPNServiceApp() {
       if (!error && !configError) {
         // Даем немного времени для инициализации Firebase
         const timer = setTimeout(() => {
-          setLoading(prev => {
-            if (prev) {
-              return false
-            }
-            return prev
-          })
+          setLoading(false)
         }, 2000)
         return () => clearTimeout(timer)
       }
     }
-  }, [firebaseUser, loadUsers, loadSettings, error, configError]) // Убираем loading из зависимостей
+  }, [firebaseUser, loadUsers, error, configError]) // Убираем loading из зависимостей
 
   // Единое сообщение об ошибке авторизации (i18n + fallback из authService)
   const getAuthErrorMsg = useCallback((err) => {
@@ -2754,23 +2749,24 @@ export default function VPNServiceApp() {
     }
 
     try {
-      const isUpdate = cleanedServer.id && servers.find(s => s.id === cleanedServer.id)
+      const serversList = Array.isArray(servers) ? servers : []
+      const isUpdate = cleanedServer.id && serversList.find(s => s.id === cleanedServer.id)
       let updatedServers = []
       
       if (isUpdate) {
-        updatedServers = servers.map(s => s.id === cleanedServer.id ? cleanedServer : s)
+        updatedServers = serversList.map(s => s.id === cleanedServer.id ? cleanedServer : s)
         logger.debug('Admin', 'Обновление существующего сервера', { 
           serverId: cleanedServer.id,
           serverName: cleanedServer.name,
-          prevCount: servers.length,
+          prevCount: serversList.length,
           updatedCount: updatedServers.length
         })
       } else {
-        updatedServers = [...servers, cleanedServer]
+        updatedServers = [...serversList, cleanedServer]
         logger.debug('Admin', 'Добавление нового сервера', { 
           serverId: cleanedServer.id,
           serverName: cleanedServer.name,
-          prevCount: servers.length,
+          prevCount: serversList.length,
           updatedCount: updatedServers.length
         })
       }
@@ -2844,12 +2840,10 @@ export default function VPNServiceApp() {
     }
 
     try {
-      // Удаляем сервер из локального состояния
-      const updatedServers = servers.filter(s => s.id !== serverId)
+      const serversList = Array.isArray(servers) ? servers : []
+      const updatedServers = serversList.filter(s => s.id !== serverId)
       setServers(updatedServers)
       
-      // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
-      // Используем текущее состояние settings, если оно есть
       const currentSettings = settings || {
         serverIP: '',
         serverPort: 2053,
@@ -2893,8 +2887,7 @@ export default function VPNServiceApp() {
         serverId: serverId 
       }, err)
       setError('Ошибка удаления сервера: ' + (err.message || 'Неизвестная ошибка'))
-      // Восстанавливаем сервер в локальном состоянии при ошибке
-      setServers(servers)
+      setServers(serversList)
     }
   }, [servers, currentUser, db, settings])
 
@@ -2907,11 +2900,9 @@ export default function VPNServiceApp() {
     setError('')
     setSuccess('')
 
-    // ВАЖНО: Получаем актуальный объект сервера из состояния servers
-    // Используем актуальное состояние, переданное через замыкание
-    const currentServer = servers.find(s => s.id === server.id) || server
+    const serversList = Array.isArray(servers) ? servers : []
+    const currentServer = serversList.find(s => s.id === server.id) || server
     
-    // ВАЖНО: Логируем источник данных для диагностики
     logger.info('Admin', '🔍 Получение актуального объекта сервера', {
       serverId: server.id,
       serverName: server.name,
@@ -2924,7 +2915,7 @@ export default function VPNServiceApp() {
       passedServerHasXuiPassword: !!server.xuiPassword,
       passedServerXuiUsername: server.xuiUsername || 'НЕТ',
       passedServerXuiPasswordLength: server.xuiPassword ? server.xuiPassword.length : 0,
-      serversCount: servers.length,
+      serversCount: serversList.length,
       note: 'Используется актуальный объект из состояния servers'
     })
 

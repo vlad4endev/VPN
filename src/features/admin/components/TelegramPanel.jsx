@@ -142,18 +142,24 @@ const TelegramPanel = () => {
   const miniAppUrl = baseUrl ? `${baseUrl}/` : ''
 
   const handleCopyWebhook = () => {
-    if (webhookUrl && navigator.clipboard) {
+    if (webhookUrl && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(webhookUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+        .then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        })
+        .catch((err) => console.warn('TelegramPanel: copy webhook failed', err?.message))
     }
   }
 
   const handleCopyMiniAppUrl = () => {
-    if (miniAppUrl && navigator.clipboard) {
+    if (miniAppUrl && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(miniAppUrl)
-      setMiniAppCopied(true)
-      setTimeout(() => setMiniAppCopied(false), 2000)
+        .then(() => {
+          setMiniAppCopied(true)
+          setTimeout(() => setMiniAppCopied(false), 2000)
+        })
+        .catch((err) => console.warn('TelegramPanel: copy mini app URL failed', err?.message))
     }
   }
 
@@ -189,10 +195,13 @@ const TelegramPanel = () => {
         return `${ts} [${event}]${restStr}`
       })
       .join('\n')
-    if (text && navigator.clipboard) {
+    if (text && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text)
-      setLogsCopied(true)
-      setTimeout(() => setLogsCopied(false), 2000)
+        .then(() => {
+          setLogsCopied(true)
+          setTimeout(() => setLogsCopied(false), 2000)
+        })
+        .catch((err) => console.warn('TelegramPanel: copy logs failed', err?.message))
     }
   }, [logs])
 

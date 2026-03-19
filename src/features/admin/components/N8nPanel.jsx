@@ -39,13 +39,13 @@ const N8nPanel = ({ onSaveSettings }) => {
     if (justSavedRef.current && !isRefresh) {
       logger.debug('Admin', 'Пропуск загрузки URL - только что сохранен')
       if (!isRefresh) setLoading(false)
-      return
+      return false
     }
 
     if (!db) {
       setError('База данных недоступна')
       if (!isRefresh) setLoading(false)
-      return
+      return false
     }
 
     try {
@@ -74,9 +74,11 @@ const N8nPanel = ({ onSaveSettings }) => {
         setWebhookUrl('')
         setActiveWebhookUrl('')
       }
+      return true
     } catch (err) {
       logger.error('Admin', 'Ошибка загрузки настроек n8n', null, err)
       setError('Ошибка загрузки настроек')
+      return false
     } finally {
       if (isRefresh) {
         setRefreshing(false)
@@ -98,8 +100,8 @@ const N8nPanel = ({ onSaveSettings }) => {
 
     const url = settings.n8nWebhookUrl || settings.webhookUrl || ''
     
-    // Обновляем только если URL отличается и не пустой
-    if (url && url !== webhookUrl) {
+    // Обновляем, даже если URL очищен (пустая строка)
+    if (url !== webhookUrl) {
       logger.info('Admin', 'Обновление webhook URL из контекста settings', { 
         newUrl: url,
         currentUrl: webhookUrl
@@ -111,9 +113,11 @@ const N8nPanel = ({ onSaveSettings }) => {
 
   // Обработчик обновления webhook из Firestore
   const handleRefresh = useCallback(async () => {
-    await loadWebhookUrl(true)
-    setSuccess('Webhook URL обновлен из базы данных')
-    setTimeout(() => setSuccess(null), 2000)
+    const ok = await loadWebhookUrl(true)
+    if (ok) {
+      setSuccess('Webhook URL обновлен из базы данных')
+      setTimeout(() => setSuccess(null), 2000)
+    }
   }, [loadWebhookUrl])
 
   // Сохранение webhook URL
@@ -304,9 +308,19 @@ const N8nPanel = ({ onSaveSettings }) => {
                 </code>
                 <button
                   onClick={() => {
+                    if (!navigator.clipboard?.writeText) {
+                      setError('Clipboard API недоступен')
+                      return
+                    }
                     navigator.clipboard.writeText(activeWebhookUrl)
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
+                      .then(() => {
+                        setCopied(true)
+                        setTimeout(() => setCopied(false), 2000)
+                      })
+                      .catch((err) => {
+                        logger.error('Admin', 'Ошибка копирования активного webhook URL', null, err)
+                        setError('Не удалось скопировать URL')
+                      })
                   }}
                   className="p-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg transition-colors flex-shrink-0"
                   title="Копировать URL"

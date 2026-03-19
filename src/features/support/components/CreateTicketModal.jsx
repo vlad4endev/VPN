@@ -10,9 +10,11 @@ const CreateTicketModal = ({ onClose, onSubmit, sending }) => {
     const s = subject.trim()
     const m = message.trim()
     if (s && m) {
-      onSubmit(s, m).then((id) => {
-        if (id) onClose()
-      })
+      onSubmit(s, m)
+        .then((id) => {
+          if (id) onClose()
+        })
+        .catch((err) => console.warn('CreateTicketModal: submit failed', err?.message))
     }
   }
 

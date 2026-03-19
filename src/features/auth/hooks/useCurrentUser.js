@@ -9,9 +9,15 @@ export function useCurrentUser() {
   useEffect(() => {
     if (!supabase) return
 
-    supabase.auth.getUser().then(({ data }) => {
-      setSupabaseUser(data.user ?? null)
-    })
+    supabase.auth.getUser()
+      .then(({ data, error }) => {
+        if (error) {
+          setSupabaseUser(null)
+          return
+        }
+        setSupabaseUser(data?.user ?? null)
+      })
+      .catch(() => setSupabaseUser(null))
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSupabaseUser(session?.user ?? null)

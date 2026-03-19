@@ -274,6 +274,22 @@ const FinancesDashboard = ({formatDate = (x) => (x != null ? String(x) : '—'),
     return p ? p.label : 'период'
   }, [useCustom, customFrom, customTo, periodId])
 
+  const usersById = useMemo(() => {
+    const map = {}
+    for (const u of users) {
+      if (u?.id) map[u.id] = u
+    }
+    return map
+  }, [users])
+
+  const tariffsById = useMemo(() => {
+    const map = {}
+    for (const t of tariffs) {
+      if (t?.id) map[t.id] = t
+    }
+    return map
+  }, [tariffs])
+
   const byTariff = useMemo(() => {
     const map = new Map()
     for (const p of completedPayments) {
@@ -286,9 +302,9 @@ const FinancesDashboard = ({formatDate = (x) => (x != null ? String(x) : '—'),
     return Array.from(map.entries()).map(([id, v]) => ({
       tariffId: id === '_без_тарифа' ? null : id,
       ...v,
-      name: id === '_без_тарифа' ? 'Без тарифа' : (tariffs.find((t) => t.id === id)?.name || id),
+      name: id === '_без_тарифа' ? 'Без тарифа' : (tariffsById[id]?.name || id),
     }))
-  }, [completedPayments, tariffs])
+  }, [completedPayments, tariffsById])
 
   const handleRunFinanceAnalysis = useCallback(async () => {
     setAnalysisError(null)
@@ -715,7 +731,7 @@ const FinancesDashboard = ({formatDate = (x) => (x != null ? String(x) : '—'),
                 </thead>
                 <tbody className="divide-y divide-slate-700">
                   {completedPayments.slice(0, 50).map((p) => {
-                    const user = users.find((u) => u.id === p.userId)
+                    const user = usersById[p.userId]
                     const displayName = user ? (user.name && user.name.trim() ? user.name.trim() : user.email || '—') : '—'
                     return (
                       <tr key={p.id} className="bg-slate-800/30 hover:bg-slate-800/50">
@@ -724,7 +740,7 @@ const FinancesDashboard = ({formatDate = (x) => (x != null ? String(x) : '—'),
                         </td>
                         <td className="px-4 py-2 text-sm font-medium text-emerald-400">{formatMoney(p.amount)}</td>
                         <td className="px-4 py-2 text-sm text-slate-300">
-                          {p.tariffId ? (tariffs.find((t) => t.id === p.tariffId)?.name || p.tariffId) : '—'}
+                          {p.tariffId ? (tariffsById[p.tariffId]?.name || p.tariffId) : '—'}
                         </td>
                         <td className="px-4 py-2 text-sm text-slate-300 truncate max-w-[180px]" title={displayName}>
                           {displayName}

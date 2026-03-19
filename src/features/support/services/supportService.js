@@ -83,7 +83,7 @@ export const supportService = {
       const ticketId = crypto.randomUUID()
       const now = new Date().toISOString()
 
-      await supabase.from(TICKETS_TABLE).insert({
+      const { error: ticketErr } = await supabase.from(TICKETS_TABLE).insert({
         app_id: APP_ID,
         document_path: ticketPath(ticketId),
         collection_path: ticketsCollectionPath(),
@@ -101,9 +101,10 @@ export const supportService = {
         source_created_at: now,
         source_updated_at: now,
       })
+      if (ticketErr) throw ticketErr
 
       const messageId = crypto.randomUUID()
-      await supabase.from(TICKETS_TABLE).insert({
+      const { error: msgErr } = await supabase.from(TICKETS_TABLE).insert({
         app_id: APP_ID,
         document_path: messagePath(ticketId, messageId),
         collection_path: messagesCollectionPath(ticketId),
@@ -113,6 +114,7 @@ export const supportService = {
         data: { from: 'support', userId: adminUser.id, text: trimmedMessage, createdAt: now },
         source_created_at: now,
       })
+      if (msgErr) throw msgErr
 
       logger.info('Support', 'Тикет создан админом', { ticketId, targetUserId: targetUser.id })
       return { id: ticketId }
@@ -181,15 +183,32 @@ export const supportService = {
     if (!supabase || !ticketId || !onUpdate) return () => {}
 
     let cancelled = false
+    let timer = null
+    let inFlight = false
     const poll = async () => {
-      if (cancelled) return
-      const ticket = await this.getTicket(ticketId, userId, isAdmin)
-      if (!cancelled && ticket) onUpdate(ticket, ticket.messages || [])
-      else if (!cancelled) onUpdate(null, [])
+      if (cancelled || inFlight) return
+      inFlight = true
+      try {
+        const ticket = await this.getTicket(ticketId, userId, isAdmin)
+        if (!cancelled && ticket) onUpdate(ticket, ticket.messages || [])
+        else if (!cancelled) onUpdate(null, [])
+      } catch (err) {
+        if (!cancelled) {
+          logger.warn('Support', 'subscribeTicket poll failed', { ticketId, userId }, err)
+          onUpdate(null, [])
+        }
+      } finally {
+        inFlight = false
+        if (!cancelled) {
+          timer = setTimeout(poll, 5000)
+        }
+      }
     }
     poll()
-    const interval = setInterval(poll, 5000)
-    return () => { cancelled = true; clearInterval(interval) }
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   },
 
   async addMessage(ticketId, user, text, from = 'user') {
@@ -201,7 +220,7 @@ export const supportService = {
       const now = new Date().toISOString()
       const messageId = crypto.randomUUID()
 
-      await supabase.from(TICKETS_TABLE).insert({
+      const { error: msgInsertErr } = await supabase.from(TICKETS_TABLE).insert({
         app_id: APP_ID,
         document_path: messagePath(ticketId, messageId),
         collection_path: messagesCollectionPath(ticketId),
@@ -211,6 +230,7 @@ export const supportService = {
         data: { from, userId: user.id, text: trimmed, createdAt: now },
         source_created_at: now,
       })
+      if (msgInsertErr) throw msgInsertErr
 
       const newStatus = from === 'support' ? 'answered' : 'open'
       const { data: existing } = await supabase

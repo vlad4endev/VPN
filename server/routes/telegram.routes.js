@@ -70,31 +70,37 @@ export function createTelegramRouter(deps) {
     randomUUID,
     crypto,
   } = deps
+  const appId = APP_ID || process.env.APP_ID || 'skyputh'
 
   // ——— POST /verify (для удалённой проверки: B запрашивает у A) ———
   router.post('/verify', express.json(), async (req, res) => {
-    const secret = (req.headers['x-telegram-verify-secret'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '')).trim()
-    if (!TELEGRAM_VERIFY_SECRET || secret !== TELEGRAM_VERIFY_SECRET) {
-      return res.status(401).json({ ok: false, reason: 'unauthorized', message: 'Invalid or missing verify secret' })
-    }
-    const { type, initData, widgetUser } = req.body || {}
-    if (type === 'initData') {
-      const result = await validateTelegramInitDataWithReasonAsync(initData)
-      if (!result.ok) {
-        return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+    try {
+      const secret = (req.headers['x-telegram-verify-secret'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '')).trim()
+      if (!TELEGRAM_VERIFY_SECRET || secret !== TELEGRAM_VERIFY_SECRET) {
+        return res.status(401).json({ ok: false, reason: 'unauthorized', message: 'Invalid or missing verify secret' })
       }
-      const tgId = result.data?.user?.id
-      return res.json({ ok: true, tgId, user: result.data?.user })
-    }
-    if (type === 'widget') {
-      const token = await getTelegramToken()
-      const result = await validateTelegramWidgetData(widgetUser, token)
-      if (!result.ok) {
-        return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+      const { type, initData, widgetUser } = req.body || {}
+      if (type === 'initData') {
+        const result = await validateTelegramInitDataWithReasonAsync(initData)
+        if (!result.ok) {
+          return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+        }
+        const tgId = result.data?.user?.id
+        return res.json({ ok: true, tgId, user: result.data?.user })
       }
-      return res.json({ ok: true, tgId: result.tgId, user: result.user })
+      if (type === 'widget') {
+        const token = await getTelegramToken()
+        const result = await validateTelegramWidgetData(widgetUser, token)
+        if (!result.ok) {
+          return res.json({ ok: false, reason: result.reason || 'unknown', message: result.message || 'Validation failed' })
+        }
+        return res.json({ ok: true, tgId: result.tgId, user: result.user })
+      }
+      return res.status(400).json({ ok: false, reason: 'invalid_type', message: 'Body must have type "initData" or "widget" and corresponding data' })
+    } catch (err) {
+      console.error('❌ POST /api/telegram/verify:', err.message)
+      return res.status(500).json({ ok: false, reason: 'server_error', message: err.message || 'Internal error' })
     }
-    return res.status(400).json({ ok: false, reason: 'invalid_type', message: 'Body must have type "initData" or "widget" and corresponding data' })
   })
 
   const setTmaSessionCookie = (res, token) => {
@@ -104,7 +110,7 @@ export function createTelegramRouter(deps) {
       secure: isSecure,
       sameSite: 'lax',
       path: '/',
-      maxAge: Math.floor(TELEGRAM_SESSION_TTL_MS / 1000),
+      maxAge: TELEGRAM_SESSION_TTL_MS,
     })
   }
 
@@ -144,8 +150,6 @@ export function createTelegramRouter(deps) {
         return res.status(503).json({ success: false, error: 'Сервис недоступен. Настройте Firebase Admin (FIREBASE_SERVICE_ACCOUNT_KEY) в server/.env', reason: 'service_unavailable' })
       }
     }
-    /** APP_ID из deps или env; единственный допустимый fallback — 'skypath' (см. n8n-webhook-proxy). */
-    const appId = APP_ID || process.env.APP_ID || 'skypath'
     const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
 
     if (sessionToken) {
@@ -182,7 +186,13 @@ export function createTelegramRouter(deps) {
     // Предпочитаем body: при явной отправке initData в body строка полная; заголовок мог быть обрезан прокси (no_hash)
     const rawInitData = (req.body && typeof req.body.initData === 'string' ? req.body.initData : null) || req.headers['x-telegram-initdata'] || ''
     const initData = typeof rawInitData === 'string' ? rawInitData : ''
-    const result = await validateTelegramInitDataWithReasonAsync(initData)
+    let result
+    try {
+      result = await validateTelegramInitDataWithReasonAsync(initData)
+    } catch (err) {
+      logTelegramAuth('firebase_error', { step: 'validate_init_data', message: err.message, reason: 'auth_fail', severity: 'error' })
+      return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации', reason: 'auth_fail' })
+    }
     if (!result.ok) {
       const reason = result.reason || 'unknown'
       const isSignatureFailure = reason === 'invalid_signature' || reason === 'no_hash'
@@ -289,15 +299,20 @@ export function createTelegramRouter(deps) {
         return res.status(503).json({ success: false, error: 'Сервис недоступен' })
       }
     }
-    const result = validateTelegramWidgetDataOrRemote
-      ? await validateTelegramWidgetDataOrRemote(widgetUser)
-      : await validateTelegramWidgetData(widgetUser, await getTelegramToken())
+    let result
+    try {
+      result = validateTelegramWidgetDataOrRemote
+        ? await validateTelegramWidgetDataOrRemote(widgetUser)
+        : await validateTelegramWidgetData(widgetUser, await getTelegramToken())
+    } catch (err) {
+      logTelegramAuth('error', { step: 'widget_validate', message: err.message, source: 'widget' })
+      return res.status(500).json({ success: false, error: err.message || 'Ошибка авторизации' })
+    }
     if (!result.ok) {
       logTelegramAuth('initData_fail', { reason: result.reason, source: 'widget' })
       return res.status(400).json({ success: false, error: result.message, reason: result.reason })
     }
-    const tgId = result.tgId
-    const appId = APP_ID || process.env.APP_ID || 'skypath'
+    const tgId = String(result.tgId)
     const usersRef = db.collection(`artifacts/${appId}/public/data/users_v4`)
     const nowIso = new Date().toISOString()
     const sessionTokenNew = crypto.randomBytes(32).toString('hex')
@@ -395,12 +410,12 @@ export function createTelegramRouter(deps) {
     if (!authResult?.ok) return
     const db = getDb()
     if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
-    const botToken = await getTelegramToken()
-    if (!botToken) return res.status(503).json({ success: false, error: 'Telegram-бот не настроен' })
     try {
+      const botToken = await getTelegramToken()
+      if (!botToken) return res.status(503).json({ success: false, error: 'Telegram-бот не настроен' })
       const token = randomUUID().replace(/-/g, '').slice(0, 24)
       const expiresAt = Date.now() + 15 * 60 * 1000
-      const bindRef = db.doc(`artifacts/${APP_ID}/public/data/telegram_binds/${token}`)
+      const bindRef = db.doc(`artifacts/${appId}/public/data/telegram_binds/${token}`)
       await bindRef.set({ userId: authResult.uid, expiresAt, createdAt: new Date().toISOString() })
       const botInfo = await getTelegramBotInfo(botToken)
       const username = botInfo.username || 'YourBot'
@@ -418,7 +433,7 @@ export function createTelegramRouter(deps) {
     const db = getDb()
     if (!db) return res.status(503).json({ success: false, error: 'Сервис недоступен' })
     try {
-      const userRef = db.doc(`artifacts/${APP_ID}/public/data/users_v4/${authResult.uid}`)
+      const userRef = db.doc(`artifacts/${appId}/public/data/users_v4/${authResult.uid}`)
       await userRef.update({ tgId: null, updatedAt: new Date().toISOString() })
       res.json({ success: true })
     } catch (err) {
@@ -433,15 +448,15 @@ export function createTelegramRouter(deps) {
     if (TELEGRAM_WEBHOOK_SECRET && secret !== TELEGRAM_WEBHOOK_SECRET) {
       return res.status(401).json({ success: false, error: 'Неверный секрет' })
     }
-    const botToken = await getTelegramToken()
-    const db = getDb()
-    if (!db || !botToken) return res.status(200).json({ success: true, sent: 0, message: 'Telegram не настроен' })
     try {
+      const botToken = await getTelegramToken()
+      const db = getDb()
+      if (!db || !botToken) return res.status(200).json({ success: true, sent: 0, message: 'Telegram не настроен' })
       const now = Date.now()
       const oneDay = 24 * 60 * 60 * 1000
       const inSevenDays = now + 7 * oneDay
       const inOneDay = now + oneDay
-      const usersSnap = await db.collection(`artifacts/${APP_ID}/public/data/users_v4`).get()
+      const usersSnap = await db.collection(`artifacts/${appId}/public/data/users_v4`).get()
       let sent = 0
       for (const doc of usersSnap.docs) {
         const u = doc.data()

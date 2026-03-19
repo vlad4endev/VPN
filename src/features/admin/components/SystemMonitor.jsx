@@ -26,6 +26,9 @@ const SystemMonitor = () => {
   // API URL для мониторинга (можно использовать переменную окружения)
   const apiUrl = import.meta.env.VITE_MONITORING_API_URL || getApiBaseUrl()
   const monitoringEnabled = import.meta.env.VITE_ENABLE_MONITORING !== 'false'
+  const clientHeapUsagePercent = clientStatus?.memory?.totalJSHeapSize > 0
+    ? (clientStatus.memory.usedJSHeapSize / clientStatus.memory.totalJSHeapSize) * 100
+    : 0
 
   // Получение статуса клиента (браузер)
   const getClientStatus = useCallback(() => {
@@ -110,13 +113,11 @@ const SystemMonitor = () => {
       setClientStatus(getClientStatus())
       setStatus(null)
       // Не показываем ошибку, так как используем клиентский статус
-      if (!error) {
-        setError(null) // Очищаем ошибку, если используем клиентский статус
-      }
+      setError(null)
     } finally {
       setLoading(false)
     }
-  }, [apiUrl, monitoringEnabled, getClientStatus, error])
+  }, [apiUrl, monitoringEnabled, getClientStatus])
 
   // Fetch logs from server API
   const fetchLogs = useCallback(async () => {
@@ -247,11 +248,12 @@ const SystemMonitor = () => {
 
   // Format bytes
   const formatBytes = (bytes) => {
-    if (!bytes || bytes === 0) return '0 B'
+    const value = Number(bytes)
+    if (!Number.isFinite(value) || value <= 0) return '0 B'
     const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+    const i = Math.min(Math.floor(Math.log(value) / Math.log(k)), sizes.length - 1)
+    return `${(value / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
 
   // Modules list (можно расширить)
@@ -531,22 +533,22 @@ const SystemMonitor = () => {
             <div className="flex justify-between items-center">
               <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Использование</span>
               <span className="text-slate-200 font-semibold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">
-                {status?.cpu?.usage?.toFixed(1) || 'N/A'}%
+                {Number.isFinite(Number(status?.cpu?.usage)) ? Number(status.cpu.usage).toFixed(1) : 'N/A'}%
               </span>
             </div>
-            {status?.cpu?.usage !== undefined ? (
+            {Number.isFinite(Number(status?.cpu?.usage)) ? (
               <>
             <div className="w-full bg-slate-800 rounded-full h-2">
               <div
                 className={`h-2 rounded-full transition-all ${
-                      status.cpu.usage > 80 ? 'bg-red-500' : status.cpu.usage > 50 ? 'bg-yellow-500' : 'bg-green-500'
+                      Number(status.cpu.usage) > 80 ? 'bg-red-500' : Number(status.cpu.usage) > 50 ? 'bg-yellow-500' : 'bg-green-500'
                 }`}
-                    style={{ width: `${Math.min(status.cpu.usage, 100)}%` }}
+                    style={{ width: `${Math.min(Number(status.cpu.usage), 100)}%` }}
               />
             </div>
             <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-slate-500">
-                  <span>Ядер: {status.cpu.cores || 'N/A'}</span>
-                  <span>Load: {status.cpu.load?.toFixed(2) || 'N/A'}</span>
+                  <span>Ядер: {status.cpu.cores ?? 'N/A'}</span>
+                  <span>Load: {Number.isFinite(Number(status.cpu.load)) ? Number(status.cpu.load).toFixed(2) : 'N/A'}</span>
             </div>
               </>
             ) : (
@@ -567,26 +569,26 @@ const SystemMonitor = () => {
             <div className="flex justify-between items-center">
               <span className="text-slate-400 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] sm:text-sm">Использование</span>
               <span className="text-slate-200 font-semibold text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] sm:text-lg">
-                {status?.ram?.usage?.toFixed(1) || clientStatus?.memory ? 
-                  (clientStatus.memory ? 
-                    ((clientStatus.memory.usedJSHeapSize / clientStatus.memory.totalJSHeapSize * 100).toFixed(1)) : 
-                    'N/A'
-                  ) : 'N/A'}%
+                {Number.isFinite(Number(status?.ram?.usage))
+                  ? Number(status.ram.usage).toFixed(1)
+                  : clientStatus?.memory
+                    ? clientHeapUsagePercent.toFixed(1)
+                    : 'N/A'}%
               </span>
             </div>
-            {status?.ram?.usage !== undefined ? (
+            {Number.isFinite(Number(status?.ram?.usage)) ? (
               <>
                 <div className="w-full bg-slate-800 rounded-full h-2">
                   <div
                     className={`h-2 rounded-full transition-all ${
-                      status.ram.usage > 80 ? 'bg-red-500' : status.ram.usage > 50 ? 'bg-yellow-500' : 'bg-green-500'
+                      Number(status.ram.usage) > 80 ? 'bg-red-500' : Number(status.ram.usage) > 50 ? 'bg-yellow-500' : 'bg-green-500'
                     }`}
-                    style={{ width: `${Math.min(status.ram.usage, 100)}%` }}
+                    style={{ width: `${Math.min(Number(status.ram.usage), 100)}%` }}
                   />
                 </div>
                 <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-slate-500">
-                  <span>{status.ram.usedGB?.toFixed(2) || 'N/A'} GB</span>
-                  <span>из {status.ram.totalGB?.toFixed(2) || 'N/A'} GB</span>
+                  <span>{Number.isFinite(Number(status.ram.usedGB)) ? Number(status.ram.usedGB).toFixed(2) : 'N/A'} GB</span>
+                  <span>из {Number.isFinite(Number(status.ram.totalGB)) ? Number(status.ram.totalGB).toFixed(2) : 'N/A'} GB</span>
                 </div>
               </>
             ) : clientStatus?.memory ? (
@@ -594,10 +596,10 @@ const SystemMonitor = () => {
             <div className="w-full bg-slate-800 rounded-full h-2">
               <div
                 className={`h-2 rounded-full transition-all ${
-                      (clientStatus.memory.usedJSHeapSize / clientStatus.memory.totalJSHeapSize * 100) > 80 ? 'bg-red-500' :
-                      (clientStatus.memory.usedJSHeapSize / clientStatus.memory.totalJSHeapSize * 100) > 50 ? 'bg-yellow-500' : 'bg-green-500'
+                      clientHeapUsagePercent > 80 ? 'bg-red-500' :
+                      clientHeapUsagePercent > 50 ? 'bg-yellow-500' : 'bg-green-500'
                 }`}
-                    style={{ width: `${Math.min((clientStatus.memory.usedJSHeapSize / clientStatus.memory.totalJSHeapSize * 100), 100)}%` }}
+                    style={{ width: `${Math.min(clientHeapUsagePercent, 100)}%` }}
               />
             </div>
             <div className="flex justify-between items-center text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-slate-500">
@@ -826,9 +828,9 @@ const SystemMonitor = () => {
                       {log.statusCode}
                     </span>
                   )}
-                  {log.responseTime && (
+                  {Number.isFinite(Number(log.responseTime)) && (
                     <span className="text-slate-500 text-xs">
-                      {log.responseTime.toFixed(2)}ms
+                      {Number(log.responseTime).toFixed(2)}ms
                     </span>
                   )}
                 </div>
@@ -837,7 +839,7 @@ const SystemMonitor = () => {
                 </div>
                 {log.error?.stack && (
                   <div className="mt-1 text-xs text-slate-600 font-mono">
-                    {log.error.stack.split('\n').slice(0, 3).join('\n')}
+                    {String(log.error.stack).split('\n').slice(0, 3).join('\n')}
                   </div>
                 )}
               </div>

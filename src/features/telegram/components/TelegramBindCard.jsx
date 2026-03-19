@@ -35,10 +35,14 @@ export default function TelegramBindCard({ currentUser, onBoundChange, onCopy })
     if (bindLink && typeof onCopy === 'function') {
       onCopy(bindLink)
       logger.info('Telegram', 'Ссылка скопирована')
-    } else if (bindLink && navigator.clipboard) {
-      navigator.clipboard.writeText(bindLink).then(() => {
-        logger.info('Telegram', 'Ссылка скопирована')
-      })
+    } else if (bindLink && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(bindLink)
+        .then(() => {
+          logger.info('Telegram', 'Ссылка скопирована')
+        })
+        .catch((err) => {
+          logger.warn('Telegram', 'Не удалось скопировать ссылку', { message: err?.message })
+        })
     }
   }, [bindLink, onCopy])
 

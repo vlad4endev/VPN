@@ -24,7 +24,7 @@ function buildReplyMarkup(keyboardJson) {
  */
 export async function processUpdate(update, deps) {
   if (!update) return
-  if (!update.message && !update.callback_query) return
+  if (!update.message && !update.edited_message && !update.callback_query) return
 
   if (deps.logTelegramUpdate) {
     try { deps.logTelegramUpdate(update) } catch (_) {}

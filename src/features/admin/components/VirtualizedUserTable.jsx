@@ -135,22 +135,8 @@ const VirtualizedUserTable = ({
     const el = listAreaRef.current
     if (!el) return
     measureListHeight()
-    requestAnimationFrame(measureListHeight)
-
-    let timeoutId = null
-    const debouncedMeasure = () => {
-      if (timeoutId) clearTimeout(timeoutId)
-      timeoutId = setTimeout(() => {
-        requestAnimationFrame(measureListHeight)
-        timeoutId = null
-      }, 120)
-    }
-    const ro = new ResizeObserver(debouncedMeasure)
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      if (timeoutId) clearTimeout(timeoutId)
-    }
+    // Измеряем один раз при монтировании / смене layout-флагов, не подписываемся на resize,
+    // чтобы не сбрасывать позицию скролла при появлении/скрытии скроллбара.
   }, [isMobile, filtersExpanded, measureListHeight])
 
   // Мемоизация данных для передачи в виртуализированный список (используем отфильтрованный список)

@@ -615,27 +615,24 @@ export default function VPNServiceApp() {
     }
 
     try {
-      // ВАЖНО: Сначала вычисляем обновленный список серверов СИНХРОННО
-      // Используем текущее состояние servers напрямую
-      const isUpdate = cleanedServer.id && servers.find(s => s.id === cleanedServer.id)
+      const serversList = Array.isArray(servers) ? servers : []
+      const isUpdate = cleanedServer.id && serversList.find(s => s.id === cleanedServer.id)
       let updatedServers = []
       
       if (isUpdate) {
-        // Обновляем существующий сервер
-        updatedServers = servers.map(s => s.id === cleanedServer.id ? cleanedServer : s)
+        updatedServers = serversList.map(s => s.id === cleanedServer.id ? cleanedServer : s)
         logger.debug('Admin', 'Обновление существующего сервера', { 
           serverId: cleanedServer.id,
           serverName: cleanedServer.name,
-          prevCount: servers.length,
+          prevCount: serversList.length,
           updatedCount: updatedServers.length
         })
       } else {
-        // Добавляем новый сервер
-        updatedServers = [...servers, cleanedServer]
+        updatedServers = [...serversList, cleanedServer]
         logger.debug('Admin', 'Добавление нового сервера', { 
           serverId: cleanedServer.id,
           serverName: cleanedServer.name,
-          prevCount: servers.length,
+          prevCount: serversList.length,
           updatedCount: updatedServers.length
         })
       }
@@ -716,8 +713,8 @@ export default function VPNServiceApp() {
     }
 
     try {
-      // Удаляем сервер из локального состояния
-      const updatedServers = servers.filter(s => s.id !== serverId)
+      const serversList = Array.isArray(servers) ? servers : []
+      const updatedServers = serversList.filter(s => s.id !== serverId)
       setServers(updatedServers)
       
       // ВАЖНО: Получаем актуальные настройки из состояния или создаем новые
@@ -765,8 +762,7 @@ export default function VPNServiceApp() {
         serverId: serverId 
       }, err)
       setError('Ошибка удаления сервера: ' + (err.message || 'Неизвестная ошибка'))
-      // Восстанавливаем сервер в локальном состоянии при ошибке
-      setServers(servers)
+      setServers(serversList)
     }
   }, [servers, currentUser, db, settings])
 
@@ -779,11 +775,9 @@ export default function VPNServiceApp() {
     setError('')
     setSuccess('')
 
-    // ВАЖНО: Получаем актуальный объект сервера из состояния servers
-    // Используем актуальное состояние, переданное через замыкание
-    const currentServer = servers.find(s => s.id === server.id) || server
+    const serversList = Array.isArray(servers) ? servers : []
+    const currentServer = serversList.find(s => s.id === server.id) || server
     
-    // ВАЖНО: Логируем источник данных для диагностики
     logger.info('Admin', '🔍 Получение актуального объекта сервера', {
       serverId: server.id,
       serverName: server.name,
@@ -796,7 +790,7 @@ export default function VPNServiceApp() {
       passedServerHasXuiPassword: !!server.xuiPassword,
       passedServerXuiUsernameLength: server.xuiUsername ? server.xuiUsername.length : 0,
       passedServerXuiPasswordLength: server.xuiPassword ? server.xuiPassword.length : 0,
-      serversCount: servers.length,
+      serversCount: serversList.length,
       note: 'Используется актуальный объект из состояния servers'
     })
 
@@ -1616,7 +1610,7 @@ export default function VPNServiceApp() {
       return null
     }
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col overflow-x-hidden">
+      <div className="min-h-screen bg-slate-950 flex flex-col overflow-x-hidden overflow-y-auto">
         <Sidebar
           currentUser={currentUser}
           view="finances"

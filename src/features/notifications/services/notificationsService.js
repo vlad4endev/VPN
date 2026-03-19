@@ -16,8 +16,9 @@ async function getAuthToken() {
     } catch (_) {}
   }
   if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession()
-    return session?.access_token || null
+    const { data, error } = await supabase.auth.getSession()
+    if (error) return null
+    return data?.session?.access_token || null
   }
   return null
 }
@@ -74,14 +75,26 @@ export const notificationsService = {
     if (!supabase || !userId || typeof callback !== 'function') return () => {}
 
     let cancelled = false
+    let timer = null
+    let inFlight = false
     const poll = async () => {
-      if (cancelled) return
-      const items = await notificationsService.getList(userId)
-      if (!cancelled) callback(items)
+      if (cancelled || inFlight) return
+      inFlight = true
+      try {
+        const items = await notificationsService.getList(userId)
+        if (!cancelled) callback(items)
+      } finally {
+        inFlight = false
+        if (!cancelled) {
+          timer = setTimeout(poll, 10000)
+        }
+      }
     }
     poll()
-    const interval = setInterval(poll, 10000)
-    return () => { cancelled = true; clearInterval(interval) }
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   },
 
   async createOne(payload) {

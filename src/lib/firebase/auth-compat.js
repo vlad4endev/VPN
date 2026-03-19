@@ -6,12 +6,7 @@ import { supabase } from '../supabase/client.js'
 
 export async function signInWithCustomToken(auth, token) {
   if (!supabase) throw new Error('Supabase not configured')
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: '_custom_token_@placeholder.local',
-    password: token,
-  }).catch(() => ({ data: null, error: new Error('Custom token sign-in not supported with Supabase. Use email/password or magic link.') }))
-  if (error) throw error
-  return { user: data?.user }
+  throw new Error('Custom token sign-in not supported with Supabase. Use email/password or magic link.')
 }
 
 export async function signInWithEmailAndPassword(auth, email, password) {
@@ -50,9 +45,15 @@ export function onAuthStateChanged(auth, callback) {
     return () => {}
   }
 
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    callback(session?.user ?? null)
-  })
+  supabase.auth.getSession()
+    .then(({ data, error }) => {
+      if (error) {
+        callback(null)
+        return
+      }
+      callback(data?.session?.user ?? null)
+    })
+    .catch(() => callback(null))
 
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
     callback(session?.user ?? null)

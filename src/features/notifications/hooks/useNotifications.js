@@ -10,6 +10,10 @@ export function useNotifications(userId) {
   const [loading, setLoading] = useState(true)
   const pushSubscribedRef = useRef(false)
 
+  useEffect(() => {
+    pushSubscribedRef.current = false
+  }, [userId])
+
   const unreadCount = list.filter((n) => !n.read).length
 
   const markAsRead = useCallback(async (notificationId) => {
@@ -24,6 +28,7 @@ export function useNotifications(userId) {
       setLoading(false)
       return
     }
+    setList([])
     setLoading(true)
     const unsubscribe = notificationsService.subscribe(userId, (notifications) => {
       setList(notifications)
@@ -37,15 +42,20 @@ export function useNotifications(userId) {
     if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return
     const getToken = async () => {
       if (!supabase) return null
-      const { data: { session } } = await supabase.auth.getSession()
-      return session?.access_token || null
+      const { data, error } = await supabase.auth.getSession()
+      if (error) return null
+      return data?.session?.access_token || null
     }
-    registerAndSubscribe(getToken).then((ok) => {
-      if (ok) pushSubscribedRef.current = true
-    })
+    registerAndSubscribe(getToken)
+      .then((ok) => {
+        if (ok) pushSubscribedRef.current = true
+      })
+      .catch((err) => {
+        logger.warn('useNotifications', 'Push subscribe failed', { message: err?.message })
+      })
   }, [userId])
 
-  const prevIdsRef = { current: new Set() }
+  const prevIdsRef = useRef(new Set())
   useEffect(() => {
     if (!userId || list.length === 0) return
     const instance = notificationService.getInstance()

@@ -68,7 +68,7 @@ const SupportView = ({
   }
 
   return (
-    <div className="min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden bg-slate-950">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden overflow-y-auto bg-slate-950">
       <Sidebar
         currentUser={currentUser}
         view="support"

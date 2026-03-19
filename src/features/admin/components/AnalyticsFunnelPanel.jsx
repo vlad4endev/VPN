@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { TrendingDown, Loader2, AlertCircle, Users, Target, Zap, UserX, Send, Sparkles, X, Copy, Percent, Gift } from 'lucide-react'
 import { getFunnel, refreshMetrics, sendChurnOffer, getAiStrategy, assignDiscount, sendUserTelegram, runAiFunnelAnalysis } from '../services/analyticsFunnelService.js'
@@ -31,10 +31,10 @@ const COMPLEXITY_LABELS = {
   5: 'Очень сложно',
 }
 
-function displayName(row, users = []) {
+function displayName(row, usersById = {}) {
   const fromRow = (row.name && row.name.trim()) || (row.email && row.email.trim())
   if (fromRow) return fromRow
-  const user = users.find((u) => u.id === row.userId)
+  const user = row.userId ? usersById[row.userId] : null
   const fromUser = (user?.name && String(user.name).trim()) || (user?.email && String(user.email).trim())
   if (fromUser) return fromUser
   return row.userId || '—'
@@ -89,6 +89,13 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
   const [offerStatus, setOfferStatus] = useState(null)
   const [aiTableRows, setAiTableRows] = useState(null)
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
+  const usersById = useMemo(() => {
+    const map = {}
+    for (const u of users) {
+      if (u?.id) map[u.id] = u
+    }
+    return map
+  }, [users])
   const [aiAnalysisProgressStep, setAiAnalysisProgressStep] = useState(null)
 
   const load = useCallback(async () => {
@@ -190,7 +197,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
 
   const handleCopyMessage = useCallback(() => {
     const text = offerMessage || aiResult?.suggestedOfferMessage || aiResult?.message
-    if (text) {
+    if (text && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch((err) => console.warn('AnalyticsFunnelPanel: clipboard failed', err?.message))
     }
   }, [offerMessage, aiResult?.suggestedOfferMessage, aiResult?.message])
@@ -255,7 +262,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
 
   const handleRowClick = (row, e) => {
     if (e.target.closest('button')) return
-    const user = users.find((u) => u.id === row.userId)
+    const user = usersById[row.userId]
     if (user) setSelectedUser(user)
   }
 
@@ -286,15 +293,16 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
   // Таблица строится только по результатам ИИ (старые данные воронки не показываем)
   const tableRowsBase = aiTableRows || []
   const filteredByRole = tableRowsBase.filter((row) => {
-    const u = users.find((usr) => usr.id === row.userId)
-    if (!u) return false
+    const u = usersById[row.userId]
+    if (!u) return true
     const r = (u.role || '').toString().toLowerCase()
     return r === 'user' || r === ''
   })
   const seenIds = new Set()
   const tableRows = filteredByRole.filter((row) => {
-    if (seenIds.has(row.userId)) return false
-    seenIds.add(row.userId)
+    const rowKey = row.userId || row.email || row.id || `${row.name || ''}:${row.priority || ''}:${row.reason || ''}`
+    if (seenIds.has(rowKey)) return false
+    seenIds.add(rowKey)
     return true
   })
   const showAiColumns = tableRows.length > 0
@@ -419,7 +427,7 @@ export default function AnalyticsFunnelPanel({ users = [], tariffs = [], formatD
                     >
                       <td className="py-1 pl-3 pr-2 text-slate-500 tabular-nums">{idx + 1}</td>
                       <td className="py-1 pr-2 text-slate-200 truncate max-w-[140px]" title={row.email || row.userId}>
-                        {displayName(row, users)}
+                        {displayName(row, usersById)}
                       </td>
                       <td className="py-1 pr-2 whitespace-nowrap">
                         <span

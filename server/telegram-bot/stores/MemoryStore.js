@@ -5,7 +5,14 @@
 const store = new Map()
 
 export function getState(chatId) {
-  return Promise.resolve(store.get(String(chatId)) ?? null)
+  const key = String(chatId)
+  const state = store.get(key) ?? null
+  if (!state) return Promise.resolve(null)
+  if (state._expiresAt && state._expiresAt < Date.now()) {
+    store.delete(key)
+    return Promise.resolve(null)
+  }
+  return Promise.resolve(state)
 }
 
 export function setState(chatId, state, ttlSeconds = 3600) {

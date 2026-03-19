@@ -21,16 +21,23 @@ export function useSupport(currentUser) {
   const isAdmin = canAccessAdmin(currentUser?.role, currentUser)
 
   useEffect(() => {
+    pushSubscribedRef.current = false
+  }, [currentUser?.id])
+
+  useEffect(() => {
     if (!currentUser?.id || isAdmin || pushSubscribedRef.current) return
     if (typeof window === 'undefined' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
     const getToken = async () => {
       if (!supabase) return null
-      const { data: { session } } = await supabase.auth.getSession()
-      return session?.access_token || null
+      const { data, error } = await supabase.auth.getSession()
+      if (error) return null
+      return data?.session?.access_token || null
     }
-    registerAndSubscribe(getToken).then((ok) => {
-      if (ok) pushSubscribedRef.current = true
-    })
+    registerAndSubscribe(getToken)
+      .then((ok) => {
+        if (ok) pushSubscribedRef.current = true
+      })
+      .catch((err) => console.warn('useSupport: push subscribe failed', err?.message))
   }, [currentUser?.id, isAdmin])
 
   const loadTickets = useCallback(async () => {
@@ -90,7 +97,7 @@ export function useSupport(currentUser) {
         body: (last.text || '').slice(0, 100) + (last.text && last.text.length > 100 ? '…' : ''),
         tag: 'support-reply-' + selectedTicketId,
         data: { url: `/#support${ticketParam}`, type: 'support-reply', ticketId: selectedTicketId },
-      })
+      }).catch((err) => console.warn('useSupport: showNotification failed', err?.message))
     }
   }, [messages, isAdmin, selectedTicketId])
 
@@ -105,8 +112,9 @@ export function useSupport(currentUser) {
       supportNotifyService.notifyNewTicket(id, currentUser.email, currentUser.name, subject, message)
       const getToken = async () => {
         if (!supabase) return null
-        const { data: { session } } = await supabase.auth.getSession()
-        return session?.access_token || null
+        const { data, error } = await supabase.auth.getSession()
+        if (error) return null
+        return data?.session?.access_token || null
       }
       supportNotifyService.triggerAutoReply(id, getToken).catch((err) => console.warn('useSupport:', err?.message))
       return id
@@ -151,8 +159,9 @@ export function useSupport(currentUser) {
           supportNotifyService.notifyNewMessageToAdmin(selectedTicketId, currentUser.email, currentUser.name, t.subject, text)
           const getToken = async () => {
             if (!supabase) return null
-            const { data: { session } } = await supabase.auth.getSession()
-            return session?.access_token || null
+            const { data, error } = await supabase.auth.getSession()
+            if (error) return null
+            return data?.session?.access_token || null
           }
           supportNotifyService.triggerAutoReply(selectedTicketId, getToken).catch((err) => console.warn('useSupport:', err?.message))
         }

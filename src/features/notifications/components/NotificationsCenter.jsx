@@ -152,12 +152,9 @@ export default function NotificationsCenter({ userId, className = '' }) {
               {hasOverview && (
                 <div className="mt-3 pt-3 border-t border-slate-700">
                   <p className="text-xs font-medium text-slate-400 mb-1">Обзор</p>
-                  <div
-                    className="text-slate-300 text-sm prose prose-invert prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{
-                      __html: detail.overview.replace(/\n/g, '<br />'),
-                    }}
-                  />
+                  <div className="text-slate-300 text-sm whitespace-pre-line break-words">
+                    {String(detail.overview || '')}
+                  </div>
                 </div>
               )}
               {detail.data?.buttons && Array.isArray(detail.data.buttons) && detail.data.buttons.length > 0 && (

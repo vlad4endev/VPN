@@ -394,7 +394,11 @@ const SubscriptionSuccessModal = ({
                     </button>
                     
                     {/* Сообщение об ошибке проверки */}
-                    {checkPaymentMessage && !checkingPayment && checkPaymentMessage.includes('Ошибка') || checkPaymentMessage.includes('недоступен') || checkPaymentMessage.includes('не прошел') ? (
+                    {checkPaymentMessage && !checkingPayment && (
+                      checkPaymentMessage.includes('Ошибка') ||
+                      checkPaymentMessage.includes('недоступен') ||
+                      checkPaymentMessage.includes('не прошел')
+                    ) ? (
                       <div className="p-3 bg-red-900/20 border border-red-800/50 rounded-lg">
                         <p className="text-red-400 text-[clamp(0.7rem,0.65rem+0.25vw,0.75rem)] sm:text-xs text-center">
                           {checkPaymentMessage}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Megaphone,
   Send,
@@ -333,17 +333,41 @@ export default function MailingsSection({ users = [], tariffs = [], onSuccess, o
     }
   }
 
-  const userIds = users.map((u) => u.id).filter(Boolean)
-  const plans = [...new Set(users.map((u) => u.plan).filter(Boolean))].sort()
-  const countByPlan = plans.reduce((acc, p) => ({ ...acc, [p]: users.filter((u) => u.plan === p).length }), {})
-  const countByTariff = tariffs.reduce((acc, t) => ({ ...acc, [t.id]: users.filter((u) => u.tariffId === t.id).length }), {})
+  const { userIds, plans, countByPlan, countByTariff, tariffsById } = useMemo(() => {
+    const ids = []
+    const planSet = new Set()
+    const byPlan = {}
+    const byTariff = {}
+    for (const u of users) {
+      if (u?.id) ids.push(u.id)
+      if (u?.plan) {
+        planSet.add(u.plan)
+        byPlan[u.plan] = (byPlan[u.plan] || 0) + 1
+      }
+      if (u?.tariffId) {
+        byTariff[u.tariffId] = (byTariff[u.tariffId] || 0) + 1
+      }
+    }
+    const tariffMap = {}
+    for (const t of tariffs) {
+      if (t?.id) tariffMap[t.id] = t
+      if (t?.id && byTariff[t.id] == null) byTariff[t.id] = 0
+    }
+    return {
+      userIds: ids,
+      plans: [...planSet].sort(),
+      countByPlan: byPlan,
+      countByTariff: byTariff,
+      tariffsById: tariffMap,
+    }
+  }, [users, tariffs])
 
   const getRecipientSummary = () => {
     if (recipientFilter === 'userIds') return { label: 'Выбранные в таблице', count: userIds.length }
     if (recipientFilter === 'all') return { label: 'Всем пользователям', count: users.length }
     if (recipientFilter === 'plan') return { label: `План «${broadcastPlan || '…'}»`, count: broadcastPlan ? (countByPlan[broadcastPlan] ?? 0) : 0 }
     if (recipientFilter === 'tariff') {
-      const name = tariffs.find((t) => t.id === broadcastTariffId)?.name || broadcastTariffId || '…'
+      const name = tariffsById[broadcastTariffId]?.name || broadcastTariffId || '…'
       return { label: `Тариф «${name}»`, count: broadcastTariffId ? (countByTariff[broadcastTariffId] ?? 0) : 0 }
     }
     return { label: '', count: 0 }
@@ -354,7 +378,7 @@ export default function MailingsSection({ users = [], tariffs = [], onSuccess, o
     if (s.recipientFilter === 'all') return 'Всем'
     if (s.recipientFilter === 'plan' && s.plan) return `План «${s.plan}»`
     if (s.recipientFilter === 'tariff' && s.tariffId) {
-      const t = tariffs.find((tr) => tr.id === s.tariffId)
+      const t = tariffsById[s.tariffId]
       return `Тариф «${t?.name || s.tariffId}»`
     }
     if (s.recipientFilter === 'userIds' && Array.isArray(s.userIds)) return `Выбранные (${s.userIds.length})`
