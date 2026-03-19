@@ -111,6 +111,11 @@ export function useSettings(currentUser, setError, setSuccess) {
       return
     }
 
+    if (settingsLoading || settingsLoadInProgressRef.current) {
+      setError('Подождите, пока загрузятся настройки и сервера')
+      return
+    }
+
     if (!settings) return
 
     try {
@@ -121,7 +126,7 @@ export function useSettings(currentUser, setError, setSuccess) {
       logger.error('Admin', 'Ошибка сохранения настроек', { adminId: currentUser.id }, err)
       setError('Ошибка сохранения настроек')
     }
-  }, [currentUser, settings, servers, setError, setSuccess])
+  }, [currentUser, settings, servers, setError, setSuccess, settingsLoading])
 
   // Условия тарифов (отображаются в ЛК под описанием). Ключи: super, multi, megamix, default
   const handleTariffConditionChange = useCallback((tariffKey, value) => {

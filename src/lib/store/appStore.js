@@ -13,17 +13,32 @@ export const useAppStore = create((set) => ({
 
     // Global settings & tariffs
     tariffs: [],
-    setTariffs: (tariffs) => set({ tariffs }),
+    setTariffs: (valueOrUpdater) =>
+      set((state) => ({
+        tariffs: typeof valueOrUpdater === 'function' ? valueOrUpdater(state.tariffs) : valueOrUpdater,
+      })),
 
     appState: null, // Project settings, etc.
-    setAppState: (state) => set({ appState: state }),
+    setAppState: (valueOrUpdater) =>
+      set((state) => ({
+        appState: typeof valueOrUpdater === 'function' ? valueOrUpdater(state.appState) : valueOrUpdater,
+      })),
 
     settings: null,
-    setSettings: (settings) => set({ settings }),
+    setSettings: (valueOrUpdater) =>
+      set((state) => ({
+        settings: typeof valueOrUpdater === 'function' ? valueOrUpdater(state.settings) : valueOrUpdater,
+      })),
 
     servers: [],
-    setServers: (servers) => set({ servers: servers }),
+    setServers: (valueOrUpdater) =>
+      set((state) => ({
+        servers: typeof valueOrUpdater === 'function' ? valueOrUpdater(state.servers) : valueOrUpdater,
+      })),
 
     users: [],
-    setUsers: (users) => set({ users })
+    setUsers: (valueOrUpdater) =>
+      set((state) => ({
+        users: typeof valueOrUpdater === 'function' ? valueOrUpdater(state.users) : valueOrUpdater,
+      })),
 }))

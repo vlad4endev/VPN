@@ -220,15 +220,28 @@ export const adminService = {
       throw new Error('База данных недоступна')
     }
 
+    const appId = String(APP_ID ?? '').trim()
+    if (!appId || appId === 'undefined' || appId === 'null') {
+      throw new Error('APP_ID не задан: проверьте VITE_APP_ID (иначе пути artifacts/${APP_ID}/... будут неверными)')
+    }
+
     try {
       logger.info('Admin', 'Загрузка глобальных настроек системы (только для админа)')
-      const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+      const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
       const settingsSnapshot = await getDoc(settingsDoc)
       
       if (settingsSnapshot.exists()) {
         const data = settingsSnapshot.data()
         // Backward-compat: в старых версиях `servers` мог сохраниться как объект (map), а не массив.
-        const rawServersCandidate = data.servers
+        let rawServersCandidate = data.servers
+        // Иногда поле `servers` могло сохраниться строкой JSON — парсим, чтобы не получать пустой список.
+        if (typeof rawServersCandidate === 'string') {
+          try {
+            rawServersCandidate = JSON.parse(rawServersCandidate)
+          } catch (e) {
+            logger.warn('Admin', 'servers в Firestore — строка, но JSON распарсить не удалось', { receivedType: typeof data.servers })
+          }
+        }
         const rawServers = Array.isArray(rawServersCandidate)
           ? rawServersCandidate
           : rawServersCandidate && typeof rawServersCandidate === 'object'
@@ -335,9 +348,15 @@ export const adminService = {
       throw new Error('База данных недоступна')
     }
 
+    const appId = String(APP_ID ?? '').trim()
+    if (!appId || appId === 'undefined' || appId === 'null') {
+      logger.error('Admin', 'APP_ID отсутствует — пропускаем сохранение настроек', { adminId, APP_ID })
+      throw new Error('APP_ID не задан: сохранение настроек невозможно')
+    }
+
     try {
       logger.info('Admin', 'Сохранение глобальных настроек системы', { adminId })
-      const settingsDoc = doc(db, `artifacts/${APP_ID}/public/settings`)
+      const settingsDoc = doc(db, `artifacts/${appId}/public/settings`)
       await setDoc(settingsDoc, stripUndefinedForFirestore({
         ...settings,
         servers: servers,

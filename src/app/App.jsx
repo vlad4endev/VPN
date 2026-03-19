@@ -769,7 +769,18 @@ export default function VPNServiceApp() {
           seo: data.seo && typeof data.seo === 'object' ? data.seo : {},
         }
         setSettings(merged)
-        const rawServersCandidate = merged.servers ?? data.servers
+        let rawServersCandidate = merged.servers ?? data.servers
+        // Иногда поле `servers` могло сохраниться строкой JSON — парсим, чтобы не получать пустой список.
+        if (typeof rawServersCandidate === 'string') {
+          try {
+            rawServersCandidate = JSON.parse(rawServersCandidate)
+          } catch (e) {
+            logger.warn('Firestore', 'servers в публичных настройках — строка, но JSON распарсить не удалось', {
+              receivedType: typeof rawServersCandidate,
+              userId: currentUser?.id,
+            })
+          }
+        }
         if (rawServersCandidate !== undefined && !Array.isArray(rawServersCandidate)) {
           const isObjectLike = rawServersCandidate && typeof rawServersCandidate === 'object'
           const preview = isObjectLike
@@ -875,7 +886,18 @@ export default function VPNServiceApp() {
         setSettings(merged)
         // ВАЖНО: Объединяем серверы из Firestore с текущими локальными серверами
         // Это предотвращает потерю серверов, которые были добавлены/изменены локально, но еще не сохранены
-        const rawServersCandidate = merged.servers ?? data.servers
+        let rawServersCandidate = merged.servers ?? data.servers
+        // Иногда поле `servers` могло сохраниться строкой JSON — парсим, чтобы не получать пустой список.
+        if (typeof rawServersCandidate === 'string') {
+          try {
+            rawServersCandidate = JSON.parse(rawServersCandidate)
+          } catch (e) {
+            logger.warn('Firestore', 'servers в глобальных настройках — строка, но JSON распарсить не удалось', {
+              receivedType: typeof merged.servers,
+              adminId: currentUser?.id,
+            })
+          }
+        }
         if (rawServersCandidate !== undefined && !Array.isArray(rawServersCandidate)) {
           const isObjectLike = rawServersCandidate && typeof rawServersCandidate === 'object'
           const preview = isObjectLike
