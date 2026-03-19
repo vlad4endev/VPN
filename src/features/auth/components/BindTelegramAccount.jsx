@@ -6,19 +6,9 @@ import logger from '../../../shared/utils/logger.js'
 import { validateEmail } from '../utils/validateEmail.js'
 import { validatePassword } from '../utils/validatePassword.js'
 import { authService } from '../services/authService.js'
+import { getMagicTokenFromWindow } from '../utils/magicLinkUrl.js'
 
 const WEBHOOK_URL = 'https://n8n.your-server.com/webhook/registration-confirm'
-
-function tokenFromUrl() {
-  if (typeof window === 'undefined') return null
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
-    return token ? String(token) : null
-  } catch {
-    return null
-  }
-}
 
 function toExpiryMillis(value) {
   if (value === null || value === undefined) return null
@@ -113,7 +103,7 @@ export default function BindTelegramAccount({ db, appId, setCurrentUser, setView
         setLoading(false)
         return
       }
-      const t = tokenFromUrl()
+      const t = getMagicTokenFromWindow()
       if (!t) {
         setLocalError('Ссылка недействительна или срок действия истек')
         setLoading(false)

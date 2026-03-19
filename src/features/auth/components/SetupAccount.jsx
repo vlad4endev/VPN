@@ -5,17 +5,7 @@ import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
 import { authService } from '../services/authService.js'
 import { validateEmail } from '../utils/validateEmail.js'
 import { validatePassword } from '../utils/validatePassword.js'
-
-function tokenFromUrl() {
-  if (typeof window === 'undefined') return null
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
-    return token ? String(token) : null
-  } catch {
-    return null
-  }
-}
+import { getMagicTokenFromWindow } from '../utils/magicLinkUrl.js'
 
 function toExpiryMillis(value) {
   if (value === null || value === undefined) return null
@@ -94,7 +84,7 @@ export default function SetupAccount({
     const run = async () => {
       if (!auth || !db || !appId) return
 
-      const t = tokenFromUrl()
+      const t = getMagicTokenFromWindow()
       if (!t) {
         setLocalError('Ссылка недействительна')
         setLoading(false)

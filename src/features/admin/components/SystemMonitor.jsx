@@ -4,11 +4,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Activity, Cpu, HardDrive, Wifi, AlertCircle, CheckCircle2, XCircle, Trash2, Filter, RefreshCw, Server, Database, Zap, Loader2, Gauge, Cloud, Workflow, Shield } from 'lucide-react'
+import { Activity, Cpu, HardDrive, Wifi, AlertCircle, CheckCircle2, XCircle, Trash2, Filter, RefreshCw, Server, Database, Zap, Loader2, Gauge, Cloud, Workflow, Shield, Sparkles } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import axios from 'axios'
 import logger from '../../../shared/utils/logger.js'
 import { getApiBaseUrl } from '../../../shared/utils/apiBase.js'
+import { fetchMonitoringAiReport } from '../services/monitoringAiReportService.js'
 
 const SystemMonitor = () => {
   const [status, setStatus] = useState(null)
@@ -20,6 +21,9 @@ const SystemMonitor = () => {
   const [restartingModule, setRestartingModule] = useState(null) // ID модуля, который перезапускается
   const [clientStatus, setClientStatus] = useState(null) // Статус клиента (браузер)
   const [success, setSuccess] = useState(null) // Сообщение об успехе
+  const [aiReport, setAiReport] = useState('')
+  const [aiReportLoading, setAiReportLoading] = useState(false)
+  const [aiReportMeta, setAiReportMeta] = useState(null) // { heuristicOnly, generatedAt, aiError }
   const logsEndRef = useRef(null)
   const maxHistoryPoints = 30 // Последние 30 точек для графика
 
@@ -211,6 +215,31 @@ const SystemMonitor = () => {
     logger.info('SystemMonitor', 'Логи очищены')
   }, [])
 
+  const handleAiMonitoringReport = useCallback(async () => {
+    setAiReportLoading(true)
+    setError(null)
+    try {
+      const result = await fetchMonitoringAiReport({
+        status,
+        logs,
+        responseTimeHistory,
+        clientStatus: getClientStatus(),
+        logLimit: 320,
+      })
+      setAiReport(result.report)
+      setAiReportMeta({
+        heuristicOnly: result.heuristicOnly,
+        generatedAt: result.generatedAt,
+        aiError: result.aiError,
+      })
+    } catch (err) {
+      logger.error('SystemMonitor', 'ИИ-отчёт мониторинга', null, err)
+      setError(err.message || 'Не удалось сформировать отчёт')
+    } finally {
+      setAiReportLoading(false)
+    }
+  }, [status, logs, responseTimeHistory, getClientStatus])
+
   // Get status color
   const getStatusColor = (connected) => {
     return connected ? 'text-green-400' : 'text-red-400'
@@ -351,6 +380,65 @@ const SystemMonitor = () => {
           )}
         </div>
       )}
+
+      {/* Умный анализ: ИИ по метрикам, логам и тренду latency */}
+      <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-violet-900/35">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-violet-400 flex-shrink-0" />
+            <div>
+              <h3 className="text-[clamp(1rem,0.95rem+0.25vw,1.125rem)] font-semibold text-slate-200">
+                Умный отчёт мониторинга
+              </h3>
+              <p className="text-slate-500 text-xs sm:text-sm mt-0.5">
+                ИИ анализирует метрики сервера, сервисы, логи и динамику задержек; на сервер подмешиваются свежие записи из буфера.
+                {' '}
+                <span className="text-slate-600">
+                  Без Firebase Admin: откройте админку с localhost и держите backend на :3001 (прокси Vite). Дополнительно можно задать секреты MONITORING_AI_REPORT_DEV_SECRET.
+                </span>
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleAiMonitoringReport}
+            disabled={aiReportLoading}
+            className="min-h-[44px] shrink-0 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm font-medium flex items-center justify-center gap-2 touch-manipulation"
+          >
+            {aiReportLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Анализ…
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                Сформировать отчёт
+              </>
+            )}
+          </button>
+        </div>
+        {aiReportMeta && (
+          <p className="text-slate-500 text-xs mb-2">
+            {aiReportMeta.generatedAt && `Сгенерировано: ${new Date(aiReportMeta.generatedAt).toLocaleString('ru-RU')}`}
+            {aiReportMeta.heuristicOnly && (
+              <span className="text-amber-400/90"> · без LLM (эвристика или ошибка ИИ)</span>
+            )}
+            {aiReportMeta.aiError && (
+              <span className="text-red-400/80"> · {aiReportMeta.aiError}</span>
+            )}
+          </p>
+        )}
+        {aiReport ? (
+          <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 sm:p-4 max-h-[min(70vh,520px)] overflow-y-auto">
+            <pre className="text-slate-200 text-[clamp(0.75rem,0.7rem+0.25vw,0.875rem)] whitespace-pre-wrap font-sans leading-relaxed">
+              {aiReport}
+            </pre>
+          </div>
+        ) : (
+          <p className="text-slate-600 text-sm">Нажмите «Сформировать отчёт». Нужны настройки ИИ в админке для полного разбора; без ключа вернётся краткая эвристика.</p>
+        )}
+      </div>
 
       {/* Server Status Card - Mobile First */}
       <div className="bg-slate-900 rounded-lg sm:rounded-xl shadow-xl section-spacing-sm border border-slate-800">

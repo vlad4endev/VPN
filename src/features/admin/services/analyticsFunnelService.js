@@ -29,6 +29,13 @@ export async function getFunnel() {
         'Эндпоинт аналитики не найден (404). Перезапустите backend: npm start (из корня или из папки server).'
       )
     }
+    if (res.status === 503) {
+      throw new Error(
+        data.error ||
+          data.msg ||
+          'Сервис аналитики недоступен (503). Настройте Firebase Admin на backend: server/firebase-service-account.json или FIREBASE_SERVICE_ACCOUNT_KEY в server/.env и перезапустите n8n-webhook-proxy.',
+      )
+    }
     throw new Error(data.error || data.msg || res.statusText)
   }
   return res.json()

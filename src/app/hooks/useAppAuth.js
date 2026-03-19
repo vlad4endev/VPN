@@ -10,7 +10,7 @@ import { isAdminEmail } from '../../shared/constants/admin.js'
 import { getFirestoreSafeName } from '../../shared/utils/firestoreSafe.js'
 import { applyUserLanguageToUi } from '../../features/auth/services/userLanguageService.js'
 import { isBrowserAuthPath } from '../../features/telegram/utils/tmaPath.js'
-import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
+import { getMagicLinkViewFromWindow, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
 
 export const useAppAuth = ({
   appId,
@@ -415,7 +415,7 @@ export const useAppAuth = ({
           else if (path === '/set-password') setView('set-password')
           else if (pathnameIsBindTelegram(pathname)) setView('bind-telegram')
           else {
-            const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+            const magicView = getMagicLinkViewFromWindow()
             if (magicView) setView(magicView)
           }
         }

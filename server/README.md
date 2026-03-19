@@ -60,7 +60,8 @@ npm start
 - `GET /api/vpn/inbounds/:inboundId` - Инбаунд по ID
 - `POST /api/vpn/sync-user` - Синхронизация данных пользователя с n8n
 - `GET /api/system/status` - Системная информация
-- `GET /api/system/logs` - Логи (заглушка)
+- `GET /api/system/logs` - Логи из in-memory буфера (`{ success, data: { logs } }`)
+- `POST /api/admin/system/monitoring-ai-report` - ИИ/эвристический отчёт мониторинга (админ, Bearer)
 - `POST /api/analytics/finance-analysis` — ИИ-анализ доходов/расходов
 
 ## Структура

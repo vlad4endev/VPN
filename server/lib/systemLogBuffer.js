@@ -129,8 +129,11 @@ export function getSystemLogs(opts = {}) {
   if (sinceRaw !== undefined && sinceRaw !== null && String(sinceRaw).trim()) {
     const s = String(sinceRaw).trim()
     const asNum = Number(s)
-    if (!Number.isNaN(asNum)) sinceTs = asNum
-    else {
+    if (!Number.isNaN(asNum)) {
+      // Малое число — окно «мс назад» (например 3600000 = последний час); большое — абсолютный timestamp.
+      if (asNum > 0 && asNum < 1e12) sinceTs = Date.now() - asNum
+      else sinceTs = asNum
+    } else {
       const d = new Date(s)
       if (!Number.isNaN(d.getTime())) sinceTs = d.getTime()
     }

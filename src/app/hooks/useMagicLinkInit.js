@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import logger from '../../shared/utils/logger.js'
-import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
+import { getMagicLinkViewFromWindow, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
 
 function tokenParamFromUrl() {
   if (typeof window === 'undefined') return null
@@ -38,7 +38,7 @@ export function useMagicLinkInit({
     const token = tokenParamFromUrl()
     if (!token) return
 
-    const target = getMagicLinkViewFromSearch(typeof window !== 'undefined' ? window.location.search : '')
+    const target = typeof window !== 'undefined' ? getMagicLinkViewFromWindow() : null
     startedRef.current = true
     const resolved = target || 'bind-telegram'
     logger.info('MagicLink', `Magic token detected -> ${resolved} view`, { explicit: !!target })

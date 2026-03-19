@@ -19,31 +19,14 @@ export const AdminPanelPropTypes = {
   // Навигация
   onSetView: PropTypes.func.isRequired,
   onHandleLogout: PropTypes.func.isRequired,
-  
-  // Пользователи
-  users: PropTypes.arrayOf(
-    PropTypes.shape({
-      id: PropTypes.string.isRequired,
-      email: PropTypes.string.isRequired,
-      uuid: PropTypes.string,
-      name: PropTypes.string,
-      phone: PropTypes.string,
-      expiresAt: PropTypes.number,
-      trafficGB: PropTypes.number,
-      devices: PropTypes.number,
-      tariffId: PropTypes.string,
-      plan: PropTypes.string,
-      role: PropTypes.string,
-    })
-  ).isRequired,
+
+  // users / servers / tariffs — из useAppStore(), не передаются пропсами
   editingUser: PropTypes.object,
   onSetEditingUser: PropTypes.func.isRequired,
   onHandleUpdateUser: PropTypes.func.isRequired,
   onHandleDeleteUser: PropTypes.func.isRequired,
   onHandleCopy: PropTypes.func.isRequired,
-  
-  // Серверы
-  servers: PropTypes.arrayOf(PropTypes.object).isRequired,
+
   editingServer: PropTypes.object,
   onSetEditingServer: PropTypes.func.isRequired,
   onHandleAddServer: PropTypes.func.isRequired,
@@ -80,8 +63,6 @@ export const AdminPanelPropTypes = {
   onHandleSeoChange: PropTypes.func,
   onHandleTariffConditionChange: PropTypes.func,
 
-  // Тарифы
-  tariffs: PropTypes.arrayOf(PropTypes.object).isRequired,
   editingTariff: PropTypes.object,
   onSetEditingTariff: PropTypes.func.isRequired,
   onHandleSaveTariff: PropTypes.func.isRequired,

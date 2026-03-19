@@ -39,6 +39,7 @@ import { generateUniqueSubId } from './lib/generateUniqueSubId.js'
 import { generatePaymentLink as generatePaymentLinkFromService, generateOrderId, verifyYooMoneyWebhookSignature, buildRedirectUrl } from './payment/index.js'
 import { installConsoleCapture } from './lib/consoleCapture.js'
 import { getSystemLogs, clearSystemLogs, getSystemLogMax } from './lib/systemLogBuffer.js'
+import { buildMonitoringAiUserContent, buildHeuristicMonitoringReport } from './lib/monitoringAiReport.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -170,7 +171,10 @@ async function initFirebaseAdmin() {
       console.log('⚠️ Firebase Admin SDK: задайте FIREBASE_PROJECT_ID в server/.env (или положите ключ в server/firebase-service-account.json с project_id)')
     } else {
       console.log('⚠️ Firebase Admin SDK не настроен: положите ключ в server/firebase-service-account.json или задайте FIREBASE_SERVICE_ACCOUNT_KEY в server/.env')
-      console.log('   Админ-API и Telegram будут возвращать 503 до настройки.')
+      console.log(
+        '   Без ключа недоступны проверка админа по токену, Firestore, большинство /api/admin/*, аналитика, Telegram. ' +
+          'В dev (NODE_ENV≠production) ИИ-отчёт мониторинга может отвечать с loopback без ключа; в production — только после настройки SDK.',
+      )
     }
   } catch (err) {
     console.log('⚠️ Firebase Admin SDK недоступен:', err.message)
@@ -893,6 +897,45 @@ function cleanupAdminCache() {
     const firstKey = adminCache.keys().next().value
     if (firstKey) adminCache.delete(firstKey)
   }
+}
+
+function isNodeProductionEnv() {
+  return String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+}
+
+/**
+ * Локальная разработка без Firebase Admin: POST /api/admin/system/monitoring-ai-report
+ * с заголовком X-Monitoring-Dev-Secret === MONITORING_AI_REPORT_DEV_SECRET (server/.env).
+ * В production отключено. Не используйте простые секреты; только на своей машине.
+ */
+function isMonitoringAiDevAuthOk(req) {
+  if (isNodeProductionEnv()) return false
+  const serverSecret = (process.env.MONITORING_AI_REPORT_DEV_SECRET || '').trim()
+  if (!serverSecret) return false
+  const hdr = String(
+    req.headers['x-monitoring-dev-secret'] ||
+      req.headers['X-Monitoring-Dev-Secret'] ||
+      '',
+  ).trim()
+  return hdr.length > 0 && hdr === serverSecret
+}
+
+/** TCP-клиент с loopback (Vite proxy → :3001 тоже даёт 127.0.0.1). */
+function isRequestFromLoopback(req) {
+  const raw = req.socket?.remoteAddress || req.connection?.remoteAddress || ''
+  const ip = (req.ip && String(req.ip).trim()) || String(raw).trim()
+  const v4 = ip.replace(/^::ffff:/i, '')
+  return v4 === '127.0.0.1' || ip === '::1' || v4 === '::1'
+}
+
+/**
+ * Dev без Firebase Admin и без секрета: только loopback + не production.
+ * Не срабатывает, если Admin SDK уже поднят (тогда нужен обычный админ-токен).
+ */
+function isMonitoringAiLocalLoopbackNoFirebaseOk(req) {
+  if (isNodeProductionEnv()) return false
+  if (admin && db) return false
+  return isRequestFromLoopback(req)
 }
 
 /**
@@ -4754,6 +4797,114 @@ app.get('/api/admin/system/logs', async (req, res) => {
   res.json({ success: true, logs })
 })
 
+/**
+ * POST /api/admin/system/monitoring-ai-report — умный отчёт по мониторингу (ИИ + эвристика без ключа).
+ * Тело: { status?, logs?, responseTimeHistory?, clientStatus?, logLimit?, logLevel?, since? }
+ * Только админ.
+ */
+app.post('/api/admin/system/monitoring-ai-report', express.json({ limit: '1mb' }), async (req, res) => {
+  const bypassAdmin =
+    isMonitoringAiDevAuthOk(req) || isMonitoringAiLocalLoopbackNoFirebaseOk(req)
+  if (!bypassAdmin) {
+    const adminOk = await ensureAdmin(req, res)
+    if (!adminOk?.ok) return
+  }
+
+  try {
+    const body = req.body || {}
+    const maxBuf = getSystemLogMax()
+    const logLimit = Math.min(Math.max(1, parseInt(body.logLimit, 10) || 280), maxBuf)
+    const level =
+      body.logLevel != null && String(body.logLevel).trim() && String(body.logLevel).toLowerCase() !== 'all'
+        ? String(body.logLevel).toLowerCase()
+        : undefined
+    const since = body.since != null ? body.since : undefined
+
+    const serverLogs = getSystemLogs({ limit: logLimit, since, level })
+    const clientLogs = Array.isArray(body.logs) ? body.logs : []
+    const mergedLogs = serverLogs.length >= clientLogs.length ? serverLogs : clientLogs
+
+    const payload = {
+      status: body.status ?? null,
+      logs: mergedLogs,
+      responseTimeHistory: Array.isArray(body.responseTimeHistory) ? body.responseTimeHistory : [],
+      clientStatus: body.clientStatus ?? null,
+      serverNote: `Логи с сервера (буфер): ${serverLogs.length}; в теле запроса: ${clientLogs.length}; в анализе: ${mergedLogs.length}.`,
+    }
+
+    const aiConfig = await getActiveAiConfig()
+    if (!aiConfig.apiKey || !String(aiConfig.apiKey).trim()) {
+      const report = buildHeuristicMonitoringReport(payload)
+      return res.json({
+        success: true,
+        heuristicOnly: true,
+        report,
+        generatedAt: new Date().toISOString(),
+      })
+    }
+
+    const systemPrompt = `Ты — senior SRE. Анализируешь моментальный снимок мониторинга бэкенда VPN/прокси-приложения (Node, Firebase, n8n, 3x-ui, метрики HTTP API) и логи.
+Ответ строго на русском языке, в Markdown.
+Структура:
+## Общее состояние
+(коротко: здоровье инфраструктуры)
+
+## Производительность и задержки
+(CPU, RAM, процесс Node, средняя задержка API, тренд по серии latency если есть)
+
+## Логи и инциденты
+(повторяющиеся ошибки, критичность, что проверить)
+
+## Актуальность данных и риски
+(насколько свежий снимок, слепые зоны)
+
+## Рекомендации
+(нумерованный список конкретных шагов)
+Не выдумывай метрики, которых нет в JSON. Если данных мало — напиши об этом.`
+
+    const userContent = buildMonitoringAiUserContent(payload)
+    const timeoutSec = Math.min(120, Math.max(25, Number(aiConfig.timeout) || 60))
+
+    const chatConfig = {
+      provider: aiConfig.provider,
+      apiKey: aiConfig.apiKey,
+      model: aiConfig.model,
+      temperature: Math.min(0.45, Number(aiConfig.temperature) || 0.35),
+      max_tokens: Math.min(4096, Math.max(1024, Number(aiConfig.max_tokens) || 2048)),
+      timeout: timeoutSec,
+    }
+
+    const result = await unifiedChat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Данные для анализа (JSON):\n${userContent}` },
+      ],
+      chatConfig,
+    )
+
+    if (!result.ok) {
+      const fallback = buildHeuristicMonitoringReport(payload)
+      return res.json({
+        success: true,
+        heuristicOnly: true,
+        report: `${fallback}\n\n---\n*ИИ не ответил: ${result.error || result.code || 'ошибка'}*`,
+        generatedAt: new Date().toISOString(),
+        aiError: result.error || result.code,
+      })
+    }
+
+    return res.json({
+      success: true,
+      heuristicOnly: false,
+      report: result.content,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('❌ POST /api/admin/system/monitoring-ai-report:', err.message)
+    return res.status(500).json({ success: false, error: err.message || 'Ошибка отчёта' })
+  }
+})
+
 /** GET /api/admin/telegram/chat-info — данные чата/аккаунта по сохранённому Chat ID админа (только админ) */
 app.get('/api/admin/telegram/chat-info', async (req, res) => {
   const adminOk = await ensureAdmin(req, res)
@@ -8028,7 +8179,21 @@ app.get('/api/system/status', async (req, res) => {
 })
 
 app.get('/api/system/logs', (req, res) => {
-  res.json({ logs: [], message: 'Логи доступны в n8n workflows' })
+  try {
+    const max = getSystemLogMax()
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, max)
+    const since = req.query.since != null ? String(req.query.since) : undefined
+    const level =
+      req.query.level != null &&
+      String(req.query.level).trim() &&
+      String(req.query.level).toLowerCase() !== 'all'
+        ? String(req.query.level).toLowerCase()
+        : undefined
+    const logs = getSystemLogs({ limit, since, level })
+    res.json({ success: true, data: { logs } })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || 'Ошибка чтения логов' })
+  }
 })
 
 app.post('/api/system/restart/:moduleId', async (req, res) => {

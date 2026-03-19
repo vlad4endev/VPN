@@ -64,7 +64,7 @@ import SetupAccount from '../features/auth/components/SetupAccount.jsx'
 import BindTelegramAccount from '../features/auth/components/BindTelegramAccount.jsx'
 import { tmaLog } from '../features/telegram/utils/tmaLogger.js'
 import { isBrowserAuthPath } from '../features/telegram/utils/tmaPath.js'
-import { getMagicLinkViewFromSearch, pathnameIsBindTelegram } from '../features/auth/utils/magicLinkUrl.js'
+import { getMagicLinkViewFromWindow, pathnameIsBindTelegram } from '../features/auth/utils/magicLinkUrl.js'
 
 // Константа appId для пути Firestore (для обратной совместимости)
 const appId = APP_ID
@@ -388,7 +388,7 @@ export default function VPNServiceApp() {
         if (path === '/review' || hash === '#review') return 'review'
         if (path === '/set-password') return 'set-password'
         if (pathnameIsBindTelegram(path)) return 'bind-telegram'
-        const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+        const magicView = getMagicLinkViewFromWindow()
         if (magicView) return magicView
       }
       const savedView = localStorage.getItem('vpn_current_view')
@@ -638,7 +638,7 @@ export default function VPNServiceApp() {
   useLayoutEffect(() => {
     if (currentUser || firebaseUser) return
     if (typeof window === 'undefined') return
-    const mv = getMagicLinkViewFromSearch(window.location.search || '')
+    const mv = getMagicLinkViewFromWindow()
     if (!mv) return
     if (view !== mv) setView(mv)
   }, [view, currentUser, firebaseUser, setView])
@@ -652,7 +652,7 @@ export default function VPNServiceApp() {
       if (path === '/review' || hash === '#review') setViewState('review')
       if (path === '/set-password') setViewState('set-password')
       if (pathnameIsBindTelegram(window.location.pathname || '')) setView('bind-telegram')
-      const magicView = getMagicLinkViewFromSearch(window.location.search || '')
+      const magicView = getMagicLinkViewFromWindow()
       if (magicView) setView(magicView)
       // /payment/success и /payment/fail обрабатываются в рендере по path — view не меняем
     }
@@ -3756,6 +3756,32 @@ export default function VPNServiceApp() {
   }
   if (path === '/payment/fail') {
     return <PaymentResultPage success={false} onGoToDashboard={goToDashboard} />
+  }
+
+  // Magic link: всегда выше Welcome — иначе при welcome + ?token= всё равно рисовался лендинг
+  const magicLinkRoute = typeof window !== 'undefined' ? getMagicLinkViewFromWindow() : null
+  if (magicLinkRoute && !currentUser) {
+    if (magicLinkRoute === 'setup-account') {
+      return (
+        <SetupAccount
+          auth={auth}
+          db={db}
+          appId={appId}
+          setCurrentUser={setCurrentUser}
+          setView={setView}
+          setError={setError}
+        />
+      )
+    }
+    return (
+      <BindTelegramAccount
+        db={db}
+        appId={appId}
+        setCurrentUser={setCurrentUser}
+        setView={setView}
+        setError={setError}
+      />
+    )
   }
 
   // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации
