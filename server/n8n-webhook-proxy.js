@@ -1832,38 +1832,106 @@ app.post('/api/public/review', async (req, res) => {
 })
 
 /**
+ * Тестирование сессии 3x-ui (для админки — проверка подключения к серверу).
+ * POST /api/test-session
+ * Body: { serverIP, serverPort, protocol?, randompath? }
+ * Использует XUI_USERNAME, XUI_PASSWORD из env. Проксирует ответ и Set-Cookie клиенту.
+ */
+app.post('/api/test-session', express.json(), async (req, res) => {
+  try {
+    const { serverIP, serverPort, protocol = 'http', randompath = '' } = req.body || {}
+    if (!serverIP || !serverPort) {
+      return res.status(400).json({
+        success: false,
+        msg: 'serverIP и serverPort обязательны',
+      })
+    }
+    const username = process.env.XUI_USERNAME || ''
+    const password = process.env.XUI_PASSWORD || ''
+    const normalizedPath = randompath ? `/${String(randompath).replace(/^\/+|\/+$/g, '')}` : ''
+    const baseUrl = `${protocol}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
+    const loginUrl = `${baseUrl}/login`
+    const response = await axios.post(loginUrl, { username, password }, {
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      validateStatus: () => true,
+      timeout: 10000,
+    })
+    const setCookie = response.headers['set-cookie'] || response.headers['Set-Cookie']
+    if (setCookie) {
+      const arr = Array.isArray(setCookie) ? setCookie : [setCookie]
+      arr.forEach(c => res.append('Set-Cookie', c))
+    }
+    res.status(response.status).json(response.data || {})
+  } catch (error) {
+    console.error('❌ Test session error:', error.message)
+    res.status(error.response?.status || 500).json({
+      success: false,
+      msg: error.message || 'Test session failed',
+    })
+  }
+})
+
+/**
  * Добавление клиента в 3x-ui через n8n webhook.
  * POST /api/vpn/add-client
  * Тело запроса передаётся в n8n; ответ n8n возвращается клиенту как есть.
+ * Fallback: при ошибке n8n backend добавляет клиента напрямую через xuiClient. Требует serverIP, serverPort, protocol, randompath, xuiUsername, xuiPassword.
  */
 app.post('/api/vpn/add-client', async (req, res) => {
-  try {
-    const body = req.body || {}
-    if (!body.clientId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
-      })
-    }
-
-    const webhookUrl = getWebhookUrl('addClient', req)
-    if (!webhookUrl || !webhookUrl.trim()) {
-      return res.status(503).json({
-        success: false,
-        error: 'Webhook для addClient не настроен (N8N_WEBHOOK_ADD_CLIENT или webhookUrl в запросе)',
-      })
-    }
-
-    const result = await callN8NWebhook(webhookUrl, body)
-    res.json(result != null ? result : { success: true, vpnUuid: body.clientId })
-  } catch (error) {
-    const statusCode = error.response?.status || 500
-    res.status(statusCode).json({
+  const body = req.body || {}
+  if (!body.clientId) {
+    return res.status(400).json({
       success: false,
-      error: error.message || 'Ошибка создания клиента через n8n',
-      errorMessage: error.message,
+      error: 'Отсутствует обязательное поле: clientId (UUID пользователя)',
     })
   }
+
+  const webhookUrl = getWebhookUrl('addClient', req)
+  let n8nError = null
+
+  try {
+    if (webhookUrl && webhookUrl.trim()) {
+      const result = await callN8NWebhook(webhookUrl, body)
+      return res.json(result != null ? result : { success: true, vpnUuid: body.clientId })
+    }
+  } catch (error) {
+    n8nError = error
+    console.warn('⚠️ n8n add-client failed, falling back to direct xuiClient:', error.message)
+  }
+
+  // Fallback: добавить клиента напрямую через xuiClient (если есть данные сервера)
+  const { serverIP, serverPort, protocol = 'http', randompath = '', xuiUsername, xuiPassword } = body
+  if (serverIP && serverPort && xuiUsername && xuiPassword) {
+    try {
+      const normalizedPath = randompath ? `/${String(randompath).replace(/^\/+|\/+$/g, '')}` : ''
+      const baseUrl = `${protocol}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
+      const xui = createXuiClient({ baseUrl, username: xuiUsername, password: xuiPassword })
+      const email = body.email || body.subscriptionDetails?.userName || body.userEmail || `user_${body.userId || ''}@local`
+      await xui.addClient(body.inboundId || 1, {
+        email: email.toString().trim(),
+        uuid: body.clientId,
+        totalGB: body.totalGB ?? 0,
+        expiryTime: body.expiryTime ?? 0,
+        limitIp: body.limitIp ?? body.subscriptionDetails?.devices ?? 1,
+        subId: body.subId || '',
+        tgId: body.tgId || '',
+      })
+      console.log('✅ add-client fallback: клиент добавлен напрямую через xuiClient', { clientId: body.clientId })
+      return res.json({ success: true, vpnUuid: body.clientId, source: 'fallback' })
+    } catch (fallbackErr) {
+      console.error('❌ add-client fallback failed:', fallbackErr.message)
+    }
+  }
+
+  const statusCode = n8nError?.response?.status || 500
+  const errorData = n8nError?.response?.data
+  const errorMessage = errorData?.errorMessage || errorData?.error || n8nError?.message || 'Ошибка создания клиента через n8n'
+  res.status(statusCode).json({
+    success: false,
+    error: errorMessage,
+    errorMessage: errorMessage,
+    errorDetails: errorData,
+  })
 })
 
 /**

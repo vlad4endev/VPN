@@ -108,18 +108,18 @@
 
 ### Login (удаление клиента)
 
-- **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`
+- **URL**: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`
 - **jsonBody**: `={"username": "{{ $('Webhook').item.json.body.xuiUsername }}", "password": "{{ $('Webhook').item.json.body.xuiPassword }}"}`
 - Убрать пробел в конце пути `login ` → `login`.
 
 ### Login 178 (MULTI — создание клиента)
 
-- **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`
+- **URL**: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`
 - **jsonBody**: `={"username": "{{ $('Webhook').item.json.body.xuiUsername }}", "password": "{{ $('Webhook').item.json.body.xuiPassword }}"}`
 
 ### Создание клиента (MULTI)
 
-- **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/addClient`
+- **URL**: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/addClient`
 - **jsonBody** оставить как есть (уже из body):
   - `id`: `{{ $('Webhook').item.json.body.inboundId }}`
   - `settings`: clients с `userUuid`, `subscriptionDetails.userName`, `subscriptionDetails.devices`, `subscriptionDetails.period.expiryDate3xui`, `subId`
@@ -128,10 +128,10 @@
 ### Code10 → Login3 → Создание клиента1 (Super)
 
 - **Login3**  
-  - **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`  
+  - **URL**: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`  
   - **jsonBody**: `={"username": "{{ $('Webhook').item.json.body.xuiUsername }}", "password": "{{ $('Webhook').item.json.body.xuiPassword }}"}`
 - **Создание клиента1**  
-  - **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/addClient`  
+  - **URL**: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/addClient`  
   - **jsonBody**: без изменений (уже использует Webhook body: inboundId, userUuid, email, limitIp, totalGB, subscriptionDetails.period.expiryDate3xui, subId).  
   - **jsonHeaders**: Cookie от Login3: `{{ $json.headers["set-cookie"][0] }}`
 
@@ -141,14 +141,14 @@
   - **URL**: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}login`  
   - **jsonBody**: `={"username": "{{ $('Webhook').item.json.body.xuiUsername }}", "password": "{{ $('Webhook').item.json.body.xuiPassword }}"}`
 - **Создание клиента2**  
-  - **URL**: уже из body: `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/updateClient/{{ $('Webhook').item.json.body.clientId }}`  
+  - **URL**: уже из body: `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/updateClient/{{ $('Webhook').item.json.body.clientId }}`  
   - **jsonBody**: уже из body (id, settings с userUuid, email, limitIp, totalGB, expiryTime, subId).  
   - **jsonHeaders**: Cookie от Login6: `{{ $json.headers["set-cookie"][0] }}`
 
 ### Удаление (delete_client)
 
 - **URL** уже из body:  
-  `=https://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/{{ $('Webhook').item.json.body.inboundId }}/delClient/{{ $('Webhook').item.json.body.clientId }}`
+  `={{ $('Webhook').item.json.body.protocol || 'https' }}://{{ $('Webhook').item.json.body.serverIP }}:{{ $('Webhook').item.json.body.serverPort }}{{ $('Webhook').item.json.body.randompath }}panel/api/inbounds/{{ $('Webhook').item.json.body.inboundId }}/delClient/{{ $('Webhook').item.json.body.clientId }}`
 - **jsonHeaders**: Cookie от узла Login: `{{ $json.headers["set-cookie"][0] }}`
 
 ### Edit Fields (MULTI) — KEY
