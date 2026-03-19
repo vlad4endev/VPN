@@ -198,7 +198,15 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
     setError('')
     setSuccess('')
 
-    const serversList = Array.isArray(servers) ? servers : []
+    // ВАЖНО:
+    // `servers` приходит в этот хук через props, а список на UI берется из zustand-стора.
+    // Иногда из-за гонок/перерендеров `servers` может кратковременно стать пустым.
+    // Если мы перезапишем список на `[]`, пользователь "теряет" все сервера.
+    const propsServers = Array.isArray(servers) ? servers : []
+    const settingsServers = Array.isArray(settings?.servers) ? settings.servers : []
+    const serversList = propsServers.length > 0 ? propsServers : settingsServers
+    const shouldUpdateServers = serversList.length > 0
+
     const currentServer = serversList.find(s => s.id === server.id) || server
     
     const protocol = currentServer.protocol || (currentServer.serverPort === 443 || currentServer.serverPort === 40919 ? 'https' : 'http')
@@ -249,7 +257,15 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
             }
           : s
       )
-      setServers(updatedServers)
+      if (shouldUpdateServers) {
+        setServers(updatedServers)
+      } else {
+        logger.warn('Admin', 'Пропускаем перезапись списка серверов (актуальный список пуст)', {
+          serverId: server.id,
+          serversCountProps: propsServers.length,
+          serversCountSettings: settingsServers.length,
+        })
+      }
       
       setSuccess('Сессия успешно протестирована')
       setTimeout(() => setSuccess(''), 3000)
@@ -267,13 +283,21 @@ export function useServers(currentUser, servers, setServers, settings, setSettin
             }
           : s
       )
-      setServers(updatedServers)
+      if (shouldUpdateServers) {
+        setServers(updatedServers)
+      } else {
+        logger.warn('Admin', 'Пропускаем перезапись списка серверов после ошибки (актуальный список пуст)', {
+          serverId: server.id,
+          serversCountProps: propsServers.length,
+          serversCountSettings: settingsServers.length,
+        })
+      }
       
       setError(err.message || 'Ошибка тестирования сессии')
     } finally {
       setTestingServerId(null)
     }
-  }, [servers, setServers, setError, setSuccess])
+  }, [servers, settings?.servers, setServers, setError, setSuccess])
 
   // Обработчики для полей сервера
   const handleServerNameChange = useCallback((e) => {
