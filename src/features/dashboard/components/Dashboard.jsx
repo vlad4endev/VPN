@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { CheckCircle2, XCircle, AlertCircle, CreditCard, User, History, Shield, Globe, Copy, Check, Clock, Calendar, Smartphone, Zap, Trash2, Loader2, X, Link2, Gift, RefreshCw, ArrowLeftRight, Lock, Share2 } from 'lucide-react'
 import Sidebar from '../../../shared/components/Sidebar.jsx'
@@ -20,6 +20,7 @@ import TelegramBindCard from '../../telegram/components/TelegramBindCard.jsx'
 import SetPasswordForEmailCard from './SetPasswordForEmailCard.jsx'
 import SubscriptionInfoCard from './SubscriptionInfoCard.jsx'
 import VPNKeyControl from './VPNKeyControl.jsx'
+import { getReferralInviteUrl } from '../../../shared/utils/referralInviteUrl.js'
 
 
 
@@ -124,6 +125,13 @@ const Dashboard = ({
   }
 
   const tariffsList = Array.isArray(tariffs) ? tariffs : []
+  const referralInviteUrl = useMemo(
+    () =>
+      currentUser?.referralCode
+        ? getReferralInviteUrl(currentUser.referralCode)
+        : '',
+    [currentUser?.referralCode],
+  )
   const currentTariff = tariffsList.find(t => t.id === currentUser?.tariffId)
   const currentPlanKey = (currentUser?.plan || currentUser?.tariffName || '').toLowerCase()
   // Все остальные активные тарифы для переключения; по одному на уникальное имя/план (без дублей в UI)
@@ -1588,15 +1596,32 @@ const Dashboard = ({
                       <input
                         type="text"
                         readOnly
-                        value={currentUser.referralCode ? `${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}` : t('common.loading')}
+                        value={
+                          currentUser.referralCode
+                            ? referralInviteUrl || t('common.loading')
+                            : t('common.loading')
+                        }
                         className="flex-1 min-h-[44px] px-3 py-2.5 bg-transparent text-slate-200 text-sm font-mono border-0 outline-none"
                         aria-label={t('dashboard.referralLinkAria')}
                       />
+                      {currentUser.referralCode && referralInviteUrl && (
+                          <a
+                            href={referralInviteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-medium flex items-center justify-center touch-manipulation border-l border-slate-700"
+                            title={t('dashboard.openReferralLink', {
+                              defaultValue: 'Открыть ссылку',
+                            })}
+                          >
+                            ↗
+                          </a>
+                        )}
                       {typeof navigator !== 'undefined' && navigator.share && currentUser.referralCode && (
                         <button
                           type="button"
                           onClick={async () => {
-                            const url = `${window.location.origin + (window.location.pathname || '')}?ref=${currentUser.referralCode}`
+                            const url = referralInviteUrl
                             try {
                               await navigator.share({
                                 title: t('dashboard.inviteFriend'),
@@ -1616,7 +1641,11 @@ const Dashboard = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => currentUser.referralCode && onCopy(`${typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '') : ''}?ref=${currentUser.referralCode}`)}
+                        onClick={() =>
+                          currentUser.referralCode &&
+                          referralInviteUrl &&
+                          onCopy(referralInviteUrl)
+                        }
                         disabled={!currentUser.referralCode}
                         className="shrink-0 min-h-[44px] min-w-[44px] px-3 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center touch-manipulation"
                         aria-label={t('dashboard.copyLinkAria')}

@@ -14,5 +14,8 @@ export const REFERRAL_CODE_STORAGE_KEY = 'referral_code_pending'
 /** Ключ в localStorage — сохраняет ref при закрытии вкладки (fallback) */
 export const REFERRAL_CODE_LOCAL_KEY = 'referral_code_pending'
 
+/** Параметр в invite-URL (?ref=) — должен совпадать с разбором в App.jsx */
+export const REFERRAL_URL_QUERY_KEY = 'ref'
+
 /** Сумма бонуса приглашающему за одного приглашённого (баллы/рубли) — можно переопределить через env на бэкенде */
 export const REFERRAL_BONUS_AMOUNT_DEFAULT = 100
