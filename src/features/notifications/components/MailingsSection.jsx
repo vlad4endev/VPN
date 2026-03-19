@@ -1065,6 +1065,7 @@ export default function MailingsSection({
                       <th className="pb-2 pr-4">Кому</th>
                       <th className="pb-2 pr-4">Заголовок</th>
                       <th className="pb-2 pr-4">Результат</th>
+                      <th className="pb-2 pr-4">Telegram</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1085,6 +1086,17 @@ export default function MailingsSection({
                         <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
                           {h.sent ?? 0}/{h.total ?? 0}
                           {(h.failed ?? 0) > 0 ? <span className="text-red-400"> · ошибок: {h.failed}</span> : <span className="text-green-400"> · ok</span>}
+                        </td>
+                        <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
+                          {h.telegram?.enabled ? (
+                            <>
+                              {h.telegram.sent ?? 0}
+                              {(h.telegram.failed ?? 0) > 0 ? <span className="text-red-400"> / err {h.telegram.failed}</span> : null}
+                              {(h.telegram.skipped ?? 0) > 0 ? <span className="text-amber-400"> / skip {h.telegram.skipped}</span> : null}
+                            </>
+                          ) : (
+                            <span className="text-slate-500">выкл</span>
+                          )}
                         </td>
                       </tr>
                     ))}
