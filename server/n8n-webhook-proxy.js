@@ -1901,10 +1901,12 @@ app.post('/api/vpn/add-client', async (req, res) => {
 
   // Fallback: добавить клиента напрямую через xuiClient (если есть данные сервера)
   const { serverIP, serverPort, protocol = 'http', randompath = '', xuiUsername, xuiPassword } = body
+  let fallbackError = null
   if (serverIP && serverPort && xuiUsername && xuiPassword) {
     try {
       const normalizedPath = randompath ? `/${String(randompath).replace(/^\/+|\/+$/g, '')}` : ''
       const baseUrl = `${protocol}://${serverIP}:${serverPort}${normalizedPath}`.replace(/\/+$/, '')
+      console.log('🔄 add-client fallback: попытка через xuiClient', { baseUrl: baseUrl.replace(/:[^:@]+@/, ':****@'), inboundId: body.inboundId })
       const xui = createXuiClient({ baseUrl, username: xuiUsername, password: xuiPassword })
       const email = body.email || body.subscriptionDetails?.userName || body.userEmail || `user_${body.userId || ''}@local`
       await xui.addClient(body.inboundId || 1, {
@@ -1919,19 +1921,31 @@ app.post('/api/vpn/add-client', async (req, res) => {
       console.log('✅ add-client fallback: клиент добавлен напрямую через xuiClient', { clientId: body.clientId })
       return res.json({ success: true, vpnUuid: body.clientId, source: 'fallback' })
     } catch (fallbackErr) {
-      console.error('❌ add-client fallback failed:', fallbackErr.message)
+      fallbackError = fallbackErr.message || String(fallbackErr)
+      console.error('❌ add-client fallback failed:', fallbackError, fallbackErr.stack?.slice(0, 300))
     }
+  } else {
+    console.warn('⚠️ add-client fallback skipped: missing serverIP, serverPort, xuiUsername or xuiPassword', {
+      hasServerIP: !!serverIP,
+      hasServerPort: !!serverPort,
+      hasXuiUsername: !!xuiUsername,
+      hasXuiPassword: !!xuiPassword,
+    })
   }
 
   const statusCode = n8nError?.response?.status || 500
   const errorData = n8nError?.response?.data
   const errorMessage = errorData?.errorMessage || errorData?.error || n8nError?.message || 'Ошибка создания клиента через n8n'
-  res.status(statusCode).json({
+  const responsePayload = {
     success: false,
     error: errorMessage,
     errorMessage: errorMessage,
     errorDetails: errorData,
-  })
+  }
+  if (fallbackError) {
+    responsePayload.fallbackError = fallbackError
+  }
+  res.status(statusCode).json(responsePayload)
 })
 
 /**
