@@ -6,7 +6,22 @@
  * У бота может быть установлен только один webhook (ограничение Telegram API); setWebhook заменяет предыдущий URL.
  */
 
+import axios from 'axios'
+
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
+
+/** Таймаут запросов к api.telegram.org (сеть/DNS на серверах без IPv6 и т.д.) */
+const TELEGRAM_HTTP_TIMEOUT_MS = Math.max(5000, parseInt(process.env.TELEGRAM_HTTP_TIMEOUT_MS || '45000', 10))
+
+function formatTelegramHttpError (err) {
+  if (!err || typeof err !== 'object') return String(err)
+  const d = err.response?.data
+  if (d && typeof d === 'object' && d.description) return String(d.description)
+  const parts = [err.message || 'HTTP error']
+  if (err.code) parts.push(`(${err.code})`)
+  if (err.cause && err.cause.message) parts.push(err.cause.message)
+  return parts.join(' ')
+}
 
 /**
  * Отправить ответ через Telegram API: POST https://api.telegram.org/bot<TOKEN>/sendMessage
@@ -127,18 +142,17 @@ export async function setTelegramWebhook(botToken, webhookUrl, opts = {}) {
   }
   if (opts.secret_token) body.secret_token = opts.secret_token
   try {
-    const res = await fetch(url, {
-      method: 'POST',
+    const { data } = await axios.post(url, body, {
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      timeout: TELEGRAM_HTTP_TIMEOUT_MS,
+      validateStatus: () => true,
     })
-    const data = await res.json().catch(() => ({}))
-    if (!data.ok) {
-      return { ok: false, error: data.description || res.statusText }
+    if (!data || !data.ok) {
+      return { ok: false, error: (data && data.description) || 'Ошибка Telegram API' }
     }
     return { ok: true }
   } catch (err) {
-    return { ok: false, error: err.message || 'Ошибка установки webhook' }
+    return { ok: false, error: formatTelegramHttpError(err) || 'Ошибка установки webhook' }
   }
 }
 
@@ -151,14 +165,16 @@ export async function getTelegramWebhookInfo(botToken) {
   if (!botToken) return { ok: false, error: 'botToken обязателен' }
   const url = `${TELEGRAM_API_BASE}${botToken}/getWebhookInfo`
   try {
-    const res = await fetch(url)
-    const data = await res.json().catch(() => ({}))
-    if (!data.ok) {
-      return { ok: false, error: data.description || res.statusText }
+    const { data } = await axios.get(url, {
+      timeout: TELEGRAM_HTTP_TIMEOUT_MS,
+      validateStatus: () => true,
+    })
+    if (!data || !data.ok) {
+      return { ok: false, error: (data && data.description) || 'Ошибка Telegram API' }
     }
     return { ok: true, result: data.result }
   } catch (err) {
-    return { ok: false, error: err.message }
+    return { ok: false, error: formatTelegramHttpError(err) }
   }
 }
 

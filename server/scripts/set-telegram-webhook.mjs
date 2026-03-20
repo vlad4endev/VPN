@@ -93,6 +93,8 @@ async function main () {
     process.exit(0)
   }
 
+  console.log('Node:', process.version, '| запрос к https://api.telegram.org …')
+
   const result = await setTelegramWebhook(token, webhookUrl, {
     secret_token: secret,
     allowed_updates: ['message', 'callback_query'],
@@ -100,6 +102,10 @@ async function main () {
 
   if (!result.ok) {
     console.error('❌ setWebhook:', result.error)
+    console.error(
+      '\nПодсказки: проверьте исходящий HTTPS с сервера (curl https://api.telegram.org), DNS, файрвол.\n' +
+        'Опционально: TELEGRAM_HTTP_TIMEOUT_MS=60000 в .env\n'
+    )
     process.exit(1)
   }
 
