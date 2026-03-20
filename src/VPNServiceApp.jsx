@@ -26,6 +26,7 @@ import logger from './shared/utils/logger.js'
 import { canAccessAdmin, canAccessFinances } from './shared/constants/admin.js'
 import { stripUndefinedForFirestore } from './shared/utils/firestoreSafe.js'
 import { useUIStore } from './lib/store/uiStore.js'
+import { adminService } from './features/admin/services/adminService.js'
 
 // Firebase инициализация вынесена в src/lib/firebase/config.js
 // Используется через хук useFirebase из src/shared/hooks/useFirebase.js
@@ -98,21 +99,72 @@ export default function VPNServiceApp() {
       const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
       const tariffsSnapshot = await getDocs(tariffsCollection)
       const tariffsList = []
-      
+
       tariffsSnapshot.forEach((docSnapshot) => {
         tariffsList.push({
           id: docSnapshot.id,
           ...docSnapshot.data(),
         })
       })
-      
-      setTariffs(tariffsList)
-      logger.info('Dashboard', 'Тарифы загружены', { count: tariffsList.length })
+
+      if (tariffsList.length === 0) {
+        const defaultTariffs = [
+          { name: 'Super', plan: 'super', price: 150, devices: 1, trafficGB: 0, durationDays: 30, active: true },
+          { name: 'MULTI', plan: 'multi', price: 250, devices: 5, trafficGB: 0, durationDays: 30, active: true },
+        ]
+        const createdTariffs = (
+          await Promise.all(
+            defaultTariffs.map(async (tariff) => {
+              try {
+                const docRef = await addDoc(tariffsCollection, {
+                  ...tariff,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                })
+                return { id: docRef.id, ...tariff }
+              } catch (err) {
+                logger.error('Tariffs', 'Ошибка создания тарифа', { tariff }, err)
+                return null
+              }
+            }),
+          )
+        ).filter(Boolean)
+        if (createdTariffs.length > 0) {
+          setTariffs(createdTariffs)
+          logger.info('Tariffs', 'Созданы тарифы по умолчанию', { count: createdTariffs.length })
+        }
+      } else {
+        let list = tariffsList
+        if (currentUser?.role === 'admin') {
+          try {
+            const counts = await adminService.getTariffUsageCounts()
+            list = tariffsList.map((t) => {
+              const c = counts[t.id]
+              return { ...t, usersCount: c?.users ?? 0, paymentsCount: c?.payments ?? 0 }
+            })
+          } catch (e) {
+            logger.error('Tariffs', 'Ошибка загрузки счётчиков тарифов', null, e)
+          }
+        }
+        const sorted = list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        setTariffs(sorted)
+        const activeCount = sorted.filter((t) => t.active !== false).length
+        const nameCounts = sorted.reduce((acc, t) => {
+          const n = (t.name || t.plan || '—').toString()
+          acc[n] = (acc[n] || 0) + 1
+          return acc
+        }, {})
+        logger.info('Tariffs', 'Загружены тарифы', {
+          total: sorted.length,
+          active: activeCount,
+          byName: nameCounts,
+        })
+      }
     } catch (err) {
-      logger.error('Dashboard', 'Ошибка загрузки тарифов', null, err)
+      logger.error('Tariffs', 'Ошибка загрузки тарифов', null, err)
       setError('Ошибка загрузки тарифов')
     }
-  }, [db, setError])
+  }, [db, currentUser?.role, setError])
 
   // Загрузка тарифов при открытии Dashboard
   useEffect(() => {
@@ -209,20 +261,21 @@ export default function VPNServiceApp() {
     if (view === 'admin' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
-        adminHandlers.loadUsers()
-        adminHandlers.loadSettings()
-        adminHandlers.loadTariffs()
+        void Promise.all([
+          adminHandlers.loadUsers(),
+          adminHandlers.loadSettings(),
+          adminHandlers.loadTariffs(),
+        ])
         adminPanelLoadedRef.current = true
       }
       financesLoadedRef.current = false
     } else if (view === 'finances' && canAccessFinances(currentUser?.role)) {
       if (!financesLoadedRef.current) {
         logger.info('Admin', 'Загрузка данных для раздела Финансы', { userId: currentUser.id })
-        adminHandlers.loadUsers()
+        const tasks = [adminHandlers.loadUsers()]
+        if (tariffs.length === 0) tasks.push(loadTariffs())
+        void Promise.all(tasks)
         financesLoadedRef.current = true
-      }
-      if (tariffs.length === 0) {
-        loadTariffs()
       }
       adminPanelLoadedRef.current = false
     } else {
@@ -250,106 +303,6 @@ export default function VPNServiceApp() {
 
   // Функции Dashboard вынесены в useDashboard hook
   // Используем dashboardHandlers.*
-
-  // Старое определение Dashboard удалено - компонент вынесен наружу
-
-  // Загрузка тарифов из Firestore
-  // Загрузка тарифов из Firestore
-  const loadTariffs = useCallback(async () => {
-    if (!db) return
-
-    try {
-      const tariffsCollection = collection(db, `artifacts/${APP_ID}/public/data/tariffs`)
-      const tariffsSnapshot = await getDocs(tariffsCollection)
-      const tariffsList = []
-      
-      tariffsSnapshot.forEach((docSnapshot) => {
-        tariffsList.push({
-          id: docSnapshot.id,
-          ...docSnapshot.data(),
-        })
-      })
-      
-      // Если тарифов нет вообще, создаем по умолчанию (только SUPER и MULTI)
-      if (tariffsList.length === 0) {
-        const defaultTariffs = [
-          { name: 'Super', plan: 'super', price: 150, devices: 1, trafficGB: 0, durationDays: 30, active: true },
-          { name: 'MULTI', plan: 'multi', price: 250, devices: 5, trafficGB: 0, durationDays: 30, active: true },
-        ]
-        
-        const createdTariffs = []
-        for (const tariff of defaultTariffs) {
-          try {
-            const docRef = await addDoc(tariffsCollection, {
-            ...tariff,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-            createdTariffs.push({ id: docRef.id, ...tariff })
-          } catch (err) {
-            logger.error('Tariffs', 'Ошибка создания тарифа', { tariff }, err)
-          }
-        }
-        
-        if (createdTariffs.length > 0) {
-          setTariffs(createdTariffs)
-          logger.info('Tariffs', 'Созданы тарифы по умолчанию', { count: createdTariffs.length })
-        }
-      } else {
-        let list = tariffsList
-        if (currentUser?.role === 'admin') {
-          try {
-            const counts = await adminService.getTariffUsageCounts()
-            list = tariffsList.map(t => {
-              const c = counts[t.id]
-              return { ...t, usersCount: c?.users ?? 0, paymentsCount: c?.payments ?? 0 }
-            })
-          } catch (e) {
-            logger.error('Tariffs', 'Ошибка загрузки счётчиков тарифов', null, e)
-          }
-        }
-        const sorted = list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        setTariffs(sorted)
-        const activeCount = sorted.filter(t => t.active !== false).length
-        const nameCounts = sorted.reduce((acc, t) => {
-          const n = (t.name || t.plan || '—').toString()
-          acc[n] = (acc[n] || 0) + 1
-          return acc
-        }, {})
-        logger.info('Tariffs', 'Загружены тарифы', {
-          total: sorted.length,
-          active: activeCount,
-          byName: nameCounts
-        })
-      }
-    } catch (err) {
-      logger.error('Tariffs', 'Ошибка загрузки тарифов', null, err)
-      setError('Ошибка загрузки тарифов')
-    }
-  }, [db, currentUser?.role])
-
-  // Загрузка данных при открытии админ-панели
-  // ВАЖНО: Используем useRef для отслеживания, чтобы не перезагружать данные при каждом рендере
-  // Это предотвращает потерю локальных изменений серверов при перезагрузке из Firestore
-  const adminPanelLoadedRef = useRef(false)
-  useEffect(() => {
-    // Двойная проверка: view === 'admin' И role === 'admin'
-    if (view === 'admin' && currentUser?.role === 'admin') {
-      // Загружаем данные только один раз при открытии админ-панели
-      // Не перезагружаем при каждом изменении зависимостей, чтобы не потерять локальные изменения
-      // Особенно важно для серверов, которые могут быть изменены локально (тесты, редактирование)
-      if (!adminPanelLoadedRef.current) {
-        logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
-        adminHandlers.loadUsers() // Загружаем всех пользователей (только для админа)
-        adminHandlers.loadSettings() // Загружаем глобальные настройки (с объединением локальных серверов)
-        adminHandlers.loadTariffs() // Загружаем глобальные тарифы
-        adminPanelLoadedRef.current = true
-      }
-    } else {
-      // Сбрасываем флаг при выходе из админ-панели
-      adminPanelLoadedRef.current = false
-    }
-  }, [view, currentUser?.role, currentUser?.id, adminHandlers])
 
   // Мемоизированные обработчики для настроек
   /*

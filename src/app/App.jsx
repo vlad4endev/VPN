@@ -19,6 +19,7 @@ import axios from 'axios'
 // bcrypt больше не нужен - используем Firebase Auth
 import ThreeXUI from '../features/vpn/services/ThreeXUI.js' // Используется только для утилит (generateUUID, generateSubId)
 import { dashboardService } from '../features/dashboard/services/dashboardService.js' // Работает через Backend Proxy для создания клиентов в 3x-ui
+import notificationService from '../shared/services/notificationService.js'
 import { getEnvErrorMessage } from '../shared/utils/envValidation.js'
 import logger from '../shared/utils/logger.js'
 import LoggerPanel from '../shared/components/LoggerPanel.jsx'
@@ -1121,7 +1122,7 @@ export default function VPNServiceApp() {
   // Один аккаунт на браузер: если пользователь уже авторизован (Firebase + Firestore), редирект с экрана входа
   // Не редиректим при firebaseUser без currentUser — иначе зацикливание (dashboard без пользователя показывает welcome)
   useEffect(() => {
-    if (currentUser && firebaseUser && (view === 'login' || view === 'register' || view === 'welcome')) {
+    if (currentUser && firebaseUser && (view === 'login' || view === 'register')) {
       const nextView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
       setView(nextView)
       logger.debug('App', 'Уже авторизован — редирект с экрана входа', { view, nextView })
@@ -1130,7 +1131,7 @@ export default function VPNServiceApp() {
 
   // Страховка: если currentUser есть, но view всё ещё экран входа — принудительно переключаем в ЛК (обход гонок после Google/email входа)
   useEffect(() => {
-    if (currentUser && (view === 'login' || view === 'register' || view === 'welcome')) {
+    if (currentUser && (view === 'login' || view === 'register')) {
       const nextView = currentUser.role === 'admin' ? 'admin' : 'dashboard'
       setView(nextView)
       if (currentUser.role !== 'admin') setDashboardTab('subscription')
@@ -1258,7 +1259,6 @@ export default function VPNServiceApp() {
       if (currentUserData.role !== 'admin') setDashboardTab('subscription')
 
       try {
-        const notificationService = (await import('../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
         if (!notificationInstance.hasPermission()) await notificationInstance.requestPermission()
       } catch (_) {}
@@ -1416,7 +1416,6 @@ export default function VPNServiceApp() {
       
       // Запрашиваем разрешение на уведомления после успешной регистрации
       try {
-        const notificationService = (await import('../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
         const perm = await notificationInstance.requestPermission()
         if (perm === 'granted') {
@@ -1676,6 +1675,12 @@ export default function VPNServiceApp() {
     setError('')
     setSuccess('')
   }, [currentUser, auth, clearTmaSession])
+
+  /** Со стартовой страницы «О сервисе» — в кабинет или админку */
+  const goToDashboardFromWelcome = useCallback(() => {
+    setView(currentUser?.role === 'admin' ? 'admin' : 'dashboard')
+    if (currentUser?.role !== 'admin') setDashboardTab('subscription')
+  }, [currentUser?.role, setView, setDashboardTab])
 
   // Удаление пользователя (админ)
   const handleDeleteUser = useCallback(async (userId) => {
@@ -2323,7 +2328,6 @@ export default function VPNServiceApp() {
       setError('')
       setSuccess('')
 
-      const { dashboardService } = await import('../features/dashboard/services/dashboardService.js')
       const result = await dashboardService.deleteSubscription(currentUser)
 
       // Обновляем локальное состояние пользователя
@@ -2424,19 +2428,23 @@ export default function VPNServiceApp() {
           { name: 'MULTI', plan: 'multi', price: 250, devices: 5, trafficGB: 0, durationDays: 30, active: true },
         ]
         
-        const createdTariffs = []
-        for (const tariff of defaultTariffs) {
-          try {
-            const docRef = await addDoc(tariffsCollection, {
-            ...tariff,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-            createdTariffs.push({ id: docRef.id, ...tariff })
-          } catch (err) {
-            logger.error('Tariffs', 'Ошибка создания тарифа', { tariff }, err)
-          }
-        }
+        const createdTariffs = (
+          await Promise.all(
+            defaultTariffs.map(async (tariff) => {
+              try {
+                const docRef = await addDoc(tariffsCollection, {
+                  ...tariff,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                })
+                return { id: docRef.id, ...tariff }
+              } catch (err) {
+                logger.error('Tariffs', 'Ошибка создания тарифа', { tariff }, err)
+                return null
+              }
+            }),
+          )
+        ).filter(Boolean)
         
         if (createdTariffs.length > 0) {
           setTariffs(createdTariffs)
@@ -2477,12 +2485,13 @@ export default function VPNServiceApp() {
     }
   }, [db, currentUser?.role])
 
-  // Загрузка тарифов и публичных настроек при открытии Dashboard (личный кабинет) — для обычных пользователей
+  // Загрузка тарифов и публичных настроек при открытии Dashboard — параллельно, без очереди
   useEffect(() => {
-    if (currentUser && (view === 'dashboard' || view === 'welcome')) {
-      if (tariffs.length === 0) loadTariffs()
-      if (currentUser.role !== 'admin') loadPublicSettings()
-    }
+    if (!currentUser || (view !== 'dashboard' && view !== 'welcome')) return
+    const tasks = []
+    if (tariffs.length === 0) tasks.push(loadTariffs())
+    if (currentUser.role !== 'admin') tasks.push(loadPublicSettings())
+    if (tasks.length) void Promise.all(tasks)
   }, [currentUser, view, tariffs.length, loadTariffs, loadPublicSettings])
 
   // Загрузка данных при открытии админ-панели или раздела «Финансы»
@@ -2501,29 +2510,24 @@ export default function VPNServiceApp() {
     if (view === 'admin' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка глобальных данных для админ-панели', { adminId: currentUser.id })
-        loadUsers()
-        loadSettings()
-        loadTariffs()
+        void Promise.all([loadUsers(), loadSettings(), loadTariffs()])
         adminPanelLoadedRef.current = true
       }
       financesLoadedRef.current = false
     } else if (view === 'analytics' && canAccessAdmin(currentUser?.role, currentUser)) {
       if (!adminPanelLoadedRef.current) {
         logger.info('Admin', 'Загрузка данных для раздела Аналитика (AI-воронка)', { adminId: currentUser.id })
-        loadUsers()
-        loadSettings()
-        loadTariffs()
+        void Promise.all([loadUsers(), loadSettings(), loadTariffs()])
         adminPanelLoadedRef.current = true
       }
       financesLoadedRef.current = false
     } else if (view === 'finances' && canAccessFinances(currentUser?.role)) {
       if (!financesLoadedRef.current) {
         logger.info('Admin', 'Загрузка данных для раздела Финансы', { userId: currentUser.id })
-        loadUsers()
+        const tasks = [loadUsers()]
+        if (tariffs.length === 0) tasks.push(loadTariffs())
+        void Promise.all(tasks)
         financesLoadedRef.current = true
-      }
-      if (tariffs.length === 0) {
-        loadTariffs()
       }
       adminPanelLoadedRef.current = false
     } else {
@@ -3786,12 +3790,17 @@ export default function VPNServiceApp() {
 
   // Если view === welcome — показываем экран приветствия даже при ошибках конфигурации
   // (ошибки конфигурации не критичны для показа экрана приветствия)
-  if (view === 'welcome' && !currentUser) {
+  if (view === 'welcome') {
     // Показываем предупреждение об ошибке, но не блокируем экран приветствия
     if (configError) {
       return (
         <>
-          <WelcomePage onSetView={setView} reviews={welcomeReviews} />
+          <WelcomePage
+            onSetView={setView}
+            reviews={welcomeReviews}
+            currentUser={currentUser}
+            onGoToDashboard={goToDashboardFromWelcome}
+          />
           <div className="fixed bottom-4 right-4 max-w-md bg-red-900/90 border border-red-800 rounded-lg p-4 shadow-xl z-50">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -3823,6 +3832,8 @@ export default function VPNServiceApp() {
         <WelcomePage
           onSetView={setView}
           reviews={welcomeReviews}
+          currentUser={currentUser}
+          onGoToDashboard={goToDashboardFromWelcome}
           onTelegramSignIn={undefined}
           onTelegramWidgetAuth={undefined}
           onTelegramWidgetError={undefined}
@@ -4239,7 +4250,7 @@ export default function VPNServiceApp() {
   // Личный кабинет пользователя
   // ВАЖНО: Полная изоляция данных - каждый пользователь видит только свои данные
   // Все запросы фильтруются по currentUser.id (userId)
-  if (currentUser && (view === 'dashboard' || !view || view === 'welcome')) {
+  if (currentUser && view !== 'welcome' && (view === 'dashboard' || !view)) {
     // Если пользователь админ, но view не 'admin' - показываем личный кабинет
     // Админы тоже имеют личный кабинет со своими данными
     return (
@@ -4302,6 +4313,13 @@ export default function VPNServiceApp() {
   }
 
   // По умолчанию показываем экран приветствия
-  return <WelcomePage onSetView={setView} reviews={welcomeReviews} />
+  return (
+    <WelcomePage
+      onSetView={setView}
+      reviews={welcomeReviews}
+      currentUser={currentUser}
+      onGoToDashboard={goToDashboardFromWelcome}
+    />
+  )
 }
 

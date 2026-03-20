@@ -69,7 +69,29 @@
     "reviewNext": "Next review",
     "ratingLabel": "Rating {{rating}} of 5",
     "reviewsEmpty": "Reviews will appear here soon.",
-    "mainScreen": "Main screen"
+    "mainScreen": "Main screen",
+    "backToCabinet": "Back to dashboard",
+    "servicePage": "About the service",
+    "navReviews": "Reviews",
+    "navSeller": "About the product",
+    "navInfo": "How to connect",
+    "audienceNewTitle": "Get a subscription and your key",
+    "audienceNewSubtitle": "You're signed in. Choose a plan in your dashboard — after payment you'll get a subscription link for your VPN app.",
+    "audienceActiveTitle": "Welcome back!",
+    "audienceActiveSubtitle": "Your subscription is active. Keys and stats are in your dashboard.",
+    "audienceActiveCta": "Open dashboard",
+    "sellerSection": "About the service",
+    "sellerSubtitle": "What you're buying",
+    "sellerLead": "SKYFLOW is a VPN access service on our own infrastructure. We provide subscription access to nodes in multiple countries, a personal dashboard and support.",
+    "sellerPoint1": "You pay for the subscription period (per selected plan).",
+    "sellerPoint2": "Support is available via Telegram and tickets in the dashboard.",
+    "sellerPoint3": "Terms and prices are listed below; legal details are available on request from support.",
+    "infoSection": "How to connect",
+    "infoSubtitle": "Quick guide",
+    "infoStep1": "Sign up and pay for a plan in your dashboard.",
+    "infoStep2": "Copy the subscription link (key) from the subscription section or home.",
+    "infoStep3": "Paste the link into Happ, v2rayNG, Hiddify or another subscription-capable app.",
+    "infoStep4": "If something fails, contact support with your OS and a screenshot."
   },
   "sidebar": {
     "cabinet": "Dashboard",
@@ -86,7 +108,8 @@
     "sections": "Sections",
     "sectionsCabinetAria": "Dashboard sections",
     "sectionsAdminAria": "Admin panel sections",
-    "moreSectionsAria": "More sections"
+    "moreSectionsAria": "More sections",
+    "aboutService": "About the service"
   },
   "admin": {
     "sectionHome": "Home",

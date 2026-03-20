@@ -40,6 +40,7 @@ import { generatePaymentLink as generatePaymentLinkFromService, generateOrderId,
 import { installConsoleCapture } from './lib/consoleCapture.js'
 import { getSystemLogs, clearSystemLogs, getSystemLogMax } from './lib/systemLogBuffer.js'
 import { buildMonitoringAiUserContent, buildHeuristicMonitoringReport } from './lib/monitoringAiReport.js'
+import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 
 dotenv.config()
 // Загружаем server/.env (при запуске из корня проекта корневой .env уже загружен; server/.env перезаписывает/дополняет)
@@ -1089,25 +1090,45 @@ async function verifyIdToken(req, res) {
 /** Сумма бонуса приглашающему за одного приглашённого (баллы). Переопределяется через REFERRAL_BONUS_AMOUNT. */
 const REFERRAL_BONUS_AMOUNT = Number(process.env.REFERRAL_BONUS_AMOUNT) || 100
 
+/** Бонус приглашённому (Win–Win). 0 = отключено. */
+const REFERRAL_REFEREE_BONUS_AMOUNT = Number(process.env.REFERRAL_REFEREE_BONUS_AMOUNT ?? 0) || 0
+
+const FieldValue = firebaseAdmin.firestore.FieldValue
+
 /**
  * Реферальная система: резолв кода в inviterId (без аутентификации — для регистрации).
+ * Firestore (поле referralCode), затем fallback Supabase vpn_users.raw.referralCode.
  * GET /api/referral/resolve?code=ABC12345
  */
 app.get('/api/referral/resolve', async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ success: false, error: 'Firestore недоступен' })
-  }
   const code = (req.query.code || '').trim()
   if (!code || code.length < 6) {
     return res.status(400).json({ success: false, error: 'Неверный или слишком короткий код' })
   }
   try {
-    const usersCol = `artifacts/${APP_ID}/public/data/users_v4`
-    const snap = await db.collection(usersCol).where('referralCode', '==', code).limit(1).get()
-    if (snap.empty) {
-      return res.status(404).json({ success: false, error: 'Код не найден' })
+    if (db) {
+      const usersCol = `artifacts/${APP_ID}/public/data/users_v4`
+      const snap = await db.collection(usersCol).where('referralCode', '==', code).limit(1).get()
+      if (!snap.empty) {
+        return res.json({ inviterId: snap.docs[0].id })
+      }
     }
-    return res.json({ inviterId: snap.docs[0].id })
+    const supabase = getSupabaseAdmin()
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('vpn_users')
+        .select('uid')
+        .eq('app_id', APP_ID)
+        .contains('raw', { referralCode: code })
+        .limit(1)
+      if (!error && data?.length > 0 && data[0].uid) {
+        return res.json({ inviterId: data[0].uid })
+      }
+    }
+    if (!db && !getSupabaseAdmin()) {
+      return res.status(503).json({ success: false, error: 'Сервис резолва рефералов недоступен' })
+    }
+    return res.status(404).json({ success: false, error: 'Код не найден' })
   } catch (err) {
     console.error('GET /api/referral/resolve:', err)
     return res.status(500).json({ success: false, error: err.message || 'Ошибка сервера' })
@@ -1141,50 +1162,89 @@ app.post('/api/referral/process', async (req, res) => {
   }
   const usersCol = `artifacts/${APP_ID}/public/data/users_v4`
   const rewardsCol = `artifacts/${APP_ID}/public/data/referral_rewards`
+  const referredRef = db.doc(`${usersCol}/${referredUserId}`)
+  const inviterRef = db.doc(`${usersCol}/${inviterId}`)
+  const rewardDocId = referredUserId
+  const rewardRef = db.doc(`${rewardsCol}/${rewardDocId}`)
+
   try {
-    const referredRef = db.doc(`${usersCol}/${referredUserId}`)
-    const referredSnap = await referredRef.get()
-    if (!referredSnap.exists) {
-      return res.status(404).json({ success: false, error: 'Пользователь не найден' })
-    }
-    const referredData = referredSnap.data()
-    if (referredData.referredBy !== inviterId) {
-      return res.status(400).json({
-        success: false,
-        error: 'У пользователя не указан этот пригласитель'
+    let duplicate = false
+    await db.runTransaction(async (tx) => {
+      const referredSnap = await tx.get(referredRef)
+      if (!referredSnap.exists) {
+        throw Object.assign(new Error('referred_not_found'), { http: 404 })
+      }
+      const referredData = referredSnap.data()
+      if (referredData.referredBy !== inviterId) {
+        throw Object.assign(new Error('referredBy_mismatch'), { http: 400 })
+      }
+      const inviterSnap = await tx.get(inviterRef)
+      if (!inviterSnap.exists) {
+        throw Object.assign(new Error('inviter_not_found'), { http: 400 })
+      }
+      const inviterData = inviterSnap.data()
+      const emRef = (referredData.email || '').toString().trim().toLowerCase()
+      const emInv = (inviterData.email || '').toString().trim().toLowerCase()
+      if (emRef && emInv && emRef === emInv) {
+        throw Object.assign(new Error('same_email'), { http: 400 })
+      }
+
+      const rewardSnap = await tx.get(rewardRef)
+      if (rewardSnap.exists) {
+        duplicate = true
+        return
+      }
+
+      const now = new Date().toISOString()
+      tx.set(rewardRef, {
+        inviterId,
+        referredUserId,
+        bonusAmount: REFERRAL_BONUS_AMOUNT,
+        refereeBonusAmount: REFERRAL_REFEREE_BONUS_AMOUNT,
+        bonusGrantedAt: now,
       })
-    }
-    const rewardDocId = referredUserId
-    const rewardRef = db.doc(`${rewardsCol}/${rewardDocId}`)
-    const rewardSnap = await rewardRef.get()
-    if (rewardSnap.exists) {
+      tx.update(inviterRef, {
+        referralBonusBalance: FieldValue.increment(REFERRAL_BONUS_AMOUNT),
+        updatedAt: now,
+      })
+      if (REFERRAL_REFEREE_BONUS_AMOUNT > 0) {
+        tx.update(referredRef, {
+          referralBonusBalance: FieldValue.increment(REFERRAL_REFEREE_BONUS_AMOUNT),
+          updatedAt: now,
+        })
+      }
+    })
+
+    if (duplicate) {
       return res.json({ success: true, message: 'Бонус уже был начислен ранее' })
     }
-    const inviterRef = db.doc(`${usersCol}/${inviterId}`)
-    const inviterSnap = await inviterRef.get()
-    if (!inviterSnap.exists) {
-      return res.status(400).json({ success: false, error: 'Пригласитель не найден' })
-    }
-    const now = new Date().toISOString()
-    const currentBalance = Number(inviterSnap.data().referralBonusBalance) || 0
-    const newBalance = currentBalance + REFERRAL_BONUS_AMOUNT
-    await rewardRef.set({
+    console.log('Referral: бонус начислен', {
       inviterId,
       referredUserId,
-      bonusAmount: REFERRAL_BONUS_AMOUNT,
-      bonusGrantedAt: now,
+      inviterBonus: REFERRAL_BONUS_AMOUNT,
+      refereeBonus: REFERRAL_REFEREE_BONUS_AMOUNT,
     })
-    await inviterRef.update({
-      referralBonusBalance: newBalance,
-      updatedAt: now,
-    })
-    console.log('Referral: бонус начислен', { inviterId, referredUserId, bonus: REFERRAL_BONUS_AMOUNT, newBalance })
     return res.json({
       success: true,
       bonusAmount: REFERRAL_BONUS_AMOUNT,
-      referralBonusBalance: newBalance,
+      refereeBonusAmount: REFERRAL_REFEREE_BONUS_AMOUNT,
     })
   } catch (err) {
+    const http = err.http
+    if (http === 404) {
+      return res.status(404).json({ success: false, error: 'Пользователь не найден' })
+    }
+    if (http === 400) {
+      const msg =
+        err.message === 'referredBy_mismatch'
+          ? 'У пользователя не указан этот пригласитель'
+          : err.message === 'same_email'
+            ? 'Нельзя использовать реферальную ссылку с тем же email'
+            : err.message === 'inviter_not_found'
+              ? 'Пригласитель не найден'
+              : err.message || 'Ошибка запроса'
+      return res.status(400).json({ success: false, error: msg })
+    }
     console.error('POST /api/referral/process:', err)
     return res.status(500).json({ success: false, error: err.message || 'Ошибка сервера' })
   }
@@ -4345,7 +4405,7 @@ async function sendMainMenu(botToken, chatId) {
   const scenario = await getTelegramScenario()
   const text = (scenario && scenario.menuMessage && scenario.menuMessage.trim())
     ? scenario.menuMessage.trim()
-    : `🚀 <b>VPN Панель</b>\n\n<b>Доступные действия:</b>\n• Создать VPN конфиг\n• Управлять подписками\n• Статистика трафика`
+    : `🚀 <b>VPN</b>\n\n• <b>🔑 Мой ключ VPN</b> — ссылка на подписку (Happ / v2rayNG / Hiddify)\n• <b>📊 Статус</b> — план и трафик\n• <b>Открыть приложение</b> — личный кабинет`
   const replyMarkup = buildMainKeyboard(appUrl || undefined, scenario)
   await sendTelegramMessage(botToken, chatId, text, { reply_markup: replyMarkup })
 }

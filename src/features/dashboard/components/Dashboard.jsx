@@ -277,7 +277,6 @@ const Dashboard = ({
       // Функция проверки: только GET /api/payment/status (Platega)
       const checkPaymentViaWebhook = async () => {
         try {
-          const { dashboardService } = await import('../services/dashboardService.js')
           const attempt = paymentCheckAttemptsRef.current + 1
 
           logger.debug('Dashboard', 'Проверка статуса платежа', {
@@ -493,7 +492,6 @@ const Dashboard = ({
                 orderId: paymentOrderId
               })
 
-              const { dashboardService } = await import('../services/dashboardService.js')
               const statusResult = await dashboardService.fetchPaymentStatus(paymentOrderId)
 
               logger.info('Dashboard', 'Результат проверки статуса (Platega)', {
@@ -588,8 +586,6 @@ const Dashboard = ({
       if (!currentUser || !currentUser.id) return
 
       try {
-        const { dashboardService } = await import('../services/dashboardService.js')
-
         // Проверяем тестовый период
         if (currentUser?.paymentStatus === 'test_period') {
           const updatedUser = await dashboardService.checkAndUpdateTestPeriod(currentUser)
@@ -646,8 +642,6 @@ const Dashboard = ({
 
     const checkSubscriptionStatus = async () => {
       try {
-        const { dashboardService } = await import('../services/dashboardService.js')
-
         // Проверяем тестовый период
         if (currentUser.paymentStatus === 'test_period') {
           const now = Date.now()
@@ -1027,8 +1021,6 @@ const Dashboard = ({
       // В dev — дольше не перезагружаем, чтобы успеть скопировать логи
       const reloadDelayMs = (typeof import.meta !== 'undefined' && import.meta.env?.DEV) ? 8000 : 2000
 
-      const { dashboardService } = await import('../services/dashboardService.js')
-
       // Проверка статуса через Platega API (GET /api/payment/status)
       const statusResult = await dashboardService.fetchPaymentStatus(orderId)
 
@@ -1250,7 +1242,6 @@ const Dashboard = ({
         attempt += 1
         setPaymentPollAttempt(attempt)
         try {
-          const { dashboardService } = await import('../services/dashboardService.js')
           const res = await dashboardService.fetchPaymentStatus(orderId)
           if (!res?.success) return
           const isPaid = res.status === 'completed'

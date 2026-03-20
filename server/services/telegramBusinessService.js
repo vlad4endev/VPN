@@ -3,6 +3,13 @@
  * Вызывается из telegram.service после определения пользователя (userService).
  */
 
+import {
+  ensureVpnAccessForUser,
+  formatVpnKeyMessage,
+  getVpnStatusForUser,
+  formatVpnStatusMessage,
+} from './telegramVpnService.js'
+
 /**
  * Обработать действие пользователя по callback_data (PROFILE, HELP, menu, open_panel и т.д.).
  * Вызывает answerCallbackQuery и editMessageText для ответа в чате.
@@ -18,6 +25,9 @@ export async function processUserAction({ user, action, source }, context) {
     answerCallbackQuery: answerCb,
     editMessageText: editText,
     buildMainKeyboard,
+    sendTelegramMessage,
+    db,
+    APP_ID,
   } = context
 
   if (!callbackQuery?.id || !callbackQuery?.message) return
@@ -41,10 +51,42 @@ export async function processUserAction({ user, action, source }, context) {
     const plan = (user?.plan || 'free').toString()
     return `👤 <b>Мой профиль</b>\n\nИмя: ${escapeHtml(name)}\nПлан: ${escapeHtml(plan)}\n\nОткройте приложение для полного профиля.`
   }
-  const defaultHelpText = '❓ <b>Помощь</b>\n\n• Привязка аккаунта: Личный кабинет → Профиль → Telegram → «Привязать».\n• Оплата и ключи: откройте приложение по кнопке ниже.\n• Поддержка: раздел «Поддержка» в приложении.'
-  const defaultMenuText = '🚀 <b>VPN Панель</b>\n\n<b>Доступные действия:</b>\n• Создать VPN конфиг\n• Управлять подписками\n• Статистика трафика'
+  const defaultHelpText =
+    '❓ <b>Помощь</b>\n\n• <b>Ключ VPN:</b> кнопка «🔑 Мой ключ VPN» или команды /key, /vpn.\n• Привязка веб-аккаунта: Личный кабинет → Профиль → Telegram → «Привязать».\n• Оплата и тарифы: кнопка «Открыть приложение».\n• Поддержка: раздел «Поддержка» в приложении.'
+  const defaultMenuText =
+    '🚀 <b>VPN</b>\n\n• <b>🔑 Мой ключ VPN</b> — ссылка на подписку для Happ / v2rayNG / Hiddify\n• <b>📊 Статус</b> — план и трафик\n• <b>Открыть приложение</b> — полный личный кабинет'
 
   switch (actionName) {
+    case 'VPN_KEY': {
+      if (!sendTelegramMessage || !db || !user?.id) break
+      try {
+        const result = await ensureVpnAccessForUser({ db, appId: APP_ID, user })
+        const text = formatVpnKeyMessage(result)
+        const custom = responses.VPN_KEY && String(responses.VPN_KEY).trim()
+        await sendTelegramMessage(botToken, chatId, custom ? `${custom}\n\n${text}` : text, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        })
+      } catch (err) {
+        console.error('❌ VPN_KEY callback:', err.message)
+        await sendTelegramMessage(botToken, chatId, `Не удалось выдать ключ: ${err.message || 'ошибка'}`)
+      }
+      break
+    }
+    case 'VPN_STATUS': {
+      if (!editText || !db || !user?.id) break
+      try {
+        const status = await getVpnStatusForUser({ db, appId: APP_ID, user })
+        const text = (responses.VPN_STATUS && String(responses.VPN_STATUS).trim())
+          ? `${String(responses.VPN_STATUS).trim()}\n\n${formatVpnStatusMessage(status)}`
+          : formatVpnStatusMessage(status)
+        await editText(botToken, chatId, messageId, text, { reply_markup: keyboard, parse_mode: 'HTML' })
+      } catch (err) {
+        console.error('❌ VPN_STATUS callback:', err.message)
+        await sendTelegramMessage(botToken, chatId, `Не удалось загрузить статус: ${err.message || 'ошибка'}`)
+      }
+      break
+    }
     case 'PROFILE': {
       const text = (responses.PROFILE && String(responses.PROFILE).trim()) ? responses.PROFILE.trim() : defaultProfileText()
       await editText(botToken, chatId, messageId, text, { reply_markup: keyboard })
@@ -142,13 +184,48 @@ export async function handleUpdate(update, user, context) {
   if (text === '/start') {
     await sendMainMenu(botToken, chatId)
     const scenario = context.getScenario ? await context.getScenario() : null
-    const welcomeMessage = (scenario?.welcomeMessage && String(scenario.welcomeMessage).trim()) || 'Чтобы привязать аккаунт: личный кабинет → Профиль → Telegram → «Привязать».'
+    const welcomeMessage =
+      (scenario?.welcomeMessage && String(scenario.welcomeMessage).trim()) ||
+      'Добро пожаловать! Нажмите «🔑 Мой ключ VPN», чтобы получить ссылку подписки для Happ, v2rayNG или Hiddify. Полный кабинет — кнопка «Открыть приложение». Привязка веб-аккаунта: Профиль → Telegram в приложении.'
     await sendTelegramMessage(botToken, chatId, welcomeMessage)
     return
   }
 
   if (text === '/menu') {
     await sendMainMenu(botToken, chatId)
+    return
+  }
+
+  const keyCommands = ['/key', '/vpn', '/subscription']
+  if (keyCommands.includes(text.toLowerCase())) {
+    if (!user?.id) {
+      await sendTelegramMessage(botToken, chatId, 'Нажмите /start для регистрации.')
+      return
+    }
+    try {
+      const result = await ensureVpnAccessForUser({ db, appId: APP_ID, user })
+      await sendTelegramMessage(botToken, chatId, formatVpnKeyMessage(result), {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      })
+    } catch (err) {
+      console.error('❌ /key:', err.message)
+      await sendTelegramMessage(botToken, chatId, `Ошибка: ${err.message || 'попробуйте позже'}`)
+    }
+    return
+  }
+
+  if (text === '/status' || text === '/vpn_status') {
+    if (!user?.id) {
+      await sendTelegramMessage(botToken, chatId, 'Нажмите /start для регистрации.')
+      return
+    }
+    try {
+      const status = await getVpnStatusForUser({ db, appId: APP_ID, user })
+      await sendTelegramMessage(botToken, chatId, formatVpnStatusMessage(status), { parse_mode: 'HTML' })
+    } catch (err) {
+      await sendTelegramMessage(botToken, chatId, `Ошибка: ${err.message || 'попробуйте позже'}`)
+    }
     return
   }
 }

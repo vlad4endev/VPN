@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, TrendingDown } from 'lucide-react'
+import { Shield, LogOut, Users, Menu, X, CreditCard, User, History, BarChart3, MessageCircle, ChevronDown, ChevronRight, TrendingDown, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { canAccessAdmin, canAccessFinances } from '../constants/admin.js'
 import { ADMIN_NAV_SECTIONS, ADMIN_NAV_ITEMS } from '../../features/admin/constants/navSections.js'
@@ -116,6 +116,21 @@ const Sidebar = ({ currentUser, view, onSetView, onLogout, dashboardTab, onSetDa
 
   const blockSupportAndLogout = (
     <div className="border-t border-slate-800 pt-3 sm:pt-4 mt-auto flex-shrink-0 space-y-1.5">
+      {currentUser && view !== 'welcome' && (
+        <button
+          type="button"
+          onClick={() => {
+            onSetView('welcome')
+            setIsMenuOpen(false)
+          }}
+          className={`w-full min-h-[44px] flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-colors touch-manipulation ${view === 'welcome' ? navItemClass(true) : 'text-slate-300 hover:bg-slate-800 hover:text-sky-400 active:bg-slate-700'}`}
+          aria-label={t('sidebar.aboutService')}
+          aria-current={view === 'welcome' ? 'page' : undefined}
+        >
+          <Sparkles size={18} className="sm:w-5 sm:h-5 flex-shrink-0" />
+          <span className="font-bold text-[clamp(0.875rem,0.8rem+0.375vw,1rem)] sm:text-base">{t('sidebar.aboutService')}</span>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => {

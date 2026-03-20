@@ -101,7 +101,11 @@ export const authService = {
       })
       if (res.ok) {
         const data = await res.json()
-        if (data.user) return { id: data.user.id, ...data.user }
+        if (data.user) {
+          const merged = { id: data.user.id, ...data.user }
+          const refreshed = await this.loadUserData(firebaseUser.uid, dbOverride)
+          return refreshed ?? merged
+        }
         return await this.loadUserData(firebaseUser.uid, dbOverride)
       }
     } catch (err) {
@@ -116,12 +120,12 @@ export const authService = {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password)
     const firebaseUser = userCredential.user
 
-    if (name.trim()) {
-      await updateProfile(firebaseUser, { displayName: name.trim() })
-    }
+    const [, generatedSubId] = await Promise.all([
+      name.trim() ? updateProfile(firebaseUser, { displayName: name.trim() }) : Promise.resolve(),
+      generateUniqueSubId(db, APP_ID),
+    ])
 
     const generatedUUID = ThreeXUI.generateUUID()
-    const generatedSubId = await generateUniqueSubId(db, APP_ID)
 
     const userDocRef = doc(db, `artifacts/${APP_ID}/public/data/users_v4`, firebaseUser.uid)
     const uiLang = (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || 'ru'

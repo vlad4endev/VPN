@@ -53,6 +53,10 @@ export function buildMainKeyboard(appUrl, scenario) {
     inline_keyboard: [
       [{ text: 'Открыть приложение', web_app: { url: webAppUrl } }],
       [
+        { text: '🔑 Мой ключ VPN', callback_data: 'VPN_KEY' },
+        { text: '📊 Статус', callback_data: 'VPN_STATUS' },
+      ],
+      [
         { text: 'Мой профиль', callback_data: 'PROFILE' },
         { text: 'Помощь', callback_data: 'HELP' },
       ],

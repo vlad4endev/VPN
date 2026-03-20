@@ -1,16 +1,18 @@
 import { useEffect, useCallback } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
-import { collection, getDocs, doc, query, where, updateDoc, setDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, query, where, updateDoc } from 'firebase/firestore'
 import ThreeXUI from '../../features/vpn/services/ThreeXUI.js'
 import { getDb } from '../../lib/firebase/config.js'
 import { authService } from '../../features/auth/services/authService.js'
 import logger from '../../shared/utils/logger.js'
 import i18n from '../../i18n'
 import { isAdminEmail } from '../../shared/constants/admin.js'
-import { getFirestoreSafeName } from '../../shared/utils/firestoreSafe.js'
 import { applyUserLanguageToUi } from '../../features/auth/services/userLanguageService.js'
 import { isBrowserAuthPath } from '../../features/telegram/utils/tmaPath.js'
 import { getMagicLinkViewFromWindow, pathnameIsBindTelegram } from '../../features/auth/utils/magicLinkUrl.js'
+import { createFirestoreUserFromAuthFallback } from './createFirestoreUserFromAuthFallback.js'
+import { dashboardService } from '../../features/dashboard/services/dashboardService.js'
+import notificationService from '../../shared/services/notificationService.js'
 
 export const useAppAuth = ({
   appId,
@@ -109,31 +111,12 @@ export const useAppAuth = ({
             userData = await authService.ensureFirestoreUserIfMissing(firebaseUser, dbInstance)
           }
           if (userData) {
-            // Миграция: если у существующего пользователя нет subId, генерируем его
-            if (!userData.subId) {
-              logger.info('Auth', 'У существующего пользователя нет subId, генерируем уникальный', {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email
-              })
-              try {
-                const generatedSubId = await generateUniqueSubId(dbInstance, appId)
-                const userDocRef = doc(dbInstance, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                await updateDoc(userDocRef, {
-                  subId: generatedSubId,
-                  updatedAt: new Date().toISOString(),
-                })
-                userData = { ...userData, subId: generatedSubId }
-                logger.info('Auth', 'subId добавлен существующему пользователю', { uid: firebaseUser.uid, subId: generatedSubId })
-              } catch (subIdErr) {
-                logger.error('Auth', 'Ошибка при генерации subId для существующего пользователя', { uid: firebaseUser.uid }, subIdErr)
-                // Продолжаем работу без subId, но логируем ошибку
-              }
-            }
+            const mayNeedUnpaidCleanup =
+              userData.paymentStatus === 'unpaid' && userData.uuid && userData.tariffId
 
             // Проверяем неоплаченную подписку (5 дней для удаления)
-            if (userData.paymentStatus === 'unpaid' && userData.uuid && userData.tariffId) {
+            if (mayNeedUnpaidCleanup) {
               try {
-                const { dashboardService } = await import('../../features/dashboard/services/dashboardService.js')
                 const deletedUser = await dashboardService.checkAndDeleteUnpaidSubscription(userData)
                 if (deletedUser === null) {
                   // Подписка была удалена, перезагружаем данные пользователя
@@ -181,7 +164,6 @@ export const useAppAuth = ({
             // Запрашиваем разрешение на уведомления для существующих пользователей (с задержкой)
             setTimeout(async () => {
               try {
-                const notificationService = (await import('../../shared/services/notificationService.js')).default
                 const notificationInstance = notificationService.getInstance()
                 // Запрашиваем только если разрешения еще нет
                 if (!notificationInstance.hasPermission()) {
@@ -217,45 +199,13 @@ export const useAppAuth = ({
                   return
                 }
                 logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback после Google)', { uid: firebaseUser.uid, email: firebaseUser.email })
-                const generatedUUID = ThreeXUI.generateUUID()
-                const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
-                const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
-                const newUserData = {
-                  email: firebaseUser.email || '',
-                  name: safeName,
-                  phone: '',
-                  role: 'user',
-                  plan: 'free',
-                  uuid: generatedUUID,
-                  subId: generatedSubId,
-                  expiresAt: null,
-                  tariffName: '',
-                  tariffId: '',
-                  photoURL: firebaseUser.photoURL || null,
-                  language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                }
-                await setDoc(userDocRef, newUserData)
-                let effectiveRole = 'user'
-                const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
-                if (isAdminEmail(normalizedEmail)) {
-                  try {
-                    await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                    effectiveRole = 'admin'
-                  } catch (roleErr) {
-                    logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
-                  }
-                }
-                const currentUserData = {
-                  id: firebaseUser.uid,
-                  ...newUserData,
-                  email: firebaseUser.email || '',
-                  photoURL: firebaseUser.photoURL || null,
-                  name: firebaseUser.displayName || '',
-                  role: effectiveRole,
-                }
+                const { currentUserData, effectiveRole } = await createFirestoreUserFromAuthFallback({
+                  dbInstance: dbForFallback,
+                  appId,
+                  firebaseUser,
+                  generateUniqueSubId,
+                  kind: 'google',
+                })
                 setCurrentUser(currentUserData)
                 applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
                 setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
@@ -272,45 +222,13 @@ export const useAppAuth = ({
               if (dbForFallback && firebaseUser.email) {
                 try {
                   logger.info('Auth', 'Создание пользователя в Firestore из onAuthStateChanged (fallback для email)', { uid: firebaseUser.uid, email: firebaseUser.email })
-                  const generatedUUID = ThreeXUI.generateUUID()
-                  const generatedSubId = await generateUniqueSubId(dbForFallback, appId)
-                  const userDocRef = doc(dbForFallback, `artifacts/${appId}/public/data/users_v4`, firebaseUser.uid)
-                  const safeName = getFirestoreSafeName(firebaseUser.displayName, firebaseUser.email)
-                  const newUserData = {
-                    email: firebaseUser.email || '',
-                    name: safeName,
-                    phone: '',
-                    role: 'user',
-                    plan: 'free',
-                    uuid: generatedUUID,
-                    subId: generatedSubId,
-                    expiresAt: null,
-                    tariffName: '',
-                    tariffId: '',
-                    photoURL: firebaseUser.photoURL || null,
-                    language: (typeof localStorage !== 'undefined' && localStorage.getItem('vpn-ui-lang')) || i18n.language || 'ru',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  }
-                  await setDoc(userDocRef, newUserData)
-                  let effectiveRole = 'user'
-                  const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase()
-                  if (isAdminEmail(normalizedEmail)) {
-                    try {
-                      await updateDoc(userDocRef, { role: 'admin', updatedAt: new Date().toISOString() })
-                      effectiveRole = 'admin'
-                    } catch (roleErr) {
-                      logger.error('Auth', 'Не удалось выдать admin по email в fallback', { email: normalizedEmail }, roleErr)
-                    }
-                  }
-                  const currentUserData = {
-                    id: firebaseUser.uid,
-                    ...newUserData,
-                    email: firebaseUser.email || '',
-                    photoURL: firebaseUser.photoURL || null,
-                    name: firebaseUser.displayName || '',
-                    role: effectiveRole,
-                  }
+                  const { currentUserData, effectiveRole } = await createFirestoreUserFromAuthFallback({
+                    dbInstance: dbForFallback,
+                    appId,
+                    firebaseUser,
+                    generateUniqueSubId,
+                    kind: 'email',
+                  })
                   setCurrentUser(currentUserData)
                   applyUserLanguageToUi(currentUserData, i18n.changeLanguage.bind(i18n))
                   setView(effectiveRole === 'admin' ? 'admin' : 'dashboard')
@@ -333,7 +251,6 @@ export const useAppAuth = ({
                       applyUserLanguageToUi(savedUser, i18n.changeLanguage.bind(i18n))
                       setTimeout(async () => {
                         try {
-                          const notificationService = (await import('../../shared/services/notificationService.js')).default
                           const notificationInstance = notificationService.getInstance()
                           if (!notificationInstance.hasPermission()) {
                             const perm = await notificationInstance.requestPermission()

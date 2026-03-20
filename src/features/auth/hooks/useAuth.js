@@ -6,6 +6,7 @@ import { validateEmail } from '../utils/validateEmail.js'
 import { validatePassword } from '../utils/validatePassword.js'
 import { validateName } from '../../../shared/utils/validateName.js'
 import logger from '../../../shared/utils/logger.js'
+import notificationService from '../../../shared/services/notificationService.js'
 
 /**
  * Custom hook для управления аутентификацией
@@ -69,7 +70,6 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       
       // Запрашиваем разрешение на уведомления для существующих пользователей
       try {
-        const notificationService = (await import('../../../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
         // Запрашиваем только если разрешения еще нет
         if (!notificationInstance.hasPermission()) {
@@ -134,7 +134,6 @@ export function useAuth({ onSuccess, setCurrentUser, setView }) {
       
       // Запрашиваем разрешение на уведомления после успешной регистрации
       try {
-        const notificationService = (await import('../../../shared/services/notificationService.js')).default
         const notificationInstance = notificationService.getInstance()
         const perm = await notificationInstance.requestPermission()
         if (perm === 'granted') {

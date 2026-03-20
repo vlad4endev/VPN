@@ -1,36 +1,29 @@
-import { useQuery } from '@tanstack/react-query'
-import { supabase } from '../../../lib/supabase/client.js'
-import { APP_ID } from '../../../shared/constants/app.js'
+import { useState, useCallback } from 'react'
+import { dashboardService } from '../services/dashboardService.js'
+import logger from '../../../shared/utils/logger.js'
 
-export function usePayments(userId) {
-  return useQuery({
-    queryKey: ['payments', userId],
-    queryFn: async () => {
-      if (!supabase || !userId) return []
+/**
+ * Платежи пользователя (Firestore через dashboardService).
+ * currentUser — объект пользователя; dashboardTab зарезервирован для ленивой подгрузки по вкладке.
+ */
+export function usePayments(currentUser, _dashboardTab) {
+  const [payments, setPayments] = useState([])
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
 
-      const { data, error } = await supabase
-        .from('vpn_payments')
-        .select('*')
-        .eq('app_id', APP_ID)
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50)
+  const loadPayments = useCallback(async () => {
+    const uid = currentUser?.id
+    if (!uid) return
+    setPaymentsLoading(true)
+    try {
+      const list = await dashboardService.loadPayments(uid)
+      setPayments(Array.isArray(list) ? list : [])
+    } catch (e) {
+      logger.error('Dashboard', 'Ошибка загрузки платежей', { userId: uid }, e)
+      setPayments([])
+    } finally {
+      setPaymentsLoading(false)
+    }
+  }, [currentUser?.id])
 
-      if (error) throw error
-
-      return (data || []).map((p) => ({
-        id: p.id,
-        userId: p.user_id,
-        amount: p.amount,
-        status: p.status,
-        provider: p.provider,
-        tariffId: p.tariff_id,
-        createdAt: p.created_at,
-        paidAt: p.paid_at,
-        ...(p.raw || {}),
-      }))
-    },
-    enabled: !!supabase && !!userId,
-    staleTime: 2 * 60 * 1000,
-  })
+  return { payments, paymentsLoading, loadPayments }
 }
