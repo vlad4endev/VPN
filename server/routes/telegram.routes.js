@@ -72,6 +72,32 @@ export function createTelegramRouter(deps) {
   } = deps
   const appId = APP_ID || process.env.APP_ID || 'skyputh'
 
+  /**
+   * GET /ping — диагностика: Firestore, токен бота, задан ли секрет webhook (без раскрытия значений).
+   * Откройте в браузере: https://ваш-домен/api/telegram/ping
+   */
+  router.get('/ping', async (req, res) => {
+    try {
+      const db = typeof getDb === 'function' ? getDb() : null
+      const token = await getTelegramToken()
+      const secretSet = !!(TELEGRAM_WEBHOOK_SECRET && String(TELEGRAM_WEBHOOK_SECRET).trim())
+      res.json({
+        ok: true,
+        appId,
+        firestoreOk: !!db,
+        botTokenConfigured: !!token,
+        webhookSecretConfigured: secretSet,
+        hint: !db
+          ? 'Firestore недоступен — бот не ответит (см. логи сервера при /start).'
+          : !token
+            ? 'Токен бота не задан в env/админке.'
+            : 'Если в боте тишина: проверьте совпадение TELEGRAM_WEBHOOK_SECRET с тем, что передан в setWebhook; смотрите логи при POST /webhook.',
+      })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message || 'ping failed' })
+    }
+  })
+
   // ——— POST /verify (для удалённой проверки: B запрашивает у A) ———
   router.post('/verify', express.json(), async (req, res) => {
     try {
@@ -384,6 +410,12 @@ export function createTelegramRouter(deps) {
   // ——— POST /webhook (Telegram Bot API updates). Ответ 200 OK сразу, обработка в telegram.service → userService, businessService. ———
   router.post('/webhook', verifyTelegramWebhookSecret, express.json(), (req, res) => {
     const update = req.body
+    const uid = update?.update_id
+    console.log('[Telegram webhook] входящий update', {
+      update_id: uid,
+      message: !!update?.message,
+      callback: !!update?.callback_query,
+    })
     res.status(200).send()
     const webhookDeps = {
       getTelegramToken,

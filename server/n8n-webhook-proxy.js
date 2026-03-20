@@ -4492,6 +4492,29 @@ async function handleMiniAppData(botToken, message) {
   }
 }
 
+/** GET /api/telegram/ping — до createTelegramRouter: на VPS иногда старый routes/telegram.routes.js без /ping → 404 */
+app.get('/api/telegram/ping', async (req, res) => {
+  try {
+    const token = await getTelegramToken()
+    const secretSet = !!(TELEGRAM_WEBHOOK_SECRET && String(TELEGRAM_WEBHOOK_SECRET).trim())
+    const appId = APP_ID || process.env.APP_ID || 'skyputh'
+    res.json({
+      ok: true,
+      appId,
+      firestoreOk: !!db,
+      botTokenConfigured: !!token,
+      webhookSecretConfigured: secretSet,
+      hint: !db
+        ? 'Firestore недоступен — бот не ответит (см. логи сервера при /start).'
+        : !token
+          ? 'Токен бота не задан в env/админке.'
+          : 'Если в боте тишина: проверьте совпадение TELEGRAM_WEBHOOK_SECRET с тем, что передан в setWebhook; смотрите логи при POST /webhook.',
+    })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || 'ping failed' })
+  }
+})
+
 app.use('/api/telegram', createTelegramRouter({
   getDb: () => db,
   getAdmin: () => admin,
